@@ -1,0 +1,263 @@
+package tui
+
+import (
+	"crypto/sha256"
+	"fmt"
+	"io"
+	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
+	"github.com/pders01/fwrd/internal/search"
+	"github.com/pders01/fwrd/internal/storage"
+)
+
+func (a *App) loadFeeds() tea.Cmd {
+	return func() tea.Msg {
+		feeds, err := a.store.GetAllFeeds()
+		if err != nil {
+			return errorMsg{err: err}
+		}
+		return feedsLoadedMsg{feeds: feeds}
+	}
+}
+
+func (a *App) loadArticles(feedID string) tea.Cmd {
+	return func() tea.Msg {
+		articles, err := a.store.GetArticles(feedID, 50)
+		if err != nil {
+			return errorMsg{err: err}
+		}
+		return articlesLoadedMsg{articles: articles}
+	}
+}
+
+func (a *App) renderArticle(article *storage.Article) tea.Cmd {
+	return func() tea.Msg {
+		content := fmt.Sprintf("# %s\n\n", article.Title)
+		content += fmt.Sprintf("*Published: %s*\n\n", article.Published.Format(time.RFC1123))
+		
+		if article.URL != "" {
+			content += fmt.Sprintf("[Read Online](%s)\n\n", article.URL)
+		}
+		
+		if len(article.MediaURLs) > 0 {
+			content += "**Media:**\n"
+			for _, url := range article.MediaURLs {
+				content += fmt.Sprintf("- %s\n", url)
+			}
+			content += "\n"
+		}
+		
+		content += "---\n\n"
+		
+		if article.Content != "" {
+			content += article.Content
+		} else {
+			content += article.Description
+		}
+		
+		// Make word wrap responsive to screen width
+		// Use 90% of available width, with sensible min/max bounds
+		wordWrapWidth := (a.width * 9) / 10
+		if wordWrapWidth > 120 {
+			wordWrapWidth = 120 // maximum for readability
+		}
+		if wordWrapWidth < 40 {
+			wordWrapWidth = 40 // minimum for readability
+		}
+		// For very narrow screens, use almost full width
+		if a.width < 50 {
+			wordWrapWidth = a.width - 4
+			if wordWrapWidth < 20 {
+				wordWrapWidth = 20
+			}
+		}
+		
+		r, _ := glamour.NewTermRenderer(
+			glamour.WithAutoStyle(),
+			glamour.WithWordWrap(wordWrapWidth),
+		)
+		
+		rendered, err := r.Render(content)
+		if err != nil {
+			return errorMsg{err: err}
+		}
+		
+		a.store.MarkArticleRead(article.ID, true)
+		
+		return articleRenderedMsg{content: rendered}
+	}
+}
+
+func (a *App) addFeed(url string) tea.Cmd {
+	return func() tea.Msg {
+		url = strings.TrimSpace(url)
+		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+			url = "https://" + url
+		}
+		
+		feedID := fmt.Sprintf("%x", sha256.Sum256([]byte(url)))
+		
+		newFeed := &storage.Feed{
+			ID:  feedID,
+			URL: url,
+		}
+		
+		resp, updated, err := a.fetcher.Fetch(newFeed)
+		if err != nil {
+			return feedAddedMsg{err: err}
+		}
+		
+		if !updated || resp == nil {
+			return feedAddedMsg{err: fmt.Errorf("feed not modified")}
+		}
+		
+		defer resp.Body.Close()
+		
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return feedAddedMsg{err: err}
+		}
+		
+		articles, err := a.parser.Parse(strings.NewReader(string(body)), feedID)
+		if err != nil {
+			return feedAddedMsg{err: err}
+		}
+		
+		if len(articles) > 0 && articles[0].Title != "" {
+			newFeed.Title = extractFeedTitle(articles)
+		}
+		
+		a.fetcher.UpdateFeedMetadata(newFeed, resp)
+		
+		if err := retryOperation(func() error { return a.store.SaveFeed(newFeed) }); err != nil {
+			return feedAddedMsg{err: err}
+		}
+		
+		if err := retryOperation(func() error { return a.store.SaveArticles(articles) }); err != nil {
+			return feedAddedMsg{err: err}
+		}
+		
+		return feedAddedMsg{err: nil}
+	}
+}
+
+func (a *App) refreshFeeds() tea.Cmd {
+	return func() tea.Msg {
+		feeds, err := a.store.GetAllFeeds()
+		if err != nil {
+			return errorMsg{err: err}
+		}
+		
+		for _, feed := range feeds {
+			resp, updated, err := a.fetcher.Fetch(feed)
+			if err != nil || !updated || resp == nil {
+				continue
+			}
+			
+			defer resp.Body.Close()
+			
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				continue
+			}
+			
+			articles, err := a.parser.Parse(strings.NewReader(string(body)), feed.ID)
+			if err != nil {
+				continue
+			}
+			
+			a.fetcher.UpdateFeedMetadata(feed, resp)
+			retryOperation(func() error { return a.store.SaveFeed(feed) })
+			retryOperation(func() error { return a.store.SaveArticles(articles) })
+		}
+		
+		return a.loadFeeds()()
+	}
+}
+
+func (a *App) toggleRead(article *storage.Article) tea.Cmd {
+	return func() tea.Msg {
+		err := retryOperation(func() error { return a.store.MarkArticleRead(article.ID, !article.Read) })
+		if err != nil {
+			return errorMsg{err: err}
+		}
+		return a.loadArticles(article.FeedID)()
+	}
+}
+
+func (a *App) deleteFeed(feedID string) tea.Cmd {
+	return func() tea.Msg {
+		err := retryOperation(func() error { return a.store.DeleteFeed(feedID) })
+		return feedDeletedMsg{err: err}
+	}
+}
+
+func (a *App) performSearch(query string) tea.Cmd {
+	return a.performSearchWithContext(query, "")
+}
+
+func (a *App) performSearchWithContext(query string, context string) tea.Cmd {
+	return func() tea.Msg {
+		// Use the new intelligent search engine
+		var searchResults []*search.SearchResult
+		var err error
+		
+		if context == "article" && a.currentArticle != nil {
+			// Search within current article
+			searchResults, err = a.searchEngine.SearchInArticle(a.currentArticle, query)
+		} else {
+			// Global search with limit
+			searchResults, err = a.searchEngine.Search(query, 20)
+		}
+		
+		if err != nil {
+			return errorMsg{err: err}
+		}
+		
+		// Convert search engine results to UI results
+		var results []searchResultItem
+		for _, sr := range searchResults {
+			results = append(results, searchResultItem{
+				feed:      sr.Feed,
+				article:   sr.Article,
+				isArticle: sr.IsArticle,
+			})
+		}
+		
+		return searchResultsMsg{results: results}
+	}
+}
+
+// retryOperation retries a database operation up to 3 times with exponential backoff
+func retryOperation(operation func() error) error {
+	maxRetries := 3
+	baseDelay := 100 * time.Millisecond
+	
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		if err := operation(); err != nil {
+			lastErr = err
+			if i < maxRetries-1 {
+				delay := baseDelay * time.Duration(1<<i) // exponential backoff
+				time.Sleep(delay)
+				continue
+			}
+		} else {
+			return nil
+		}
+	}
+	return lastErr
+}
+
+func extractFeedTitle(articles []*storage.Article) string {
+	if len(articles) > 0 {
+		parts := strings.SplitN(articles[0].URL, "/", 4)
+		if len(parts) >= 3 {
+			return parts[2]
+		}
+	}
+	return "Unknown Feed"
+}

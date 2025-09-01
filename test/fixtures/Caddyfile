@@ -1,0 +1,69 @@
+:8080 {
+	root * /Users/paulderscheid/Projects/pers/rss/test/fixtures
+	file_server
+
+	# RSS feed endpoints
+	handle /feed.rss {
+		header Content-Type "application/rss+xml"
+		rewrite * /sample-rss.xml
+		file_server
+	}
+
+	handle /feed.atom {
+		header Content-Type "application/atom+xml"
+		rewrite * /sample-atom.xml
+		file_server
+	}
+
+	# Test caching headers
+	handle /cached-feed.rss {
+		header Content-Type "application/rss+xml"
+		header ETag "\"test-etag-123\""
+		header Last-Modified "Wed, 01 Jan 2025 00:00:00 GMT"
+		header Cache-Control "max-age=3600"
+		rewrite * /sample-rss.xml
+		file_server
+	}
+
+	# Handle conditional requests
+	@if_none_match {
+		header If-None-Match *
+		path /cached-feed.rss
+	}
+	
+	handle @if_none_match {
+		respond 304
+	}
+
+	# Rate limiting simulation
+	handle /rate-limited.rss {
+		header Retry-After "60"
+		respond 429 "Too Many Requests"
+	}
+
+	# Slow response simulation for timeout testing
+	handle /slow-feed.rss {
+		header Content-Type "application/rss+xml"
+		respond "<?xml version=\"1.0\"?><rss><channel><title>Slow</title></channel></rss>" 200
+	}
+
+	# Mock media files
+	handle /image1.jpg {
+		respond "fake image data" 200
+		header Content-Type "image/jpeg"
+	}
+
+	handle /video1.mp4 {
+		respond "fake video data" 200
+		header Content-Type "video/mp4"
+	}
+
+	handle /document.pdf {
+		respond "fake pdf data" 200
+		header Content-Type "application/pdf"
+	}
+
+	log {
+		output file /tmp/caddy-test.log
+	}
+}

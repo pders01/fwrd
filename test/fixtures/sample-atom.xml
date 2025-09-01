@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Test Atom Feed</title>
+  <link href="http://localhost:8080/atom" rel="self"/>
+  <link href="http://localhost:8080/"/>
+  <updated>2025-01-01T12:00:00Z</updated>
+  <author>
+    <name>Test Author</name>
+  </author>
+  <id>http://localhost:8080/atom</id>
+  
+  <entry>
+    <title>Atom Entry with Content</title>
+    <link href="http://localhost:8080/atom/entry1"/>
+    <id>urn:uuid:atom-entry-1</id>
+    <updated>2025-01-01T10:00:00Z</updated>
+    <summary>This is an Atom entry summary</summary>
+    <content type="html">
+      &lt;div&gt;
+        &lt;h2&gt;Atom Entry&lt;/h2&gt;
+        &lt;p&gt;This is the full HTML content of the Atom entry.&lt;/p&gt;
+        &lt;img src="http://localhost:8080/atom-image.jpg" alt="Atom Image"&gt;
+      &lt;/div&gt;
+    </content>
+  </entry>
+  
+  <entry>
+    <title>Atom Entry with Link</title>
+    <link href="http://localhost:8080/atom/entry2"/>
+    <link rel="enclosure" type="audio/mp3" href="http://localhost:8080/podcast.mp3" length="5242880"/>
+    <id>urn:uuid:atom-entry-2</id>
+    <updated>2025-01-01T11:00:00Z</updated>
+    <summary>Entry with audio enclosure</summary>
+  </entry>
+</feed>

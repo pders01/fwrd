@@ -1,0 +1,28 @@
+# Example RSS/Atom feeds to test with fwrd
+
+# Tech News
+https://news.ycombinator.com/rss
+https://feeds.arstechnica.com/arstechnica/index
+https://www.theverge.com/rss/index.xml
+https://techcrunch.com/feed/
+
+# Programming
+https://blog.golang.org/feed.atom
+https://github.blog/feed/
+https://stackoverflow.blog/feed/
+https://dev.to/feed
+
+# General News
+https://feeds.bbci.co.uk/news/rss.xml
+https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml
+
+# Podcasts (with audio enclosures)
+https://feeds.simplecast.com/54nAGcIl
+https://changelog.com/podcast/feed
+
+# YouTube Channels (video content)
+https://www.youtube.com/feeds/videos.xml?channel_id=UC_x5XG1OV2P6uZZ5FSM9Ttw
+
+# Test your integration test server
+http://localhost:8080/feed.rss
+http://localhost:8080/feed.atom

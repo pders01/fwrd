@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:media="http://search.yahoo.com/mrss/">
+  <channel>
+    <title>Test RSS Feed</title>
+    <link>http://localhost:8080/</link>
+    <description>A test RSS feed for integration testing</description>
+    <language>en-us</language>
+    <lastBuildDate>Wed, 01 Jan 2025 12:00:00 GMT</lastBuildDate>
+    <item>
+      <title>Test Article with Image</title>
+      <link>http://localhost:8080/article1</link>
+      <description>This is a test article with an embedded image</description>
+      <content:encoded><![CDATA[
+        <h1>Test Article</h1>
+        <p>This is the full content of the test article.</p>
+        <img src="http://localhost:8080/image1.jpg" alt="Test Image">
+      ]]></content:encoded>
+      <guid>article-1</guid>
+      <pubDate>Wed, 01 Jan 2025 10:00:00 GMT</pubDate>
+      <enclosure url="http://localhost:8080/image1.jpg" type="image/jpeg" length="12345"/>
+    </item>
+    <item>
+      <title>Test Article with Video</title>
+      <link>http://localhost:8080/article2</link>
+      <description>This article contains a video</description>
+      <guid>article-2</guid>
+      <pubDate>Wed, 01 Jan 2025 11:00:00 GMT</pubDate>
+      <media:content url="http://localhost:8080/video1.mp4" type="video/mp4" duration="120"/>
+    </item>
+    <item>
+      <title>Test Article with Multiple Media</title>
+      <link>http://localhost:8080/article3</link>
+      <description>Multiple media types in one article</description>
+      <content:encoded><![CDATA[
+        <p>Check out this content with various media:</p>
+        <img src="http://localhost:8080/photo.png" alt="Photo">
+        <video src="http://localhost:8080/demo.webm"></video>
+        <a href="http://localhost:8080/document.pdf">Download PDF</a>
+      ]]></content:encoded>
+      <guid>article-3</guid>
+      <pubDate>Wed, 01 Jan 2025 12:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>
