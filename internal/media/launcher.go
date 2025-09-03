@@ -42,9 +42,15 @@ func NewLauncher(cfg *config.Config) *Launcher {
 		detector = &MediaTypeDetector{config: &MediaTypesConfig{}}
 	}
 
+	// Ensure we always have a default opener
+	defaultOpener := cfg.Media.DefaultOpener
+	if defaultOpener == "" {
+		defaultOpener = detector.GetDefaultOpener()
+	}
+
 	l := &Launcher{
 		config:        &cfg.Media,
-		defaultOpener: cfg.Media.DefaultOpener,
+		defaultOpener: defaultOpener,
 		registry:      registry,
 		detector:      detector,
 	}
@@ -117,6 +123,15 @@ func (l *Launcher) Open(url string) error {
 		playerName = l.pdfViewer
 	default:
 		playerName = l.defaultOpener
+		// Final fallback if defaultOpener is still empty
+		if playerName == "" {
+			playerName = l.detector.GetDefaultOpener()
+		}
+	}
+
+	// Ensure we have a valid command
+	if playerName == "" {
+		return fmt.Errorf("no application found to open URL")
 	}
 
 	cmd, err := l.registry.GetCommand(playerName, mediaType, url)
@@ -126,7 +141,7 @@ func (l *Launcher) Open(url string) error {
 
 	// Start GUI applications detached
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start %s: %w", cmd.Args[0], err)
+		return fmt.Errorf("failed to start %s: %w", playerName, err)
 	}
 
 	go func() {
