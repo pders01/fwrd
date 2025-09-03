@@ -24,8 +24,9 @@ func TestFetcher_Fetch(t *testing.T) {
 				URL: "",
 			},
 			serverResponse: func(w http.ResponseWriter, r *http.Request) {
-				if r.Header.Get("User-Agent") != userAgent {
-					t.Errorf("expected User-Agent %s, got %s", userAgent, r.Header.Get("User-Agent"))
+				expectedUserAgent := "fwrd-test/1.0"
+				if r.Header.Get("User-Agent") != expectedUserAgent {
+					t.Errorf("expected User-Agent %s, got %s", expectedUserAgent, r.Header.Get("User-Agent"))
 				}
 				w.Header().Set("ETag", "\"123\"")
 				w.Header().Set("Last-Modified", "Wed, 01 Jan 2025 00:00:00 GMT")

@@ -88,7 +88,21 @@ func (l *Launcher) Open(url string) error {
 		if l.videoPlayer == "" {
 			return fmt.Errorf("no video player found")
 		}
-		cmd = exec.Command(l.videoPlayer, url)
+		// Special handling for different video players
+		switch l.videoPlayer {
+		case "iina":
+			// iina needs --no-stdin flag for URLs to work properly
+			cmd = exec.Command(l.videoPlayer, "--no-stdin", url)
+		case "mpv":
+			// mpv works with URLs directly, but we can add useful flags
+			cmd = exec.Command(l.videoPlayer, "--force-window", url)
+		case "vlc":
+			// VLC needs special flags for better URL handling
+			cmd = exec.Command(l.videoPlayer, "--intf", "macosx", url)
+		default:
+			// Fallback for other players
+			cmd = exec.Command(l.videoPlayer, url)
+		}
 	case MediaTypeImage:
 		if l.imageViewer == "" {
 			return fmt.Errorf("no image viewer found")
@@ -98,7 +112,13 @@ func (l *Launcher) Open(url string) error {
 		if l.audioPlayer == "" {
 			return fmt.Errorf("no audio player found")
 		}
-		cmd = exec.Command(l.audioPlayer, url)
+		// Audio players may also need special handling for URLs
+		switch l.audioPlayer {
+		case "mpv":
+			cmd = exec.Command(l.audioPlayer, "--force-window", "--keep-open", url)
+		default:
+			cmd = exec.Command(l.audioPlayer, url)
+		}
 	case MediaTypePDF:
 		if l.pdfViewer == "" {
 			return fmt.Errorf("no PDF viewer found")
@@ -125,34 +145,66 @@ func (l *Launcher) Open(url string) error {
 func detectMediaType(url string) MediaType {
 	lower := strings.ToLower(url)
 
-	videoExts := []string{".mp4", ".webm", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v"}
-	for _, ext := range videoExts {
-		if strings.Contains(lower, ext) {
-			return MediaTypeVideo
+	// Check if this is a URL or a local file path
+	isURL := strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+
+	// Extract file extension properly (handle URLs with query params)
+	var ext string
+	if idx := strings.LastIndex(lower, "."); idx != -1 {
+		ext = lower[idx:]
+		// Remove query parameters if present (e.g., .mp4?param=value)
+		if qIdx := strings.Index(ext, "?"); qIdx != -1 {
+			ext = ext[:qIdx]
+		}
+		// Remove anchors if present (e.g., .html#section)
+		if aIdx := strings.Index(ext, "#"); aIdx != -1 {
+			ext = ext[:aIdx]
 		}
 	}
 
-	imageExts := []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
-	for _, ext := range imageExts {
-		if strings.Contains(lower, ext) {
-			return MediaTypeImage
-		}
-	}
-
-	audioExts := []string{".mp3", ".ogg", ".wav", ".flac", ".m4a", ".aac"}
-	for _, ext := range audioExts {
-		if strings.Contains(lower, ext) {
-			return MediaTypeAudio
-		}
-	}
-
-	if strings.Contains(lower, ".pdf") {
+	// Check specific file extensions
+	switch ext {
+	case ".mp4", ".webm", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg", ".3gp":
+		return MediaTypeVideo
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".ico", ".tiff":
+		return MediaTypeImage
+	case ".mp3", ".ogg", ".wav", ".flac", ".m4a", ".aac", ".opus", ".wma":
+		return MediaTypeAudio
+	case ".pdf":
 		return MediaTypePDF
 	}
 
-	if strings.Contains(lower, "youtube.com") || strings.Contains(lower, "youtu.be") ||
-		strings.Contains(lower, "vimeo.com") || strings.Contains(lower, "twitch.tv") {
-		return MediaTypeVideo
+	// For URLs without a clear media extension, make intelligent guesses
+	if isURL {
+		// Check for video indicators - be specific about video platforms
+		if strings.Contains(lower, "/video/") || strings.Contains(lower, "/watch") ||
+			strings.Contains(lower, "/embed/") || strings.Contains(lower, "/player/") ||
+			strings.Contains(lower, "youtube.") || strings.Contains(lower, "youtu.be") ||
+			strings.Contains(lower, "vimeo.") || strings.Contains(lower, "dailymotion.") ||
+			strings.Contains(lower, "twitch.tv") {
+			return MediaTypeVideo
+		}
+
+		// Check for podcast/audio indicators - very common in RSS
+		if strings.Contains(lower, "/audio/") || strings.Contains(lower, "/podcast") ||
+			strings.Contains(lower, "/episode") || strings.Contains(lower, "/show/") ||
+			strings.Contains(lower, "soundcloud.") || strings.Contains(lower, "spotify.") ||
+			strings.Contains(lower, "podcasts.") || strings.Contains(lower, "castbox.") ||
+			strings.Contains(lower, "podbean.") || strings.Contains(lower, "buzzsprout.") {
+			return MediaTypeAudio
+		}
+
+		// Check for image indicators
+		if strings.Contains(lower, "/image/") || strings.Contains(lower, "/img/") ||
+			strings.Contains(lower, "/photo/") || strings.Contains(lower, "/gallery/") ||
+			strings.Contains(lower, "imgur.") || strings.Contains(lower, "flickr.") ||
+			strings.Contains(lower, "instagram.") {
+			return MediaTypeImage
+		}
+
+		// For unknown URLs, return Unknown and let the default opener handle it
+		// Most URLs in RSS feeds are articles/web pages, not media files
+		return MediaTypeUnknown
 	}
 
 	return MediaTypeUnknown

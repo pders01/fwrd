@@ -3,6 +3,8 @@ package media
 import (
 	"runtime"
 	"testing"
+
+	"github.com/pders01/fwrd/internal/config"
 )
 
 func TestDetectMediaType(t *testing.T) {
@@ -108,7 +110,18 @@ func TestFindCommand(t *testing.T) {
 }
 
 func TestNewLauncher(t *testing.T) {
-	launcher := NewLauncher()
+	cfg := &config.Config{
+		Media: config.MediaConfig{
+			Darwin: config.MediaPlayers{
+				Video: []string{"mpv", "vlc"},
+				Image: []string{"open"},
+				Audio: []string{"mpv"},
+				PDF:   []string{"open"},
+			},
+			DefaultOpener: "open",
+		},
+	}
+	launcher := NewLauncher(cfg)
 
 	if launcher == nil {
 		t.Fatal("NewLauncher() returned nil")
