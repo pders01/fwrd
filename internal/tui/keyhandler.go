@@ -7,18 +7,20 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/pders01/fwrd/internal/config"
 )
 
 // KeyHandler handles key presses with context awareness
 type KeyHandler struct {
 	app         *App
+	config      *config.Config
 	modifierKey string
 }
 
 // NewKeyHandler creates a new key handler
-func NewKeyHandler(app *App) *KeyHandler {
-	modifierKey := "ctrl+"
-	return &KeyHandler{app: app, modifierKey: modifierKey}
+func NewKeyHandler(app *App, cfg *config.Config) *KeyHandler {
+	modifierKey := cfg.Keys.Modifier + "+"
+	return &KeyHandler{app: app, config: cfg, modifierKey: modifierKey}
 }
 
 // HandleKey processes key presses with proper context and precedence

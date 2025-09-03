@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+
+	"github.com/pders01/fwrd/internal/config"
 )
 
 type MediaType int
@@ -18,31 +20,60 @@ const (
 )
 
 type Launcher struct {
-	videoPlayer string
-	imageViewer string
-	audioPlayer string
-	pdfViewer   string
+	videoPlayer   string
+	imageViewer   string
+	audioPlayer   string
+	pdfViewer     string
+	defaultOpener string
+	config        *config.MediaConfig
 }
 
-func NewLauncher() *Launcher {
-	l := &Launcher{}
+func NewLauncher(cfg *config.Config) *Launcher {
+	l := &Launcher{
+		config:        &cfg.Media,
+		defaultOpener: cfg.Media.DefaultOpener,
+	}
 
+	// Get platform-specific players from config
+	var players config.MediaPlayers
 	switch runtime.GOOS {
 	case "darwin":
-		l.videoPlayer = findCommand("iina", "mpv", "vlc")
-		l.imageViewer = findCommand("sxiv", "feh", "open")
-		l.audioPlayer = findCommand("mpv", "vlc", "open")
-		l.pdfViewer = "open"
+		players = cfg.Media.Darwin
 	case "linux":
-		l.videoPlayer = findCommand("mpv", "vlc", "mplayer")
-		l.imageViewer = findCommand("sxiv", "feh", "eog", "xdg-open")
-		l.audioPlayer = findCommand("mpv", "vlc", "mplayer")
-		l.pdfViewer = findCommand("zathura", "evince", "xdg-open")
+		players = cfg.Media.Linux
+	case "windows":
+		players = cfg.Media.Windows
 	default:
-		l.videoPlayer = "open"
-		l.imageViewer = "open"
-		l.audioPlayer = "open"
-		l.pdfViewer = "open"
+		// Use Darwin as fallback
+		players = cfg.Media.Darwin
+	}
+
+	// Find available commands from configured preferences
+	if len(players.Video) > 0 {
+		l.videoPlayer = findCommand(players.Video...)
+	}
+	if len(players.Image) > 0 {
+		l.imageViewer = findCommand(players.Image...)
+	}
+	if len(players.Audio) > 0 {
+		l.audioPlayer = findCommand(players.Audio...)
+	}
+	if len(players.PDF) > 0 {
+		l.pdfViewer = findCommand(players.PDF...)
+	}
+
+	// Fallback to default opener if no specific player found
+	if l.videoPlayer == "" {
+		l.videoPlayer = l.defaultOpener
+	}
+	if l.imageViewer == "" {
+		l.imageViewer = l.defaultOpener
+	}
+	if l.audioPlayer == "" {
+		l.audioPlayer = l.defaultOpener
+	}
+	if l.pdfViewer == "" {
+		l.pdfViewer = l.defaultOpener
 	}
 
 	return l
@@ -74,7 +105,7 @@ func (l *Launcher) Open(url string) error {
 		}
 		cmd = exec.Command(l.pdfViewer, url)
 	default:
-		cmd = exec.Command(getDefaultOpener(), url)
+		cmd = exec.Command(l.defaultOpener, url)
 	}
 
 	// For GUI applications like iina, we want to start them detached

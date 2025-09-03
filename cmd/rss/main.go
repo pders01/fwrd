@@ -9,15 +9,18 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/storage"
 	"github.com/pders01/fwrd/internal/tui"
 )
 
 func main() {
 	var (
-		dbPath  = flag.String("db", "", "Path to database file")
-		version = flag.Bool("version", false, "Show version information")
-		quiet   = flag.Bool("quiet", false, "Skip startup banner")
+		dbPath         = flag.String("db", "", "Path to database file (overrides config)")
+		configPath     = flag.String("config", "", "Path to configuration file")
+		generateConfig = flag.Bool("generate-config", false, "Generate default config file")
+		version        = flag.Bool("version", false, "Show version information")
+		quiet          = flag.Bool("quiet", false, "Skip startup banner")
 	)
 	flag.Parse()
 
@@ -28,25 +31,47 @@ func main() {
 		return
 	}
 
+	// Handle generate-config flag
+	if *generateConfig {
+		home, _ := os.UserHomeDir()
+		configDir := filepath.Join(home, ".config", "fwrd")
+		configFile := filepath.Join(configDir, "config.toml")
+
+		if err := config.GenerateDefaultConfig(configFile); err != nil {
+			log.Fatalf("Failed to generate config: %v", err)
+		}
+		fmt.Printf("Generated default configuration at: %s\n", configFile)
+		return
+	}
+
 	if !*quiet {
 		showBanner()
 	}
 
-	if *dbPath == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			log.Fatal(err)
-		}
-		*dbPath = filepath.Join(home, ".fwrd.db")
+	// Load configuration
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	store, err := storage.NewStore(*dbPath)
+	// Override database path if provided via flag
+	if *dbPath != "" {
+		cfg.Database.Path = *dbPath
+	}
+
+	// Expand tilde in database path
+	if len(cfg.Database.Path) >= 2 && cfg.Database.Path[:2] == "~/" {
+		home, _ := os.UserHomeDir()
+		cfg.Database.Path = filepath.Join(home, cfg.Database.Path[2:])
+	}
+
+	store, err := storage.NewStore(cfg.Database.Path)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer store.Close()
 
-	app := tui.NewApp(store)
+	app := tui.NewApp(store, cfg)
 	p := tea.NewProgram(app, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {

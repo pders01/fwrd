@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/storage"
 )
 
@@ -15,14 +16,16 @@ type Manager struct {
 	store   *storage.Store
 	fetcher *Fetcher
 	parser  *Parser
+	config  *config.Config
 	mu      sync.RWMutex
 }
 
-func NewManager(store *storage.Store) *Manager {
+func NewManager(store *storage.Store, cfg *config.Config) *Manager {
 	return &Manager{
 		store:   store,
-		fetcher: NewFetcher(),
+		fetcher: NewFetcher(cfg),
 		parser:  NewParser(),
+		config:  cfg,
 	}
 }
 
@@ -90,7 +93,7 @@ func (m *Manager) RefreshFeed(feedID string) error {
 		return fmt.Errorf("getting feed: %w", err)
 	}
 
-	if time.Since(feed.LastFetched) < 5*time.Minute {
+	if time.Since(feed.LastFetched) < m.config.Feed.RefreshInterval {
 		return nil
 	}
 

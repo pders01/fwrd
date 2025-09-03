@@ -1,0 +1,83 @@
+# fwrd configuration file
+# Copy this to ~/.config/fwrd/config.toml and customize as needed
+# Environment variables can override any setting using FWRD_ prefix
+# e.g., FWRD_DATABASE_PATH=/custom/path.db
+
+[database]
+# Path to the database file
+# Default: ~/.fwrd.db
+path = "~/.fwrd.db"
+# Database operation timeout
+timeout = "1s"
+
+[feed]
+# HTTP request timeout for fetching feeds
+http_timeout = "30s"
+# Minimum interval between feed refreshes
+refresh_interval = "5m"
+# Default retry interval when no Retry-After header is present
+default_retry_after = "15m"
+# User agent string for HTTP requests
+user_agent = "fwrd/1.0 (https://github.com/pders01/fwrd)"
+
+[ui.colors]
+# Color scheme - accepts hex values or named colors
+primary = "#FF6B6B"     # Warm coral
+secondary = "#4ECDC4"   # Teal
+accent = "#95E1D3"      # Mint
+background = "#1A1A2E"  # Deep night
+surface = "#16213E"     # Midnight blue
+text = "#EAEAEA"        # Soft white
+muted = "#94A3B8"       # Muted gray-blue
+error = "#F87171"       # Red
+success = "#4ADE80"     # Green
+
+[ui.article]
+# Maximum length for article descriptions in lists
+max_description_length = 150
+# Word wrap settings for article reader
+word_wrap_max_width = 120
+word_wrap_min_width = 40
+
+[media]
+# Default program to open unrecognized media types
+# Options: "open" (macOS), "xdg-open" (Linux), "start" (Windows)
+default_opener = "open"
+
+[media.darwin]
+# Media players for macOS (in order of preference)
+video = ["iina", "mpv", "vlc"]
+image = ["preview", "open"]
+audio = ["mpv", "vlc", "open"]
+pdf = ["preview", "open"]
+
+[media.linux]
+# Media players for Linux (in order of preference)
+video = ["mpv", "vlc", "mplayer"]
+image = ["sxiv", "feh", "eog", "xdg-open"]
+audio = ["mpv", "vlc", "mplayer"]
+pdf = ["zathura", "evince", "xdg-open"]
+
+[media.windows]
+# Media players for Windows (in order of preference)
+video = ["mpv", "vlc"]
+image = ["start"]
+audio = ["mpv", "vlc"]
+pdf = ["start"]
+
+[keys]
+# Modifier key for custom commands
+# Options: "ctrl", "alt", "cmd", "super"
+modifier = "ctrl"
+
+[keys.bindings]
+# Custom keybindings (without modifier prefix)
+quit = "q"
+search = "s"
+new_feed = "n"
+delete_feed = "x"
+refresh = "r"
+toggle_read = "m"
+open_media = "o"
+back = "esc"
+help = "?"

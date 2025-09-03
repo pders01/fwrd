@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/media"
 	"github.com/pders01/fwrd/internal/search"
@@ -27,6 +28,7 @@ func min(a, b int) int {
 }
 
 type App struct {
+	config          *config.Config
 	store           *storage.Store
 	fetcher         *feed.Fetcher
 	parser          *feed.Parser
@@ -57,7 +59,7 @@ type App struct {
 	loadingArticle  bool // Track if we're loading an article
 }
 
-func NewApp(store *storage.Store) *App {
+func NewApp(store *storage.Store, cfg *config.Config) *App {
 	feedList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	feedList.Title = "› feeds"
 	feedList.SetShowStatusBar(false)
@@ -86,10 +88,11 @@ func NewApp(store *storage.Store) *App {
 	si.Placeholder = "Search feeds and articles..."
 
 	app := &App{
+		config:         cfg,
 		store:          store,
-		fetcher:        feed.NewFetcher(),
+		fetcher:        feed.NewFetcher(cfg),
 		parser:         feed.NewParser(),
-		launcher:       media.NewLauncher(),
+		launcher:       media.NewLauncher(cfg),
 		searchEngine:   search.NewEngine(store),
 		feedList:       feedList,
 		articleList:    articleList,
@@ -105,7 +108,7 @@ func NewApp(store *storage.Store) *App {
 	}
 
 	// Initialize key handler after app is created
-	app.keyHandler = NewKeyHandler(app)
+	app.keyHandler = NewKeyHandler(app, cfg)
 
 	return app
 }

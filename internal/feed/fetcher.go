@@ -5,23 +5,23 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/storage"
 )
 
-const (
-	userAgent = "fwrd/1.0 (RSS aggregator; github.com/pders01/fwrd)"
-	timeout   = 30 * time.Second
-)
-
 type Fetcher struct {
-	client *http.Client
+	client    *http.Client
+	config    *config.FeedConfig
+	userAgent string
 }
 
-func NewFetcher() *Fetcher {
+func NewFetcher(cfg *config.Config) *Fetcher {
 	return &Fetcher{
 		client: &http.Client{
-			Timeout: timeout,
+			Timeout: cfg.Feed.HTTPTimeout,
 		},
+		config:    &cfg.Feed,
+		userAgent: cfg.Feed.UserAgent,
 	}
 }
 
@@ -31,7 +31,7 @@ func (f *Fetcher) Fetch(feed *storage.Feed) (*http.Response, bool, error) {
 		return nil, false, fmt.Errorf("creating request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", f.userAgent)
 	req.Header.Set("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml")
 
 	if feed.ETag != "" {
@@ -78,5 +78,5 @@ func (f *Fetcher) GetRetryAfter(resp *http.Response) time.Duration {
 			return seconds
 		}
 	}
-	return 15 * time.Minute
+	return f.config.DefaultRetryAfter
 }
