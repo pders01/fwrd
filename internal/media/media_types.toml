@@ -1,0 +1,72 @@
+# Media Type Detection Configuration
+# This file defines file extensions and URL patterns for detecting media types
+
+[video]
+# File extensions for video files
+extensions = [
+    "mp4", "webm", "mkv", "avi", "mov", "wmv", "flv", "m4v",
+    "mpg", "mpeg", "3gp", "ogv", "m2ts", "mts", "vob", "divx"
+]
+
+# URL patterns that indicate video content
+url_patterns = [
+    "/video/", "/watch", "/embed/", "/player/", "/stream/",
+    "youtube.", "youtu.be", "vimeo.", "dailymotion.",
+    "twitch.tv", "facebook.com/watch", "tiktok.", "rumble.",
+    "bitchute.", "odysee.", "brighteon."
+]
+
+[audio]
+# File extensions for audio files
+extensions = [
+    "mp3", "ogg", "wav", "flac", "m4a", "aac", "opus", "wma",
+    "alac", "ape", "wv", "dsd", "dsf", "mka", "mp2", "aiff"
+]
+
+# URL patterns that indicate audio content
+url_patterns = [
+    "/audio/", "/podcast", "/episode", "/show/", "/listen/",
+    "soundcloud.", "spotify.", "podcasts.", "castbox.",
+    "podbean.", "buzzsprout.", "anchor.fm", "spreaker.",
+    "transistor.fm", "simplecast.", "libsyn.", "blubrry.",
+    "podcastaddict.", "overcast.fm", "pocketcasts."
+]
+
+[image]
+# File extensions for image files
+extensions = [
+    "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg",
+    "ico", "tiff", "tif", "heic", "heif", "raw", "cr2",
+    "nef", "arw", "dng", "orf"
+]
+
+# URL patterns that indicate image content
+url_patterns = [
+    "/image/", "/img/", "/photo/", "/gallery/", "/pics/",
+    "imgur.", "flickr.", "instagram.", "pinterest.",
+    "500px.", "unsplash.", "pexels.", "pixabay.",
+    "photobucket.", "imageshack.", "postimg."
+]
+
+[pdf]
+# File extensions for PDF files
+extensions = ["pdf"]
+
+# URL patterns that indicate PDF content
+url_patterns = [
+    "/pdf/", "/document/", "/docs/", ".pdf"
+]
+
+[platforms]
+# Platform-specific default openers
+[platforms.darwin]
+default_opener = "open"
+
+[platforms.linux]
+default_opener = "xdg-open"
+
+[platforms.windows]
+default_opener = "start"
+
+[platforms.fallback]
+default_opener = "open"

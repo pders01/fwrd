@@ -15,15 +15,15 @@ import (
 var playersTOML []byte
 
 type PlayerDefinition struct {
-	Description string           `toml:"description"`
-	Platforms   []string         `toml:"platforms"`
-	Video       *MediaTypeConfig `toml:"video,omitempty"`
-	Audio       *MediaTypeConfig `toml:"audio,omitempty"`
-	Image       *MediaTypeConfig `toml:"image,omitempty"`
-	PDF         *MediaTypeConfig `toml:"pdf,omitempty"`
+	Description string                 `toml:"description"`
+	Platforms   []string               `toml:"platforms"`
+	Video       *PlayerMediaTypeConfig `toml:"video,omitempty"`
+	Audio       *PlayerMediaTypeConfig `toml:"audio,omitempty"`
+	Image       *PlayerMediaTypeConfig `toml:"image,omitempty"`
+	PDF         *PlayerMediaTypeConfig `toml:"pdf,omitempty"`
 }
 
-type MediaTypeConfig struct {
+type PlayerMediaTypeConfig struct {
 	Args        []string `toml:"args,omitempty"`
 	ArgsDarwin  []string `toml:"args_darwin,omitempty"`
 	ArgsLinux   []string `toml:"args_linux,omitempty"`
@@ -95,7 +95,7 @@ func (r *PlayerRegistry) GetCommand(playerName string, mediaType MediaType, url 
 		return nil, fmt.Errorf("%s not supported on %s", playerName, runtime.GOOS)
 	}
 
-	var config *MediaTypeConfig
+	var config *PlayerMediaTypeConfig
 	switch mediaType {
 	case MediaTypeVideo:
 		config = player.Video
@@ -117,7 +117,7 @@ func (r *PlayerRegistry) GetCommand(playerName string, mediaType MediaType, url 
 	return exec.Command(playerName, args...), nil
 }
 
-func (r *PlayerRegistry) getArgs(config *MediaTypeConfig) []string {
+func (r *PlayerRegistry) getArgs(config *PlayerMediaTypeConfig) []string {
 	if config == nil {
 		return nil
 	}

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
-	"strings"
 
 	"github.com/pders01/fwrd/internal/config"
 )
@@ -27,6 +26,7 @@ type Launcher struct {
 	defaultOpener string
 	config        *config.MediaConfig
 	registry      *PlayerRegistry
+	detector      *MediaTypeDetector
 }
 
 func NewLauncher(cfg *config.Config) *Launcher {
@@ -36,10 +36,17 @@ func NewLauncher(cfg *config.Config) *Launcher {
 		registry = &PlayerRegistry{players: make(map[string]PlayerDefinition)}
 	}
 
+	detector, err := NewMediaTypeDetector()
+	if err != nil {
+		// Fallback to a basic detector if config can't be loaded
+		detector = &MediaTypeDetector{config: &MediaTypesConfig{}}
+	}
+
 	l := &Launcher{
 		config:        &cfg.Media,
 		defaultOpener: cfg.Media.DefaultOpener,
 		registry:      registry,
+		detector:      detector,
 	}
 
 	var players config.MediaPlayers
@@ -84,7 +91,7 @@ func NewLauncher(cfg *config.Config) *Launcher {
 }
 
 func (l *Launcher) Open(url string) error {
-	mediaType := detectMediaType(url)
+	mediaType := l.detector.DetectType(url)
 
 	var playerName string
 	switch mediaType {
@@ -129,67 +136,6 @@ func (l *Launcher) Open(url string) error {
 	return nil
 }
 
-func detectMediaType(url string) MediaType {
-	lower := strings.ToLower(url)
-	isURL := strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
-
-	// Extract file extension, handling URLs with query params and anchors
-	var ext string
-	if idx := strings.LastIndex(lower, "."); idx != -1 {
-		ext = lower[idx:]
-		if qIdx := strings.Index(ext, "?"); qIdx != -1 {
-			ext = ext[:qIdx]
-		}
-		if aIdx := strings.Index(ext, "#"); aIdx != -1 {
-			ext = ext[:aIdx]
-		}
-	}
-
-	switch ext {
-	case ".mp4", ".webm", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg", ".3gp":
-		return MediaTypeVideo
-	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".ico", ".tiff":
-		return MediaTypeImage
-	case ".mp3", ".ogg", ".wav", ".flac", ".m4a", ".aac", ".opus", ".wma":
-		return MediaTypeAudio
-	case ".pdf":
-		return MediaTypePDF
-	}
-
-	if isURL {
-		// Video platforms
-		if strings.Contains(lower, "/video/") || strings.Contains(lower, "/watch") ||
-			strings.Contains(lower, "/embed/") || strings.Contains(lower, "/player/") ||
-			strings.Contains(lower, "youtube.") || strings.Contains(lower, "youtu.be") ||
-			strings.Contains(lower, "vimeo.") || strings.Contains(lower, "dailymotion.") ||
-			strings.Contains(lower, "twitch.tv") {
-			return MediaTypeVideo
-		}
-
-		// Podcast/audio platforms (common in RSS)
-		if strings.Contains(lower, "/audio/") || strings.Contains(lower, "/podcast") ||
-			strings.Contains(lower, "/episode") || strings.Contains(lower, "/show/") ||
-			strings.Contains(lower, "soundcloud.") || strings.Contains(lower, "spotify.") ||
-			strings.Contains(lower, "podcasts.") || strings.Contains(lower, "castbox.") ||
-			strings.Contains(lower, "podbean.") || strings.Contains(lower, "buzzsprout.") {
-			return MediaTypeAudio
-		}
-
-		// Image platforms
-		if strings.Contains(lower, "/image/") || strings.Contains(lower, "/img/") ||
-			strings.Contains(lower, "/photo/") || strings.Contains(lower, "/gallery/") ||
-			strings.Contains(lower, "imgur.") || strings.Contains(lower, "flickr.") ||
-			strings.Contains(lower, "instagram.") {
-			return MediaTypeImage
-		}
-
-		// Most URLs in RSS feeds are articles/web pages, not media files
-		return MediaTypeUnknown
-	}
-
-	return MediaTypeUnknown
-}
-
 func findCommand(commands ...string) string {
 	for _, cmd := range commands {
 		if _, err := exec.LookPath(cmd); err == nil {
@@ -197,17 +143,4 @@ func findCommand(commands ...string) string {
 		}
 	}
 	return ""
-}
-
-func getDefaultOpener() string {
-	switch runtime.GOOS {
-	case "darwin":
-		return "open"
-	case "linux":
-		return "xdg-open"
-	case "windows":
-		return "start"
-	default:
-		return "open"
-	}
 }

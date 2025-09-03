@@ -8,6 +8,11 @@ import (
 )
 
 func TestDetectMediaType(t *testing.T) {
+	detector, err := NewMediaTypeDetector()
+	if err != nil {
+		t.Fatalf("Failed to create detector: %v", err)
+	}
+
 	tests := []struct {
 		name     string
 		url      string
@@ -59,9 +64,9 @@ func TestDetectMediaType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := detectMediaType(tt.url)
+			result := detector.DetectType(tt.url)
 			if result != tt.expected {
-				t.Errorf("detectMediaType(%s) = %v, want %v", tt.url, result, tt.expected)
+				t.Errorf("DetectType(%s) = %v, want %v", tt.url, result, tt.expected)
 			}
 		})
 	}
@@ -139,7 +144,12 @@ func TestNewLauncher(t *testing.T) {
 }
 
 func TestGetDefaultOpener(t *testing.T) {
-	opener := getDefaultOpener()
+	detector, err := NewMediaTypeDetector()
+	if err != nil {
+		t.Fatalf("Failed to create detector: %v", err)
+	}
+
+	opener := detector.GetDefaultOpener()
 
 	expectedOpeners := map[string]string{
 		"darwin":  "open",
@@ -149,13 +159,13 @@ func TestGetDefaultOpener(t *testing.T) {
 
 	// Check if we got a non-empty result
 	if opener == "" {
-		t.Error("getDefaultOpener() returned empty string")
+		t.Error("GetDefaultOpener() returned empty string")
 	}
 
 	// If we know the expected opener for this OS, verify it
 	if expected, ok := expectedOpeners[runtime.GOOS]; ok {
 		if opener != expected {
-			t.Errorf("getDefaultOpener() on %s = %s, want %s", runtime.GOOS, opener, expected)
+			t.Errorf("GetDefaultOpener() on %s = %s, want %s", runtime.GOOS, opener, expected)
 		}
 	}
 }
