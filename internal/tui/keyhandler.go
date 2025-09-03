@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	
+
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 // KeyHandler handles key presses with context awareness
 type KeyHandler struct {
-	app *App
+	app         *App
 	modifierKey string
 }
 
@@ -24,17 +24,17 @@ func NewKeyHandler(app *App) *KeyHandler {
 // HandleKey processes key presses with proper context and precedence
 func (kh *KeyHandler) HandleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
-	
+
 	// Handle text input modes first (highest precedence)
 	if kh.isInTextInputMode() {
 		return kh.handleTextInputMode(msg)
 	}
-	
+
 	// Only handle our custom action keys - let Charm handle everything else
 	if model, cmd, handled := kh.handleCustomKeys(key); handled {
 		return model, cmd
 	}
-	
+
 	// Let Charm handle all navigation, help, filtering, etc.
 	return kh.delegateToCharm(msg)
 }
@@ -54,7 +54,7 @@ func (kh *KeyHandler) isInTextInputMode() bool {
 // handleTextInputMode handles keys when text input is focused
 func (kh *KeyHandler) handleTextInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
-	
+
 	switch key {
 	case "esc":
 		return kh.navigateBack()
@@ -65,16 +65,21 @@ func (kh *KeyHandler) handleTextInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "tab", "down":
 		// In search view, unfocus input to navigate results
 		if kh.app.view == ViewSearch {
-			kh.app.searchInput.Blur()
+			if len(kh.app.searchList.Items()) > 0 {
+				kh.app.searchInput.Blur()
+				// Select first item when moving to results
+				kh.app.searchList.Select(0)
+			}
 			return kh.app, nil
 		}
 		// For other views, let text input handle it
 		return kh.delegateToTextInput(msg)
 	case "up", "shift+tab":
-		// In search view, refocus input from results
+		// In search view, this is handled by the list navigation
 		if kh.app.view == ViewSearch {
-			kh.app.searchInput.Focus()
-			return kh.app, nil
+			// Don't handle up key here when input is focused
+			// Let the default text input behavior work
+			return kh.delegateToTextInput(msg)
 		}
 		// For other views, let text input handle it
 		return kh.delegateToTextInput(msg)
@@ -96,7 +101,7 @@ func (kh *KeyHandler) handleTextInputEnter() (tea.Model, tea.Cmd) {
 			return kh.app, kh.app.addFeed(input)
 		}
 		return kh.app, nil
-		
+
 	case ViewSearch:
 		// Select first search result if available
 		if items := kh.app.searchList.Items(); len(items) > 0 {
@@ -105,7 +110,7 @@ func (kh *KeyHandler) handleTextInputEnter() (tea.Model, tea.Cmd) {
 			}
 		}
 		return kh.app, nil
-		
+
 	default:
 		return kh.app, nil
 	}
@@ -118,12 +123,12 @@ func (kh *KeyHandler) delegateToTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		newTextInput, cmd := kh.app.textInput.Update(msg)
 		kh.app.textInput = newTextInput
 		return kh.app, cmd
-		
+
 	case ViewSearch:
 		// Handle search input
 		newSearchInput, cmd := kh.app.searchInput.Update(msg)
 		kh.app.searchInput = newSearchInput
-		
+
 		// Perform search when input changes (only if still in search view)
 		searchQuery := kh.sanitizeSearchInput(kh.app.searchInput.Value())
 		if searchQuery != "" && len(searchQuery) > 1 && kh.app.view == ViewSearch {
@@ -136,9 +141,9 @@ func (kh *KeyHandler) delegateToTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return kh.app, tea.Batch(cmd, searchCmd)
 		}
-		
+
 		return kh.app, cmd
-		
+
 	default:
 		return kh.app, nil
 	}
@@ -157,7 +162,7 @@ func (kh *KeyHandler) handleCustomKeys(key string) (tea.Model, tea.Cmd, bool) {
 		model, cmd := kh.enterSearchMode()
 		return model, cmd, true
 	}
-	
+
 	// View-specific custom keys
 	switch kh.app.view {
 	case ViewFeeds:
@@ -224,7 +229,7 @@ func (kh *KeyHandler) handleReaderCustomKeys(key string) (tea.Model, tea.Cmd, bo
 			} else if kh.app.currentArticle.URL != "" {
 				url = kh.app.currentArticle.URL
 			}
-			
+
 			if url != "" {
 				return kh.app, kh.openURL(url), true
 			}
@@ -237,7 +242,7 @@ func (kh *KeyHandler) handleReaderCustomKeys(key string) (tea.Model, tea.Cmd, bo
 // delegateToCharm lets Charm handle all keys we don't intercept
 func (kh *KeyHandler) delegateToCharm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
-	
+
 	switch kh.app.view {
 	case ViewFeeds:
 		// Let the feed list handle enter, navigation, filtering, help, etc.
@@ -251,7 +256,7 @@ func (kh *KeyHandler) delegateToCharm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return kh.app, cmd
-		
+
 	case ViewArticles:
 		kh.app.articleList, cmd = kh.app.articleList.Update(msg)
 		// Handle enter key for article selection
@@ -259,39 +264,51 @@ func (kh *KeyHandler) delegateToCharm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if i, ok := kh.app.articleList.SelectedItem().(articleItem); ok {
 				kh.app.currentArticle = i.article
 				kh.app.cameFromSearch = false
+				kh.app.loadingArticle = true // Set loading flag
 				kh.app.view = ViewReader
-				return kh.app, kh.app.renderArticle(i.article)
+				// Mark article as read when opened
+				markReadCmd := kh.app.markArticleRead(i.article)
+				renderCmd := kh.app.renderArticle(i.article)
+				return kh.app, tea.Batch(markReadCmd, renderCmd)
 			}
 		}
 		return kh.app, cmd
-		
+
 	case ViewSearch:
 		// Handle focus switching when not in text input mode
 		if !kh.app.searchInput.Focused() {
 			switch msg.String() {
-			case "up", "shift+tab":
+			case "tab", "shift+tab":
+				// Tab always returns to search input
+				kh.app.searchInput.Focus()
+				return kh.app, nil
+			case "up":
 				// Navigate up in results, or refocus input if at top
 				if len(kh.app.searchList.Items()) > 0 && kh.app.searchList.Index() == 0 {
 					kh.app.searchInput.Focus()
 					return kh.app, nil
 				}
+			case "/", "i":
+				// Quick shortcuts to refocus search input
+				kh.app.searchInput.Focus()
+				return kh.app, nil
 			}
 		}
-		
+
 		kh.app.searchList, cmd = kh.app.searchList.Update(msg)
 		// Handle enter key for search result selection
-		if msg.String() == "enter" {
+		if msg.String() == "enter" && !kh.app.searchInput.Focused() {
 			if i, ok := kh.app.searchList.SelectedItem().(searchResultItem); ok {
 				return kh.selectSearchResult(i)
 			}
 		}
 		return kh.app, cmd
-		
+
 	case ViewReader:
 		// Let viewport handle scrolling
 		kh.app.viewport, cmd = kh.app.viewport.Update(msg)
 		return kh.app, cmd
-		
+
 	default:
 		return kh.app, nil
 	}
@@ -318,8 +335,12 @@ func (kh *KeyHandler) selectSearchResult(result searchResultItem) (tea.Model, te
 		kh.app.currentArticle = result.article
 		kh.app.currentFeed = result.feed
 		kh.app.cameFromSearch = true
+		kh.app.loadingArticle = true // Set loading flag
 		kh.app.view = ViewReader
-		return kh.app, kh.app.renderArticle(result.article)
+		// Mark article as read when opened
+		markReadCmd := kh.app.markArticleRead(result.article)
+		renderCmd := kh.app.renderArticle(result.article)
+		return kh.app, tea.Batch(markReadCmd, renderCmd)
 	} else {
 		// Validate feed data
 		if result.feed == nil {
@@ -332,7 +353,6 @@ func (kh *KeyHandler) selectSearchResult(result searchResultItem) (tea.Model, te
 	}
 }
 
-
 // navigateBack implements smart back navigation
 func (kh *KeyHandler) navigateBack() (tea.Model, tea.Cmd) {
 	switch kh.app.view {
@@ -340,18 +360,18 @@ func (kh *KeyHandler) navigateBack() (tea.Model, tea.Cmd) {
 		kh.app.view = ViewFeeds
 		kh.app.feedToDelete = nil
 		return kh.app, nil
-		
+
 	case ViewSearch:
 		kh.app.view = kh.app.previousView
 		kh.app.searchInput.Reset()
 		kh.app.searchResults = []searchResultItem{}
 		kh.app.searchList.SetItems([]list.Item{})
 		return kh.app, nil
-		
+
 	case ViewArticles:
 		kh.app.view = ViewFeeds
 		return kh.app, nil
-		
+
 	case ViewReader:
 		if kh.app.cameFromSearch {
 			kh.app.view = ViewSearch
@@ -363,7 +383,7 @@ func (kh *KeyHandler) navigateBack() (tea.Model, tea.Cmd) {
 			kh.app.view = ViewArticles
 			return kh.app, nil
 		}
-		
+
 	default:
 		return kh.app, tea.Quit
 	}
@@ -383,7 +403,7 @@ func (kh *KeyHandler) enterSearchMode() (tea.Model, tea.Cmd) {
 // validateFeedURL validates that a URL is suitable for RSS feeds
 func (kh *KeyHandler) validateFeedURL(input string) error {
 	input = strings.TrimSpace(input)
-	
+
 	// Length validation
 	if len(input) == 0 {
 		return fmt.Errorf("URL cannot be empty")
@@ -391,55 +411,55 @@ func (kh *KeyHandler) validateFeedURL(input string) error {
 	if len(input) > 2048 {
 		return fmt.Errorf("URL too long (max 2048 characters)")
 	}
-	
+
 	// Add protocol if missing
 	if !strings.HasPrefix(input, "http://") && !strings.HasPrefix(input, "https://") {
 		input = "https://" + input
 	}
-	
+
 	// Parse URL
 	parsedURL, err := url.Parse(input)
 	if err != nil {
 		return fmt.Errorf("invalid URL format: %w", err)
 	}
-	
+
 	// Check scheme
 	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
 		return fmt.Errorf("URL must use http or https protocol")
 	}
-	
+
 	// Check host
 	if parsedURL.Host == "" {
 		return fmt.Errorf("URL must have a valid hostname")
 	}
-	
+
 	// Basic sanitization check
 	if strings.Contains(input, "<") || strings.Contains(input, ">") {
 		return fmt.Errorf("URL contains invalid characters")
 	}
-	
+
 	return nil
 }
 
 // sanitizeSearchInput sanitizes and limits search input length
 func (kh *KeyHandler) sanitizeSearchInput(input string) string {
 	input = strings.TrimSpace(input)
-	
+
 	// Length limit for search queries
 	if len(input) > 256 {
 		input = input[:256]
 	}
-	
+
 	// Remove potentially dangerous characters but keep common search terms
 	input = strings.ReplaceAll(input, "\n", " ")
 	input = strings.ReplaceAll(input, "\r", " ")
 	input = strings.ReplaceAll(input, "\t", " ")
-	
+
 	// Collapse multiple spaces
 	for strings.Contains(input, "  ") {
 		input = strings.ReplaceAll(input, "  ", " ")
 	}
-	
+
 	return strings.TrimSpace(input)
 }
 
@@ -453,29 +473,28 @@ func (kh *KeyHandler) openURL(url string) tea.Cmd {
 	}
 }
 
-
 // GetHelpForCurrentView returns only our custom help text (Charm handles the rest)
 func (kh *KeyHandler) GetHelpForCurrentView() []string {
 	switch kh.app.view {
 	case ViewFeeds:
 		help := []string{kh.modifierKey + "n: new", kh.modifierKey + "r: refresh", kh.modifierKey + "s: search"}
 		if len(kh.app.feeds) > 0 {
-			help = append(help, kh.modifierKey + "x: delete")
+			help = append(help, kh.modifierKey+"x: delete")
 		}
 		return help
-		
+
 	case ViewArticles:
 		return []string{kh.modifierKey + "o: open", kh.modifierKey + "m: toggle read", kh.modifierKey + "s: search"}
-		
+
 	case ViewReader:
 		return []string{kh.modifierKey + "o: open media", kh.modifierKey + "s: search"}
-		
+
 	case ViewSearch:
 		return []string{kh.modifierKey + "s: search"}
-		
+
 	case ViewAddFeed, ViewDeleteConfirm:
 		return []string{} // These views have clear UI prompts
-		
+
 	default:
 		return []string{}
 	}

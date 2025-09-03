@@ -235,21 +235,21 @@ func TestExtractMediaURLs(t *testing.T) {
 
 func TestGenerateID(t *testing.T) {
 	tests := []struct {
-		name     string
-		feedID   string
-		guid     string
+		name         string
+		feedID       string
+		guid         string
 		expectPrefix string
 	}{
 		{
-			name:     "with GUID",
-			feedID:   "feed123",
-			guid:     "article456",
+			name:         "with GUID",
+			feedID:       "feed123",
+			guid:         "article456",
 			expectPrefix: "feed123:article456",
 		},
 		{
-			name:     "without GUID",
-			feedID:   "feed789",
-			guid:     "",
+			name:         "without GUID",
+			feedID:       "feed789",
+			guid:         "",
 			expectPrefix: "feed789:",
 		},
 	}

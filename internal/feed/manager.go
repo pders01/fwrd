@@ -34,9 +34,9 @@ func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
 	feedID := generateFeedID(url)
 
 	feed := &storage.Feed{
-		ID:          feedID,
-		URL:         url,
-		UpdatedAt:   time.Now(),
+		ID:        feedID,
+		URL:       url,
+		UpdatedAt: time.Now(),
 	}
 
 	resp, updated, err := m.fetcher.Fetch(feed)

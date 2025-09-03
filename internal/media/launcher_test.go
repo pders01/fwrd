@@ -68,7 +68,7 @@ func TestDetectMediaType(t *testing.T) {
 func TestFindCommand(t *testing.T) {
 	// This test is limited as it depends on system configuration
 	// We'll test the basic functionality
-	
+
 	tests := []struct {
 		name     string
 		commands []string
@@ -109,7 +109,7 @@ func TestFindCommand(t *testing.T) {
 
 func TestNewLauncher(t *testing.T) {
 	launcher := NewLauncher()
-	
+
 	if launcher == nil {
 		t.Fatal("NewLauncher() returned nil")
 	}
@@ -117,28 +117,28 @@ func TestNewLauncher(t *testing.T) {
 	// Verify that launcher has been initialized
 	// The actual values will depend on the system and installed software
 	// We just verify the structure is correct
-	
+
 	// On any system, at least the fallback values should be set
-	if launcher.videoPlayer == "" && launcher.imageViewer == "" && 
-	   launcher.audioPlayer == "" && launcher.pdfViewer == "" {
+	if launcher.videoPlayer == "" && launcher.imageViewer == "" &&
+		launcher.audioPlayer == "" && launcher.pdfViewer == "" {
 		t.Error("NewLauncher() did not initialize any media handlers")
 	}
 }
 
 func TestGetDefaultOpener(t *testing.T) {
 	opener := getDefaultOpener()
-	
+
 	expectedOpeners := map[string]string{
 		"darwin":  "open",
 		"linux":   "xdg-open",
 		"windows": "start",
 	}
-	
+
 	// Check if we got a non-empty result
 	if opener == "" {
 		t.Error("getDefaultOpener() returned empty string")
 	}
-	
+
 	// If we know the expected opener for this OS, verify it
 	if expected, ok := expectedOpeners[runtime.GOOS]; ok {
 		if opener != expected {

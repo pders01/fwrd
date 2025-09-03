@@ -63,7 +63,7 @@ func getContent(item *gofeed.Item) string {
 
 func extractMediaURLs(item *gofeed.Item) []string {
 	var urls []string
-	
+
 	for _, enclosure := range item.Enclosures {
 		if enclosure.URL != "" {
 			urls = append(urls, enclosure.URL)
@@ -84,21 +84,21 @@ func extractMediaURLs(item *gofeed.Item) []string {
 
 func findMediaInHTML(html string) []string {
 	var urls []string
-	
+
 	imgRegex := regexp.MustCompile(`<img[^>]+src=["']([^"']+)["']`)
 	for _, match := range imgRegex.FindAllStringSubmatch(html, -1) {
 		if len(match) > 1 {
 			urls = append(urls, match[1])
 		}
 	}
-	
+
 	videoRegex := regexp.MustCompile(`<video[^>]+src=["']([^"']+)["']`)
 	for _, match := range videoRegex.FindAllStringSubmatch(html, -1) {
 		if len(match) > 1 {
 			urls = append(urls, match[1])
 		}
 	}
-	
+
 	return urls
 }
 

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/glamour"
 	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/storage"
 )
@@ -35,58 +34,43 @@ func (a *App) loadArticles(feedID string) tea.Cmd {
 
 func (a *App) renderArticle(article *storage.Article) tea.Cmd {
 	return func() tea.Msg {
-		content := fmt.Sprintf("# %s\n\n", article.Title)
-		content += fmt.Sprintf("*Published: %s*\n\n", article.Published.Format(time.RFC1123))
-		
+		var content strings.Builder
+		content.WriteString(fmt.Sprintf("# %s\n\n", article.Title))
+		content.WriteString(fmt.Sprintf("*Published: %s*\n\n", article.Published.Format(time.RFC1123)))
+
 		if article.URL != "" {
-			content += fmt.Sprintf("[Read Online](%s)\n\n", article.URL)
+			content.WriteString(fmt.Sprintf("[Read Online](%s)\n\n", article.URL))
 		}
-		
+
 		if len(article.MediaURLs) > 0 {
-			content += "**Media:**\n"
+			content.WriteString("**Media:**\n")
 			for _, url := range article.MediaURLs {
-				content += fmt.Sprintf("- %s\n", url)
+				content.WriteString(fmt.Sprintf("- %s\n", url))
 			}
-			content += "\n"
+			content.WriteString("\n")
 		}
-		
-		content += "---\n\n"
-		
+
+		content.WriteString("---\n\n")
+
 		if article.Content != "" {
-			content += article.Content
+			content.WriteString(article.Content)
 		} else {
-			content += article.Description
+			content.WriteString(article.Description)
 		}
-		
-		// Make word wrap responsive to screen width
-		// Use 90% of available width, with sensible min/max bounds
-		wordWrapWidth := (a.width * 9) / 10
-		if wordWrapWidth > 120 {
-			wordWrapWidth = 120 // maximum for readability
+
+		// Use cached renderer for better performance
+		r, err := a.getRenderer()
+		if err != nil {
+			return articleRenderedMsg{content: "Error initializing renderer: " + err.Error()}
 		}
-		if wordWrapWidth < 40 {
-			wordWrapWidth = 40 // minimum for readability
-		}
-		// For very narrow screens, use almost full width
-		if a.width < 50 {
-			wordWrapWidth = a.width - 4
-			if wordWrapWidth < 20 {
-				wordWrapWidth = 20
-			}
-		}
-		
-		r, _ := glamour.NewTermRenderer(
-			glamour.WithAutoStyle(),
-			glamour.WithWordWrap(wordWrapWidth),
-		)
-		
-		rendered, err := r.Render(content)
+
+		rendered, err := r.Render(content.String())
 		if err != nil {
 			return errorMsg{err: err}
 		}
-		
+
 		a.store.MarkArticleRead(article.ID, true)
-		
+
 		return articleRenderedMsg{content: rendered}
 	}
 }
@@ -97,49 +81,49 @@ func (a *App) addFeed(url string) tea.Cmd {
 		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 			url = "https://" + url
 		}
-		
+
 		feedID := fmt.Sprintf("%x", sha256.Sum256([]byte(url)))
-		
+
 		newFeed := &storage.Feed{
 			ID:  feedID,
 			URL: url,
 		}
-		
+
 		resp, updated, err := a.fetcher.Fetch(newFeed)
 		if err != nil {
 			return feedAddedMsg{err: err}
 		}
-		
+
 		if !updated || resp == nil {
 			return feedAddedMsg{err: fmt.Errorf("feed not modified")}
 		}
-		
+
 		defer resp.Body.Close()
-		
+
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return feedAddedMsg{err: err}
 		}
-		
+
 		articles, err := a.parser.Parse(strings.NewReader(string(body)), feedID)
 		if err != nil {
 			return feedAddedMsg{err: err}
 		}
-		
+
 		if len(articles) > 0 && articles[0].Title != "" {
 			newFeed.Title = extractFeedTitle(articles)
 		}
-		
+
 		a.fetcher.UpdateFeedMetadata(newFeed, resp)
-		
+
 		if err := retryOperation(func() error { return a.store.SaveFeed(newFeed) }); err != nil {
 			return feedAddedMsg{err: err}
 		}
-		
+
 		if err := retryOperation(func() error { return a.store.SaveArticles(articles) }); err != nil {
 			return feedAddedMsg{err: err}
 		}
-		
+
 		return feedAddedMsg{err: nil}
 	}
 }
@@ -150,30 +134,30 @@ func (a *App) refreshFeeds() tea.Cmd {
 		if err != nil {
 			return errorMsg{err: err}
 		}
-		
+
 		for _, feed := range feeds {
 			resp, updated, err := a.fetcher.Fetch(feed)
 			if err != nil || !updated || resp == nil {
 				continue
 			}
-			
+
 			defer resp.Body.Close()
-			
+
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
 				continue
 			}
-			
+
 			articles, err := a.parser.Parse(strings.NewReader(string(body)), feed.ID)
 			if err != nil {
 				continue
 			}
-			
+
 			a.fetcher.UpdateFeedMetadata(feed, resp)
 			retryOperation(func() error { return a.store.SaveFeed(feed) })
 			retryOperation(func() error { return a.store.SaveArticles(articles) })
 		}
-		
+
 		return a.loadFeeds()()
 	}
 }
@@ -185,6 +169,21 @@ func (a *App) toggleRead(article *storage.Article) tea.Cmd {
 			return errorMsg{err: err}
 		}
 		return a.loadArticles(article.FeedID)()
+	}
+}
+
+func (a *App) markArticleRead(article *storage.Article) tea.Cmd {
+	return func() tea.Msg {
+		if !article.Read {
+			err := retryOperation(func() error { return a.store.MarkArticleRead(article.ID, true) })
+			if err != nil {
+				return errorMsg{err: err}
+			}
+			// Mark local copy as read too
+			article.Read = true
+		}
+		// Return nil message to not trigger any view updates
+		return nil
 	}
 }
 
@@ -204,7 +203,7 @@ func (a *App) performSearchWithContext(query string, context string) tea.Cmd {
 		// Use the new intelligent search engine
 		var searchResults []*search.SearchResult
 		var err error
-		
+
 		if context == "article" && a.currentArticle != nil {
 			// Search within current article
 			searchResults, err = a.searchEngine.SearchInArticle(a.currentArticle, query)
@@ -212,11 +211,11 @@ func (a *App) performSearchWithContext(query string, context string) tea.Cmd {
 			// Global search with limit
 			searchResults, err = a.searchEngine.Search(query, 20)
 		}
-		
+
 		if err != nil {
 			return errorMsg{err: err}
 		}
-		
+
 		// Convert search engine results to UI results
 		var results []searchResultItem
 		for _, sr := range searchResults {
@@ -226,7 +225,7 @@ func (a *App) performSearchWithContext(query string, context string) tea.Cmd {
 				isArticle: sr.IsArticle,
 			})
 		}
-		
+
 		return searchResultsMsg{results: results}
 	}
 }
@@ -235,7 +234,7 @@ func (a *App) performSearchWithContext(query string, context string) tea.Cmd {
 func retryOperation(operation func() error) error {
 	maxRetries := 3
 	baseDelay := 100 * time.Millisecond
-	
+
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
 		if err := operation(); err != nil {

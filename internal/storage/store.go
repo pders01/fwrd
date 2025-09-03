@@ -105,7 +105,7 @@ func (s *Store) GetArticles(feedID string, limit int) ([]*Article, error) {
 	err := s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(articlesBucket)
 		c := b.Cursor()
-		
+
 		count := 0
 		for k, v := c.Last(); k != nil && count < limit; k, v = c.Prev() {
 			var article Article
@@ -129,19 +129,19 @@ func (s *Store) MarkArticleRead(id string, read bool) error {
 		if data == nil {
 			return fmt.Errorf("article not found")
 		}
-		
+
 		var article Article
 		if err := json.Unmarshal(data, &article); err != nil {
 			return err
 		}
-		
+
 		article.Read = read
-		
+
 		data, err := json.Marshal(article)
 		if err != nil {
 			return err
 		}
-		
+
 		return b.Put([]byte(id), data)
 	})
 }
@@ -152,7 +152,7 @@ func (s *Store) DeleteFeed(id string) error {
 		if err := feedBucket.Delete([]byte(id)); err != nil {
 			return err
 		}
-		
+
 		articleBucket := tx.Bucket(articlesBucket)
 		c := articleBucket.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
@@ -166,7 +166,7 @@ func (s *Store) DeleteFeed(id string) error {
 				}
 			}
 		}
-		
+
 		return nil
 	})
 }

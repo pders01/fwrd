@@ -65,7 +65,7 @@ func showBanner() {
 		BorderForeground(lipgloss.Color("#95E1D3")).
 		Padding(1, 2)
 
-	logo := `  ___                     _ 
+	logo := `  ___                     _
  / _|_      ___ __ __| |
 | |_\ \ /\ / / '__/ _' |
 |  _|\ V  V /| | | (_| |

@@ -42,7 +42,7 @@ func startCaddy() error {
 	caddyfile := filepath.Join("..", "fixtures", "Caddyfile")
 	caddyCmd = exec.Command(caddyPath, "run", "--config", caddyfile)
 	caddyCmd.Dir = filepath.Join("..", "fixtures")
-	
+
 	if err := caddyCmd.Start(); err != nil {
 		return fmt.Errorf("failed to start caddy: %w", err)
 	}
@@ -170,7 +170,7 @@ func TestIntegration_RateLimiting(t *testing.T) {
 	// Test rate limited endpoint
 	feedURL := "http://localhost:8080/rate-limited.rss"
 	_, err := manager.AddFeed(feedURL)
-	
+
 	if err == nil {
 		t.Error("Expected error for rate limited feed, got nil")
 	}

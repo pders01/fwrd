@@ -26,7 +26,7 @@ type Launcher struct {
 
 func NewLauncher() *Launcher {
 	l := &Launcher{}
-	
+
 	switch runtime.GOOS {
 	case "darwin":
 		l.videoPlayer = findCommand("iina", "mpv", "vlc")
@@ -44,13 +44,13 @@ func NewLauncher() *Launcher {
 		l.audioPlayer = "open"
 		l.pdfViewer = "open"
 	}
-	
+
 	return l
 }
 
 func (l *Launcher) Open(url string) error {
 	mediaType := detectMediaType(url)
-	
+
 	var cmd *exec.Cmd
 	switch mediaType {
 	case MediaTypeVideo:
@@ -76,43 +76,54 @@ func (l *Launcher) Open(url string) error {
 	default:
 		cmd = exec.Command(getDefaultOpener(), url)
 	}
-	
-	return cmd.Start()
+
+	// For GUI applications like iina, we want to start them detached
+	// but also check if the command can at least be executed
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start %s: %w", cmd.Args[0], err)
+	}
+
+	// Don't wait for GUI applications - let them run independently
+	go func() {
+		cmd.Wait() // Clean up the process when it exits
+	}()
+
+	return nil
 }
 
 func detectMediaType(url string) MediaType {
 	lower := strings.ToLower(url)
-	
+
 	videoExts := []string{".mp4", ".webm", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v"}
 	for _, ext := range videoExts {
 		if strings.Contains(lower, ext) {
 			return MediaTypeVideo
 		}
 	}
-	
+
 	imageExts := []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
 	for _, ext := range imageExts {
 		if strings.Contains(lower, ext) {
 			return MediaTypeImage
 		}
 	}
-	
+
 	audioExts := []string{".mp3", ".ogg", ".wav", ".flac", ".m4a", ".aac"}
 	for _, ext := range audioExts {
 		if strings.Contains(lower, ext) {
 			return MediaTypeAudio
 		}
 	}
-	
+
 	if strings.Contains(lower, ".pdf") {
 		return MediaTypePDF
 	}
-	
+
 	if strings.Contains(lower, "youtube.com") || strings.Contains(lower, "youtu.be") ||
-	   strings.Contains(lower, "vimeo.com") || strings.Contains(lower, "twitch.tv") {
+		strings.Contains(lower, "vimeo.com") || strings.Contains(lower, "twitch.tv") {
 		return MediaTypeVideo
 	}
-	
+
 	return MediaTypeUnknown
 }
 

@@ -157,23 +157,23 @@ func TestFetcher_GetRetryAfter(t *testing.T) {
 	fetcher := NewFetcher()
 
 	tests := []struct {
-		name          string
-		retryAfter    string
+		name             string
+		retryAfter       string
 		expectedDuration time.Duration
 	}{
 		{
-			name:          "valid retry-after in seconds",
-			retryAfter:    "120",
+			name:             "valid retry-after in seconds",
+			retryAfter:       "120",
 			expectedDuration: 120 * time.Second,
 		},
 		{
-			name:          "invalid retry-after",
-			retryAfter:    "invalid",
+			name:             "invalid retry-after",
+			retryAfter:       "invalid",
 			expectedDuration: 15 * time.Minute,
 		},
 		{
-			name:          "no retry-after header",
-			retryAfter:    "",
+			name:             "no retry-after header",
+			retryAfter:       "",
 			expectedDuration: 15 * time.Minute,
 		},
 	}

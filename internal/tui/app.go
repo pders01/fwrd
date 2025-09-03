@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/media"
@@ -26,31 +27,34 @@ func min(a, b int) int {
 }
 
 type App struct {
-	store        *storage.Store
-	fetcher      *feed.Fetcher
-	parser       *feed.Parser
-	launcher     *media.Launcher
-	searchEngine *search.Engine
-	keyHandler   *KeyHandler
-	feedList     list.Model
-	articleList  list.Model
-	searchList   list.Model
-	searchInput  textinput.Model
-	viewport     viewport.Model
-	textInput    textinput.Model
-	help         help.Model
-	view         View
-	previousView View
-	cameFromSearch bool // Track if current article was selected from search
-	feeds        []*storage.Feed
-	articles     []*storage.Article
-	currentFeed  *storage.Feed
-	currentArticle *storage.Article
-	feedToDelete *storage.Feed
-	searchResults []searchResultItem
-	width        int
-	height       int
-	err          error
+	store           *storage.Store
+	fetcher         *feed.Fetcher
+	parser          *feed.Parser
+	launcher        *media.Launcher
+	searchEngine    *search.Engine
+	keyHandler      *KeyHandler
+	feedList        list.Model
+	articleList     list.Model
+	searchList      list.Model
+	searchInput     textinput.Model
+	viewport        viewport.Model
+	textInput       textinput.Model
+	help            help.Model
+	view            View
+	previousView    View
+	cameFromSearch  bool // Track if current article was selected from search
+	feeds           []*storage.Feed
+	articles        []*storage.Article
+	currentFeed     *storage.Feed
+	currentArticle  *storage.Article
+	feedToDelete    *storage.Feed
+	searchResults   []searchResultItem
+	width           int
+	height          int
+	err             error
+	glamourRenderer *glamour.TermRenderer
+	rendererWidth   int  // Track the width used for the renderer
+	loadingArticle  bool // Track if we're loading an article
 }
 
 func NewApp(store *storage.Store) *App {
@@ -58,52 +62,94 @@ func NewApp(store *storage.Store) *App {
 	feedList.Title = "› feeds"
 	feedList.SetShowStatusBar(false)
 	feedList.SetFilteringEnabled(true)
-	feedList.SetShowHelp(true)  // Let Charm show native help
-	
+	feedList.SetShowHelp(true) // Let Charm show native help
+
 	articleList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	articleList.Title = "› articles"
 	articleList.SetShowStatusBar(false)
 	articleList.SetFilteringEnabled(true)
-	articleList.SetShowHelp(true)  // Let Charm show native help
-	
+	articleList.SetShowHelp(true) // Let Charm show native help
+
 	searchList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	searchList.Title = "› search results"
 	searchList.SetShowStatusBar(false)
-	searchList.SetShowHelp(false)  // No native filtering for search results
+	searchList.SetShowHelp(false) // No native filtering for search results
 	searchList.SetFilteringEnabled(false)
-	
+
 	vp := viewport.New(0, 0)
-	
+
 	ti := textinput.New()
 	ti.Placeholder = "Enter feed URL..."
 	ti.Focus()
-	
+
 	si := textinput.New()
 	si.Placeholder = "Search feeds and articles..."
-	
+
 	app := &App{
-		store:        store,
-		fetcher:      feed.NewFetcher(),
-		parser:       feed.NewParser(),
-		launcher:     media.NewLauncher(),
-		searchEngine: search.NewEngine(store),
-		feedList:    feedList,
-		articleList: articleList,
-		searchList:  searchList,
-		searchInput: si,
-		viewport:      vp,
-		textInput:     ti,
-		help:          help.New(),
+		store:          store,
+		fetcher:        feed.NewFetcher(),
+		parser:         feed.NewParser(),
+		launcher:       media.NewLauncher(),
+		searchEngine:   search.NewEngine(store),
+		feedList:       feedList,
+		articleList:    articleList,
+		searchList:     searchList,
+		searchInput:    si,
+		viewport:       vp,
+		textInput:      ti,
+		help:           help.New(),
 		view:           ViewFeeds,
-		previousView:   ViewFeeds,  // Initialize previous view
-		cameFromSearch: false,      // Initialize navigation flag
+		previousView:   ViewFeeds,            // Initialize previous view
+		cameFromSearch: false,                // Initialize navigation flag
 		searchResults:  []searchResultItem{}, // Initialize empty search results
 	}
-	
+
 	// Initialize key handler after app is created
 	app.keyHandler = NewKeyHandler(app)
-	
+
 	return app
+}
+
+// getRenderer returns the glamour renderer, creating or updating it if needed
+func (a *App) getRenderer() (*glamour.TermRenderer, error) {
+	// Calculate desired width
+	wordWrapWidth := (a.width * 9) / 10
+	if wordWrapWidth > 120 {
+		wordWrapWidth = 120 // maximum for readability
+	}
+	if wordWrapWidth < 40 {
+		wordWrapWidth = 40 // minimum for readability
+	}
+	// For very narrow screens, use almost full width
+	if a.width < 50 {
+		wordWrapWidth = a.width - 4
+		if wordWrapWidth < 20 {
+			wordWrapWidth = 20
+		}
+	}
+
+	// Create new renderer if we don't have one or if width changed significantly
+	if a.glamourRenderer == nil || abs(a.rendererWidth-wordWrapWidth) > 10 {
+		r, err := glamour.NewTermRenderer(
+			glamour.WithAutoStyle(),
+			glamour.WithWordWrap(wordWrapWidth),
+		)
+		if err != nil {
+			return nil, err
+		}
+		a.glamourRenderer = r
+		a.rendererWidth = wordWrapWidth
+	}
+
+	return a.glamourRenderer, nil
+}
+
+// Helper function for absolute value
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 func (a *App) Init() tea.Cmd {
@@ -122,10 +168,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.height = msg.Height
 		a.feedList.SetSize(msg.Width, msg.Height-3)
 		a.articleList.SetSize(msg.Width, msg.Height-3)
-		a.searchList.SetSize(msg.Width, msg.Height-6) // Extra space for search input
+		// Search view layout:
+		// - Header: 1 line
+		// - Blank: 1 line
+		// - Search input: 3 lines (with border)
+		// - Help text: 1 line
+		// - Blank: 1 line
+		// - Status bar: 3 lines
+		// Total overhead: 10 lines
+		searchListHeight := msg.Height - 10
+		if searchListHeight < 5 {
+			searchListHeight = 5 // Minimum height
+		}
+		a.searchList.SetSize(msg.Width, searchListHeight)
 		a.viewport.Width = msg.Width
 		a.viewport.Height = msg.Height - 3
-		
+
 		// Make text inputs responsive
 		inputWidth := msg.Width - 4 // Leave some padding
 		if inputWidth < 20 {
@@ -137,7 +195,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// Delegate all key handling to the key handler
 		return a.keyHandler.HandleKey(msg)
-
 
 	case feedsLoadedMsg:
 		a.feeds = msg.feeds
@@ -163,6 +220,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.view == ViewReader {
 			a.viewport.SetContent(msg.content)
 			a.viewport.GotoTop()
+			a.loadingArticle = false // Article has finished loading
 		}
 
 	case feedAddedMsg:
@@ -225,12 +283,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		newSearchInput, cmd := a.searchInput.Update(msg)
 		a.searchInput = newSearchInput
 		cmds = append(cmds, cmd)
-		
+
 		// Update search list
 		newSearchList, listCmd := a.searchList.Update(msg)
 		a.searchList = newSearchList
 		cmds = append(cmds, listCmd)
-		
+
 		// Perform search when input changes
 		searchQuery := a.searchInput.Value()
 		if searchQuery != "" && len(searchQuery) > 1 {
@@ -244,17 +302,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (a *App) updateSearchInput(msg tea.Msg) tea.Cmd {
 	var cmds []tea.Cmd
-	
+
 	// Update search input
 	newSearchInput, cmd := a.searchInput.Update(msg)
 	a.searchInput = newSearchInput
 	cmds = append(cmds, cmd)
-	
+
 	// Update search list
 	newSearchList, listCmd := a.searchList.Update(msg)
 	a.searchList = newSearchList
 	cmds = append(cmds, listCmd)
-	
+
 	// Perform search when input changes (only if still in search view)
 	searchQuery := a.searchInput.Value()
 	if searchQuery != "" && len(searchQuery) > 1 && a.view == ViewSearch {
@@ -267,13 +325,13 @@ func (a *App) updateSearchInput(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, searchCmd)
 	}
-	
+
 	return tea.Batch(cmds...)
 }
 
 func (a *App) View() string {
 	var content string
-	
+
 	switch a.view {
 	case ViewFeeds:
 		if len(a.feeds) == 0 {
@@ -288,7 +346,16 @@ func (a *App) View() string {
 	case ViewArticles:
 		content = a.articleList.View()
 	case ViewReader:
-		content = a.viewport.View()
+		// Check if we're still waiting for content to be rendered
+		if a.loadingArticle {
+			// Show loading state while article is rendering
+			content = lipgloss.NewStyle().
+				Padding(2, 4).
+				Foreground(MutedColor).
+				Render("Loading article...")
+		} else {
+			content = a.viewport.View()
+		}
 	case ViewAddFeed:
 		content = lipgloss.NewStyle().
 			Width(a.width).
@@ -312,22 +379,22 @@ func (a *App) View() string {
 				feedName = a.feedToDelete.URL
 			}
 		}
-		
+
 		// Make modal responsive to viewport size
 		// Responsive modal width - use 80% of screen width, with min 20 and max based on content
-		modalWidth := (a.width * 4) / 5  // 80% of width
+		modalWidth := (a.width * 4) / 5 // 80% of width
 		if modalWidth < 20 {
-			modalWidth = a.width - 4  // Leave minimal margins if very narrow
+			modalWidth = a.width - 4 // Leave minimal margins if very narrow
 			if modalWidth < 15 {
-				modalWidth = a.width  // Use full width on tiny screens
+				modalWidth = a.width // Use full width on tiny screens
 			}
 		}
-		
+
 		// Truncate feed name if too long for small screens
 		if len(feedName) > modalWidth-4 {
 			feedName = feedName[:modalWidth-7] + "..."
 		}
-		
+
 		content = lipgloss.NewStyle().
 			Width(a.width).
 			Height(a.height).
@@ -370,14 +437,20 @@ func (a *App) View() string {
 			searchInputWidth = a.width - 4
 		}
 		a.searchInput.Width = searchInputWidth
-		
+
+		// Visual indicator for which element has focus
+		inputBorderColor := MutedColor
+		if a.searchInput.Focused() {
+			inputBorderColor = AccentColor
+		}
+
 		searchInput := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(AccentColor).
+			BorderForeground(inputBorderColor).
 			Padding(0, 1).
 			Width(searchInputWidth + 4). // Add border and padding width
 			Render(a.searchInput.View())
-		
+
 		// Show context-aware search header
 		searchHeader := "› search"
 		if a.previousView == ViewReader && a.currentArticle != nil {
@@ -386,7 +459,17 @@ func (a *App) View() string {
 				searchHeader = "› search in article: " + a.currentArticle.Title[:a.width-25] + "…"
 			}
 		}
-		
+
+		// Show help text based on focus state
+		helpText := ""
+		if a.searchInput.Focused() {
+			helpText = "Type to search • Tab/↓: results • Esc: back"
+		} else if len(a.searchList.Items()) > 0 {
+			helpText = "↑↓: navigate • Enter: select • Tab/↑: search box • Esc: back"
+		} else {
+			helpText = "No results found • Tab/↑: search box • Esc: back"
+		}
+
 		searchContent := lipgloss.JoinVertical(
 			lipgloss.Top,
 			lipgloss.NewStyle().
@@ -395,11 +478,19 @@ func (a *App) View() string {
 				Render(searchHeader),
 			"",
 			searchInput,
+			lipgloss.NewStyle().
+				Foreground(MutedColor).
+				Render(helpText),
 			"",
 			a.searchList.View(),
 		)
-		
-		content = searchContent
+
+		// Ensure content fits within viewport
+		content = lipgloss.NewStyle().
+			Width(a.width).
+			Height(a.height - 3). // Account for status bar
+			MaxHeight(a.height - 3).
+			Render(searchContent)
 	}
 
 	// Add a minimal custom status bar for visual separation
@@ -413,36 +504,36 @@ func (a *App) View() string {
 		separator := lipgloss.NewStyle().
 			Foreground(MutedColor).
 			Render("─" + strings.Repeat("─", separatorWidth))
-		
+
 		return lipgloss.JoinVertical(lipgloss.Top, content, separator, customStatus)
 	}
-	
+
 	return content
 }
 
 func (a *App) getCustomStatusBar() string {
 	// Use key handler for help text - only show our custom commands
 	commands := a.keyHandler.GetHelpForCurrentView()
-	
+
 	// Don't show status bar if no custom commands (let Charm handle it)
 	if len(commands) == 0 {
 		return ""
 	}
-	
+
 	// Handle errors
 	if a.err != nil {
 		errorMsg := lipgloss.NewStyle().
 			Foreground(ErrorColor).
 			Bold(true).
 			Render(fmt.Sprintf("✗ %v", a.err))
-		
+
 		return lipgloss.NewStyle().
 			Width(a.width).
 			Padding(0, 1).
 			Foreground(MutedColor).
 			Render(errorMsg)
 	}
-	
+
 	// Create a minimal status bar with just custom commands
 	if len(commands) > 0 {
 		commandText := strings.Join(commands, " • ")
@@ -452,7 +543,7 @@ func (a *App) getCustomStatusBar() string {
 			Foreground(MutedColor).
 			Render(commandText)
 	}
-	
+
 	return ""
 }
 
@@ -485,12 +576,12 @@ func (i articleItem) Description() string {
 			desc = desc[:maxDescLength] + "…"
 		}
 	}
-	
+
 	timeStr := ""
 	if !i.article.Published.IsZero() {
 		timeStr = TimeStyle.Render(" • " + i.article.Published.Format("Jan 2, 15:04"))
 	}
-	
+
 	return lipgloss.NewStyle().
 		Foreground(MutedColor).
 		Render(desc) + timeStr
@@ -499,8 +590,8 @@ func (i articleItem) Description() string {
 func (i articleItem) FilterValue() string { return i.article.Title }
 
 type searchResultItem struct {
-	feed    *storage.Feed
-	article *storage.Article
+	feed      *storage.Feed
+	article   *storage.Article
 	isArticle bool
 }
 
@@ -522,13 +613,13 @@ func (i searchResultItem) Title() string {
 func (i searchResultItem) Description() string {
 	if i.isArticle {
 		desc := i.article.Description
-		// Make search result description responsive 
+		// Make search result description responsive
 		// Use a reasonable description length for search results
 		maxDescLength := 50
 		if len(desc) > maxDescLength {
 			desc = desc[:maxDescLength] + "…"
 		}
-		
+
 		// Show which feed this article belongs to
 		feedName := "Unknown Feed"
 		if i.feed != nil {
@@ -537,12 +628,12 @@ func (i searchResultItem) Description() string {
 				feedName = i.feed.URL
 			}
 		}
-		
+
 		timeStr := ""
 		if !i.article.Published.IsZero() {
 			timeStr = i.article.Published.Format("Jan 2")
 		}
-		
+
 		return lipgloss.NewStyle().
 			Foreground(MutedColor).
 			Render(desc + " • from " + feedName + " • " + timeStr)

@@ -20,9 +20,9 @@ type SearchResult struct {
 
 // Match represents where text was found
 type Match struct {
-	Field   string // "title", "description", "content"
-	Text    string // matched text snippet
-	Weight  float64
+	Field  string // "title", "description", "content"
+	Text   string // matched text snippet
+	Weight float64
 }
 
 // Engine provides intelligent search without heavy indexing
@@ -219,19 +219,19 @@ func (e *Engine) scoreField(text string, terms []string, weight float64) float64
 
 	lower := strings.ToLower(text)
 	words := tokenize(text)
-	
+
 	var score float64
 	matchedTerms := 0
 
 	for _, term := range terms {
 		termLower := strings.ToLower(term)
-		
+
 		// Exact phrase match (highest score)
 		if strings.Contains(lower, termLower) {
 			score += 2.0
 			matchedTerms++
 		}
-		
+
 		// Word boundary matches (medium score)
 		for _, word := range words {
 			wordLower := strings.ToLower(word)
@@ -283,13 +283,13 @@ func (e *Engine) findBestSnippet(text string, terms []string, maxLength int) str
 	for i := 0; i <= len(words)-windowSize; i++ {
 		windowText := strings.Join(words[i:i+windowSize], " ")
 		score := 0.0
-		
+
 		for _, term := range terms {
 			if strings.Contains(strings.ToLower(windowText), strings.ToLower(term)) {
 				score += 1.0
 			}
 		}
-		
+
 		if score > bestScore {
 			bestScore = score
 			bestStart = i
@@ -304,7 +304,7 @@ func (e *Engine) findBestSnippet(text string, terms []string, maxLength int) str
 func tokenize(text string) []string {
 	var terms []string
 	current := strings.Builder{}
-	
+
 	for _, r := range text {
 		if unicode.IsLetter(r) || unicode.IsNumber(r) {
 			current.WriteRune(unicode.ToLower(r))
@@ -315,11 +315,11 @@ func tokenize(text string) []string {
 			current.Reset()
 		}
 	}
-	
+
 	if current.Len() > 1 {
 		terms = append(terms, current.String())
 	}
-	
+
 	return terms
 }
 
