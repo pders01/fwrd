@@ -13,6 +13,7 @@ const (
 	ViewAddFeed
 	ViewDeleteConfirm
 	ViewSearch
+	ViewMedia
 )
 
 type Model struct {

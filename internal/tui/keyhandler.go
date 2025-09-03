@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/pders01/fwrd/internal/config"
+	"github.com/pders01/fwrd/internal/media"
 )
 
 type KeyHandler struct {
@@ -165,6 +166,8 @@ func (kh *KeyHandler) handleCustomKeys(key string) (tea.Model, tea.Cmd, bool) {
 		return kh.handleReaderCustomKeys(key)
 	case ViewDeleteConfirm:
 		return kh.handleDeleteConfirmKeys(key)
+	case ViewMedia:
+		return kh.handleMediaCustomKeys(key)
 	default:
 		return kh.app, nil, false
 	}
@@ -215,8 +218,15 @@ func (kh *KeyHandler) handleReaderCustomKeys(key string) (tea.Model, tea.Cmd, bo
 	switch key {
 	case kh.modifierKey + "o":
 		if kh.app.currentArticle != nil {
+			// If there are multiple media URLs, show media list
+			if len(kh.app.currentArticle.MediaURLs) > 1 {
+				model, cmd := kh.openMediaList()
+				return model, cmd, true
+			}
+
+			// If there's only one media URL or just the article URL, open it directly
 			var url string
-			if len(kh.app.currentArticle.MediaURLs) > 0 {
+			if len(kh.app.currentArticle.MediaURLs) == 1 {
 				url = kh.app.currentArticle.MediaURLs[0]
 			} else if kh.app.currentArticle.URL != "" {
 				url = kh.app.currentArticle.URL
@@ -301,12 +311,41 @@ func (kh *KeyHandler) delegateToCharm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		kh.app.viewport, cmd = kh.app.viewport.Update(msg)
 		return kh.app, cmd
 
+	case ViewMedia:
+		// Let the media list handle navigation
+		kh.app.mediaList, cmd = kh.app.mediaList.Update(msg)
+		// Handle enter key for media selection
+		if msg.String() == "enter" {
+			if i, ok := kh.app.mediaList.SelectedItem().(mediaItem); ok {
+				return kh.app, kh.openURL(i.url)
+			}
+		}
+		return kh.app, cmd
+
 	default:
 		return kh.app, nil
 	}
 }
 
 // handleDeleteConfirmKeys handles keys in delete confirmation view
+func (kh *KeyHandler) handleMediaCustomKeys(key string) (tea.Model, tea.Cmd, bool) {
+	switch key {
+	case "enter":
+		// Open the selected media item
+		if item, ok := kh.app.mediaList.SelectedItem().(mediaItem); ok {
+			return kh.app, kh.openURL(item.url), true
+		}
+		return kh.app, nil, true
+	case kh.modifierKey + "o":
+		// Also handle ctrl+o to open
+		if item, ok := kh.app.mediaList.SelectedItem().(mediaItem); ok {
+			return kh.app, kh.openURL(item.url), true
+		}
+		return kh.app, nil, true
+	}
+	return kh.app, nil, false
+}
+
 func (kh *KeyHandler) handleDeleteConfirmKeys(key string) (tea.Model, tea.Cmd, bool) {
 	switch key {
 	case "enter":
@@ -358,6 +397,12 @@ func (kh *KeyHandler) navigateBack() (tea.Model, tea.Cmd) {
 		kh.app.searchInput.Reset()
 		kh.app.searchResults = []searchResultItem{}
 		kh.app.searchList.SetItems([]list.Item{})
+		return kh.app, nil
+
+	case ViewMedia:
+		kh.app.view = kh.app.previousView
+		kh.app.mediaURLs = []string{}
+		kh.app.mediaList.SetItems([]list.Item{})
 		return kh.app, nil
 
 	case ViewArticles:
@@ -456,6 +501,48 @@ func (kh *KeyHandler) sanitizeSearchInput(input string) string {
 }
 
 // openURL opens a URL using the launcher and handles errors appropriately
+func (kh *KeyHandler) openMediaList() (tea.Model, tea.Cmd) {
+	if kh.app.currentArticle == nil || len(kh.app.currentArticle.MediaURLs) == 0 {
+		return kh.app, nil
+	}
+
+	// Prepare media items for the list
+	items := make([]list.Item, len(kh.app.currentArticle.MediaURLs))
+	detector, _ := media.NewMediaTypeDetector()
+
+	for i, url := range kh.app.currentArticle.MediaURLs {
+		mediaType := media.MediaTypeUnknown
+		if detector != nil {
+			mediaType = detector.DetectType(url)
+		}
+		items[i] = mediaItem{
+			url:       url,
+			mediaType: mediaType,
+			index:     i,
+			total:     len(kh.app.currentArticle.MediaURLs),
+		}
+	}
+
+	kh.app.mediaList.SetItems(items)
+	kh.app.mediaURLs = kh.app.currentArticle.MediaURLs
+	kh.app.previousView = kh.app.view
+	kh.app.view = ViewMedia
+
+	// Set title with article name
+	title := "› media"
+	if kh.app.currentArticle != nil && kh.app.currentArticle.Title != "" {
+		// Truncate title if too long
+		articleTitle := kh.app.currentArticle.Title
+		if len(articleTitle) > 50 {
+			articleTitle = articleTitle[:47] + "..."
+		}
+		title = fmt.Sprintf("› media from: %s", articleTitle)
+	}
+	kh.app.mediaList.Title = title
+
+	return kh.app, nil
+}
+
 func (kh *KeyHandler) openURL(url string) tea.Cmd {
 	return func() tea.Msg {
 		if err := kh.app.launcher.Open(url); err != nil {
@@ -483,6 +570,9 @@ func (kh *KeyHandler) GetHelpForCurrentView() []string {
 
 	case ViewSearch:
 		return []string{kh.modifierKey + "s: search"}
+
+	case ViewMedia:
+		return []string{"enter: open", kh.modifierKey + "o: open", "esc: back"}
 
 	case ViewAddFeed, ViewDeleteConfirm:
 		return []string{} // These views have clear UI prompts

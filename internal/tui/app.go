@@ -36,6 +36,7 @@ type App struct {
 	feedList        list.Model
 	articleList     list.Model
 	searchList      list.Model
+	mediaList       list.Model
 	searchInput     textinput.Model
 	viewport        viewport.Model
 	textInput       textinput.Model
@@ -49,6 +50,7 @@ type App struct {
 	currentArticle  *storage.Article
 	feedToDelete    *storage.Feed
 	searchResults   []searchResultItem
+	mediaURLs       []string // Current media URLs being displayed
 	width           int
 	height          int
 	err             error
@@ -76,6 +78,12 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 	searchList.SetShowHelp(false) // No native filtering for search results
 	searchList.SetFilteringEnabled(false)
 
+	mediaList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	mediaList.Title = "› media"
+	mediaList.SetShowStatusBar(false)
+	mediaList.SetFilteringEnabled(false)
+	mediaList.SetShowHelp(true)
+
 	vp := viewport.New(0, 0)
 
 	ti := textinput.New()
@@ -95,6 +103,7 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 		feedList:       feedList,
 		articleList:    articleList,
 		searchList:     searchList,
+		mediaList:      mediaList,
 		searchInput:    si,
 		viewport:       vp,
 		textInput:      ti,
@@ -169,6 +178,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			searchListHeight = 5 // Minimum height
 		}
 		a.searchList.SetSize(msg.Width, searchListHeight)
+		a.mediaList.SetSize(msg.Width, msg.Height-3)
 		a.viewport.Width = msg.Width
 		a.viewport.Height = msg.Height - 3
 
@@ -272,6 +282,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			searchCmd := a.performSearch(searchQuery)
 			cmds = append(cmds, searchCmd)
 		}
+	case ViewMedia:
+		newListModel, cmd := a.mediaList.Update(msg)
+		a.mediaList = newListModel
+		cmds = append(cmds, cmd)
 	}
 
 	return a, tea.Batch(cmds...)
@@ -457,6 +471,8 @@ func (a *App) View() string {
 			Height(a.height - 3).
 			MaxHeight(a.height - 3).
 			Render(searchContent)
+	case ViewMedia:
+		content = a.mediaList.View()
 	}
 
 	customStatus := a.getCustomStatusBar()
@@ -607,6 +623,41 @@ func (i searchResultItem) FilterValue() string {
 		return i.article.Title + " " + i.article.Description
 	}
 	return i.feed.Title + " " + i.feed.Description
+}
+
+type mediaItem struct {
+	url       string
+	mediaType media.MediaType
+	index     int
+	total     int
+}
+
+func (i mediaItem) Title() string {
+	typeStr := "Media"
+	switch i.mediaType {
+	case media.MediaTypeVideo:
+		typeStr = "🎬 Video"
+	case media.MediaTypeImage:
+		typeStr = "🖼️  Image"
+	case media.MediaTypeAudio:
+		typeStr = "🎵 Audio"
+	case media.MediaTypePDF:
+		typeStr = "📄 PDF"
+	}
+	return fmt.Sprintf("%s %d/%d", typeStr, i.index+1, i.total)
+}
+
+func (i mediaItem) Description() string {
+	// Show truncated URL
+	url := i.url
+	if len(url) > 80 {
+		url = url[:77] + "..."
+	}
+	return url
+}
+
+func (i mediaItem) FilterValue() string {
+	return i.url
 }
 
 type feedsLoadedMsg struct {
