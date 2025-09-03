@@ -2,7 +2,6 @@ package config
 
 import "time"
 
-// TestConfig returns a config suitable for testing
 func TestConfig() *Config {
 	return &Config{
 		Database: DatabaseConfig{

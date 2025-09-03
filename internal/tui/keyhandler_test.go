@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
+	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/storage"
 )
 
@@ -44,7 +45,8 @@ func createTestApp() *App {
 
 func TestSearchResultSelection_Article(t *testing.T) {
 	app := createTestApp()
-	keyHandler := NewKeyHandler(app)
+	cfg := config.TestConfig()
+	keyHandler := NewKeyHandler(app, cfg)
 
 	// Set up initial state - in search view
 	app.view = ViewSearch
@@ -92,7 +94,8 @@ func TestSearchResultSelection_Article(t *testing.T) {
 
 func TestSearchResultSelection_Feed(t *testing.T) {
 	app := createTestApp()
-	keyHandler := NewKeyHandler(app)
+	cfg := config.TestConfig()
+	keyHandler := NewKeyHandler(app, cfg)
 
 	// Set up initial state
 	app.view = ViewSearch
@@ -130,7 +133,8 @@ func TestSearchResultSelection_Feed(t *testing.T) {
 
 func TestNavigateBack_FromSearchResult(t *testing.T) {
 	app := createTestApp()
-	keyHandler := NewKeyHandler(app)
+	cfg := config.TestConfig()
+	keyHandler := NewKeyHandler(app, cfg)
 
 	// Simulate being in reader view after selecting a search result
 	app.view = ViewReader
@@ -156,7 +160,8 @@ func TestNavigateBack_FromSearchResult(t *testing.T) {
 
 func TestNavigateBack_DoubleEscape(t *testing.T) {
 	app := createTestApp()
-	keyHandler := NewKeyHandler(app)
+	cfg := config.TestConfig()
+	keyHandler := NewKeyHandler(app, cfg)
 
 	// Simulate the double escape scenario
 	// First: in reader from search result
@@ -217,7 +222,8 @@ func TestViewStateConsistency_AfterMessages(t *testing.T) {
 
 func TestNilValidation_SearchResults(t *testing.T) {
 	app := createTestApp()
-	keyHandler := NewKeyHandler(app)
+	cfg := config.TestConfig()
+	keyHandler := NewKeyHandler(app, cfg)
 
 	// Test nil article
 	nilArticleResult := searchResultItem{

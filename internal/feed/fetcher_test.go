@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/storage"
 )
 
@@ -101,7 +102,8 @@ func TestFetcher_Fetch(t *testing.T) {
 			defer server.Close()
 
 			tt.feed.URL = server.URL
-			fetcher := NewFetcher()
+			cfg := config.TestConfig()
+			fetcher := NewFetcher(cfg)
 
 			resp, updated, err := fetcher.Fetch(tt.feed)
 
@@ -122,7 +124,8 @@ func TestFetcher_Fetch(t *testing.T) {
 }
 
 func TestFetcher_UpdateFeedMetadata(t *testing.T) {
-	fetcher := NewFetcher()
+	cfg := config.TestConfig()
+	fetcher := NewFetcher(cfg)
 	feed := &storage.Feed{
 		ID:  "test",
 		URL: "http://example.com",
@@ -155,7 +158,8 @@ func TestFetcher_UpdateFeedMetadata(t *testing.T) {
 }
 
 func TestFetcher_GetRetryAfter(t *testing.T) {
-	fetcher := NewFetcher()
+	cfg := config.TestConfig()
+	fetcher := NewFetcher(cfg)
 
 	tests := []struct {
 		name             string
@@ -170,12 +174,12 @@ func TestFetcher_GetRetryAfter(t *testing.T) {
 		{
 			name:             "invalid retry-after",
 			retryAfter:       "invalid",
-			expectedDuration: 15 * time.Minute,
+			expectedDuration: 5 * time.Minute, // TestConfig sets DefaultRetryAfter to 5 minutes
 		},
 		{
 			name:             "no retry-after header",
 			retryAfter:       "",
-			expectedDuration: 15 * time.Minute,
+			expectedDuration: 5 * time.Minute, // TestConfig sets DefaultRetryAfter to 5 minutes
 		},
 	}
 

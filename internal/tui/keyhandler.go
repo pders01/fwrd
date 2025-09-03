@@ -10,38 +10,31 @@ import (
 	"github.com/pders01/fwrd/internal/config"
 )
 
-// KeyHandler handles key presses with context awareness
 type KeyHandler struct {
 	app         *App
 	config      *config.Config
 	modifierKey string
 }
 
-// NewKeyHandler creates a new key handler
 func NewKeyHandler(app *App, cfg *config.Config) *KeyHandler {
 	modifierKey := cfg.Keys.Modifier + "+"
 	return &KeyHandler{app: app, config: cfg, modifierKey: modifierKey}
 }
 
-// HandleKey processes key presses with proper context and precedence
 func (kh *KeyHandler) HandleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
-	// Handle text input modes first (highest precedence)
 	if kh.isInTextInputMode() {
 		return kh.handleTextInputMode(msg)
 	}
 
-	// Only handle our custom action keys - let Charm handle everything else
 	if model, cmd, handled := kh.handleCustomKeys(key); handled {
 		return model, cmd
 	}
 
-	// Let Charm handle all navigation, help, filtering, etc.
 	return kh.delegateToCharm(msg)
 }
 
-// isInTextInputMode checks if we're in a text input focused state
 func (kh *KeyHandler) isInTextInputMode() bool {
 	switch kh.app.view {
 	case ViewAddFeed:
@@ -53,7 +46,6 @@ func (kh *KeyHandler) isInTextInputMode() bool {
 	}
 }
 
-// handleTextInputMode handles keys when text input is focused
 func (kh *KeyHandler) handleTextInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
@@ -65,33 +57,31 @@ func (kh *KeyHandler) handleTextInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		return kh.handleTextInputEnter()
 	case "tab", "down":
-		// In search view, unfocus input to navigate results
+
 		if kh.app.view == ViewSearch {
 			if len(kh.app.searchList.Items()) > 0 {
 				kh.app.searchInput.Blur()
-				// Select first item when moving to results
+
 				kh.app.searchList.Select(0)
 			}
 			return kh.app, nil
 		}
-		// For other views, let text input handle it
+
 		return kh.delegateToTextInput(msg)
 	case "up", "shift+tab":
-		// In search view, this is handled by the list navigation
+
 		if kh.app.view == ViewSearch {
-			// Don't handle up key here when input is focused
-			// Let the default text input behavior work
+
 			return kh.delegateToTextInput(msg)
 		}
-		// For other views, let text input handle it
+
 		return kh.delegateToTextInput(msg)
 	default:
-		// Let the appropriate text input handle the key
+
 		return kh.delegateToTextInput(msg)
 	}
 }
 
-// handleTextInputEnter handles enter key in text input contexts
 func (kh *KeyHandler) handleTextInputEnter() (tea.Model, tea.Cmd) {
 	switch kh.app.view {
 	case ViewAddFeed:

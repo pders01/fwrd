@@ -10,31 +10,19 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Config holds all configuration for the application
 type Config struct {
-	// Database configuration
 	Database DatabaseConfig `mapstructure:"database"`
-
-	// Feed fetching configuration
-	Feed FeedConfig `mapstructure:"feed"`
-
-	// UI configuration
-	UI UIConfig `mapstructure:"ui"`
-
-	// Media players configuration
-	Media MediaConfig `mapstructure:"media"`
-
-	// Keybindings configuration
-	Keys KeyConfig `mapstructure:"keys"`
+	Feed     FeedConfig     `mapstructure:"feed"`
+	UI       UIConfig       `mapstructure:"ui"`
+	Media    MediaConfig    `mapstructure:"media"`
+	Keys     KeyConfig      `mapstructure:"keys"`
 }
 
-// DatabaseConfig holds database-related settings
 type DatabaseConfig struct {
 	Path    string        `mapstructure:"path"`
 	Timeout time.Duration `mapstructure:"timeout"`
 }
 
-// FeedConfig holds feed fetching settings
 type FeedConfig struct {
 	HTTPTimeout       time.Duration `mapstructure:"http_timeout"`
 	RefreshInterval   time.Duration `mapstructure:"refresh_interval"`
@@ -42,16 +30,11 @@ type FeedConfig struct {
 	UserAgent         string        `mapstructure:"user_agent"`
 }
 
-// UIConfig holds UI-related settings
 type UIConfig struct {
-	// Colors can be hex values or named colors
-	Colors UIColors `mapstructure:"colors"`
-
-	// Article display settings
+	Colors  UIColors      `mapstructure:"colors"`
 	Article ArticleConfig `mapstructure:"article"`
 }
 
-// UIColors holds color configuration
 type UIColors struct {
 	Primary    string `mapstructure:"primary"`
 	Secondary  string `mapstructure:"secondary"`
@@ -64,25 +47,19 @@ type UIColors struct {
 	Success    string `mapstructure:"success"`
 }
 
-// ArticleConfig holds article display settings
 type ArticleConfig struct {
 	MaxDescriptionLength int `mapstructure:"max_description_length"`
 	WordWrapMaxWidth     int `mapstructure:"word_wrap_max_width"`
 	WordWrapMinWidth     int `mapstructure:"word_wrap_min_width"`
 }
 
-// MediaConfig holds media player configuration
 type MediaConfig struct {
-	// Players for different platforms
-	Darwin  MediaPlayers `mapstructure:"darwin"`
-	Linux   MediaPlayers `mapstructure:"linux"`
-	Windows MediaPlayers `mapstructure:"windows"`
-
-	// Fallback opener for unrecognized types
-	DefaultOpener string `mapstructure:"default_opener"`
+	Darwin        MediaPlayers `mapstructure:"darwin"`
+	Linux         MediaPlayers `mapstructure:"linux"`
+	Windows       MediaPlayers `mapstructure:"windows"`
+	DefaultOpener string       `mapstructure:"default_opener"`
 }
 
-// MediaPlayers holds media player commands
 type MediaPlayers struct {
 	Video []string `mapstructure:"video"`
 	Image []string `mapstructure:"image"`
@@ -90,16 +67,11 @@ type MediaPlayers struct {
 	PDF   []string `mapstructure:"pdf"`
 }
 
-// KeyConfig holds keybinding configuration
 type KeyConfig struct {
-	// Modifier key for custom commands (ctrl, alt, cmd, super)
-	Modifier string `mapstructure:"modifier"`
-
-	// Custom keybindings
+	Modifier string      `mapstructure:"modifier"`
 	Bindings KeyBindings `mapstructure:"bindings"`
 }
 
-// KeyBindings holds specific key combinations
 type KeyBindings struct {
 	Quit       string `mapstructure:"quit"`
 	Search     string `mapstructure:"search"`
@@ -112,7 +84,6 @@ type KeyBindings struct {
 	Help       string `mapstructure:"help"`
 }
 
-// defaultConfig returns the default configuration
 func defaultConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
 	dbPath := filepath.Join(homeDir, ".fwrd.db")
@@ -197,11 +168,9 @@ func getDefaultOpener() string {
 	}
 }
 
-// Load loads configuration from file and environment
 func Load(configPath string) (*Config, error) {
 	v := viper.New()
 
-	// Set default configuration
 	cfg := defaultConfig()
 	v.SetDefault("database", cfg.Database)
 	v.SetDefault("feed", cfg.Feed)
@@ -209,11 +178,9 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("media", cfg.Media)
 	v.SetDefault("keys", cfg.Keys)
 
-	// Set config file
 	if configPath != "" {
 		v.SetConfigFile(configPath)
 	} else {
-		// Look for config in standard locations
 		homeDir, _ := os.UserHomeDir()
 		configDir := filepath.Join(homeDir, ".config", "fwrd")
 
@@ -223,19 +190,15 @@ func Load(configPath string) (*Config, error) {
 		v.AddConfigPath(".")
 	}
 
-	// Enable environment variables
 	v.SetEnvPrefix("FWRD")
 	v.AutomaticEnv()
 
-	// Read config file if it exists
 	if err := v.ReadInConfig(); err != nil {
-		// It's okay if config file doesn't exist
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			return nil, fmt.Errorf("reading config: %w", err)
 		}
 	}
 
-	// Unmarshal into config struct
 	var config Config
 	if err := v.Unmarshal(&config); err != nil {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
@@ -244,11 +207,10 @@ func Load(configPath string) (*Config, error) {
 	return &config, nil
 }
 
-// Save saves the current configuration to file
 func Save(config *Config, path string) error {
 	v := viper.New()
 
-	// Convert durations to strings for readable TOML
+	// Convert durations to strings for TOML readability
 	dbCfg := map[string]interface{}{
 		"path":    config.Database.Path,
 		"timeout": config.Database.Timeout.String(),
@@ -261,24 +223,20 @@ func Save(config *Config, path string) error {
 		"user_agent":          config.Feed.UserAgent,
 	}
 
-	// Set the configuration values
 	v.Set("database", dbCfg)
 	v.Set("feed", feedCfg)
 	v.Set("ui", config.UI)
 	v.Set("media", config.Media)
 	v.Set("keys", config.Keys)
 
-	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 
-	// Write config file
 	return v.WriteConfigAs(path)
 }
 
-// GenerateDefaultConfig generates a default config file
 func GenerateDefaultConfig(path string) error {
 	return Save(defaultConfig(), path)
 }

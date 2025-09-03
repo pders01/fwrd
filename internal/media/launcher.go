@@ -30,10 +30,9 @@ type Launcher struct {
 }
 
 func NewLauncher(cfg *config.Config) *Launcher {
-	// Create player registry
 	registry, err := NewPlayerRegistry()
 	if err != nil {
-		// If we can't load player definitions, continue with basic functionality
+		// Continue with basic functionality if player definitions can't be loaded
 		registry = &PlayerRegistry{players: make(map[string]PlayerDefinition)}
 	}
 
@@ -43,7 +42,6 @@ func NewLauncher(cfg *config.Config) *Launcher {
 		registry:      registry,
 	}
 
-	// Get platform-specific players from config
 	var players config.MediaPlayers
 	switch runtime.GOOS {
 	case "darwin":
@@ -53,11 +51,9 @@ func NewLauncher(cfg *config.Config) *Launcher {
 	case "windows":
 		players = cfg.Media.Windows
 	default:
-		// Use Darwin as fallback
 		players = cfg.Media.Darwin
 	}
 
-	// Find available commands from configured preferences
 	if len(players.Video) > 0 {
 		l.videoPlayer = findCommand(players.Video...)
 	}
@@ -71,7 +67,6 @@ func NewLauncher(cfg *config.Config) *Launcher {
 		l.pdfViewer = findCommand(players.PDF...)
 	}
 
-	// Fallback to default opener if no specific player found
 	if l.videoPlayer == "" {
 		l.videoPlayer = l.defaultOpener
 	}
@@ -91,7 +86,6 @@ func NewLauncher(cfg *config.Config) *Launcher {
 func (l *Launcher) Open(url string) error {
 	mediaType := detectMediaType(url)
 
-	// Determine which player to use
 	var playerName string
 	switch mediaType {
 	case MediaTypeVideo:
@@ -118,22 +112,18 @@ func (l *Launcher) Open(url string) error {
 		playerName = l.defaultOpener
 	}
 
-	// Use the registry to get the appropriate command
 	cmd, err := l.registry.GetCommand(playerName, mediaType, url)
 	if err != nil {
-		// Fallback to simple command if registry fails
 		cmd = exec.Command(playerName, url)
 	}
 
-	// For GUI applications like iina, we want to start them detached
-	// but also check if the command can at least be executed
+	// Start GUI applications detached
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start %s: %w", cmd.Args[0], err)
 	}
 
-	// Don't wait for GUI applications - let them run independently
 	go func() {
-		cmd.Wait() // Clean up the process when it exits
+		cmd.Wait()
 	}()
 
 	return nil
@@ -141,25 +131,20 @@ func (l *Launcher) Open(url string) error {
 
 func detectMediaType(url string) MediaType {
 	lower := strings.ToLower(url)
-
-	// Check if this is a URL or a local file path
 	isURL := strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
 
-	// Extract file extension properly (handle URLs with query params)
+	// Extract file extension, handling URLs with query params and anchors
 	var ext string
 	if idx := strings.LastIndex(lower, "."); idx != -1 {
 		ext = lower[idx:]
-		// Remove query parameters if present (e.g., .mp4?param=value)
 		if qIdx := strings.Index(ext, "?"); qIdx != -1 {
 			ext = ext[:qIdx]
 		}
-		// Remove anchors if present (e.g., .html#section)
 		if aIdx := strings.Index(ext, "#"); aIdx != -1 {
 			ext = ext[:aIdx]
 		}
 	}
 
-	// Check specific file extensions
 	switch ext {
 	case ".mp4", ".webm", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".mpg", ".mpeg", ".3gp":
 		return MediaTypeVideo
@@ -171,9 +156,8 @@ func detectMediaType(url string) MediaType {
 		return MediaTypePDF
 	}
 
-	// For URLs without a clear media extension, make intelligent guesses
 	if isURL {
-		// Check for video indicators - be specific about video platforms
+		// Video platforms
 		if strings.Contains(lower, "/video/") || strings.Contains(lower, "/watch") ||
 			strings.Contains(lower, "/embed/") || strings.Contains(lower, "/player/") ||
 			strings.Contains(lower, "youtube.") || strings.Contains(lower, "youtu.be") ||
@@ -182,7 +166,7 @@ func detectMediaType(url string) MediaType {
 			return MediaTypeVideo
 		}
 
-		// Check for podcast/audio indicators - very common in RSS
+		// Podcast/audio platforms (common in RSS)
 		if strings.Contains(lower, "/audio/") || strings.Contains(lower, "/podcast") ||
 			strings.Contains(lower, "/episode") || strings.Contains(lower, "/show/") ||
 			strings.Contains(lower, "soundcloud.") || strings.Contains(lower, "spotify.") ||
@@ -191,7 +175,7 @@ func detectMediaType(url string) MediaType {
 			return MediaTypeAudio
 		}
 
-		// Check for image indicators
+		// Image platforms
 		if strings.Contains(lower, "/image/") || strings.Contains(lower, "/img/") ||
 			strings.Contains(lower, "/photo/") || strings.Contains(lower, "/gallery/") ||
 			strings.Contains(lower, "imgur.") || strings.Contains(lower, "flickr.") ||
@@ -199,7 +183,6 @@ func detectMediaType(url string) MediaType {
 			return MediaTypeImage
 		}
 
-		// For unknown URLs, return Unknown and let the default opener handle it
 		// Most URLs in RSS feeds are articles/web pages, not media files
 		return MediaTypeUnknown
 	}

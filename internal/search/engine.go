@@ -9,7 +9,6 @@ import (
 	"github.com/pders01/fwrd/internal/storage"
 )
 
-// SearchResult represents a search match with relevance scoring
 type SearchResult struct {
 	Feed      *storage.Feed
 	Article   *storage.Article
@@ -18,24 +17,20 @@ type SearchResult struct {
 	Matches   []Match
 }
 
-// Match represents where text was found
 type Match struct {
 	Field  string // "title", "description", "content"
 	Text   string // matched text snippet
 	Weight float64
 }
 
-// Engine provides intelligent search without heavy indexing
 type Engine struct {
 	store *storage.Store
 }
 
-// NewEngine creates a new search engine
 func NewEngine(store *storage.Store) *Engine {
 	return &Engine{store: store}
 }
 
-// Search performs intelligent search across feeds and articles
 func (e *Engine) Search(query string, limit int) ([]*SearchResult, error) {
 	if len(strings.TrimSpace(query)) < 2 {
 		return []*SearchResult{}, nil
@@ -48,20 +43,17 @@ func (e *Engine) Search(query string, limit int) ([]*SearchResult, error) {
 
 	var results []*SearchResult
 
-	// Get all feeds
 	feeds, err := e.store.GetAllFeeds()
 	if err != nil {
 		return nil, err
 	}
 
-	// Search feeds
 	for _, feed := range feeds {
 		if result := e.searchFeed(feed, terms); result != nil {
 			results = append(results, result)
 		}
 
-		// Search articles in this feed
-		articles, err := e.store.GetArticles(feed.ID, 200) // Get more articles for search
+		articles, err := e.store.GetArticles(feed.ID, 200)
 		if err != nil {
 			continue
 		}
@@ -73,7 +65,6 @@ func (e *Engine) Search(query string, limit int) ([]*SearchResult, error) {
 		}
 	}
 
-	// Sort by relevance score (highest first)
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Score > results[j].Score
 	})
@@ -86,7 +77,6 @@ func (e *Engine) Search(query string, limit int) ([]*SearchResult, error) {
 	return results, nil
 }
 
-// SearchInArticle searches within a specific article's content
 func (e *Engine) SearchInArticle(article *storage.Article, query string) ([]*SearchResult, error) {
 	if len(strings.TrimSpace(query)) < 2 || article == nil {
 		return []*SearchResult{}, nil
@@ -97,7 +87,6 @@ func (e *Engine) SearchInArticle(article *storage.Article, query string) ([]*Sea
 		return []*SearchResult{}, nil
 	}
 
-	// Create a mock feed for the result
 	feed := &storage.Feed{ID: "current", Title: "Current Article"}
 	if result := e.searchArticle(feed, article, terms); result != nil {
 		return []*SearchResult{result}, nil
@@ -106,12 +95,10 @@ func (e *Engine) SearchInArticle(article *storage.Article, query string) ([]*Sea
 	return []*SearchResult{}, nil
 }
 
-// searchFeed searches within a feed's metadata
 func (e *Engine) searchFeed(feed *storage.Feed, terms []string) *SearchResult {
 	var matches []Match
 	var totalScore float64
 
-	// Search title (highest weight)
 	if titleScore := e.scoreField(feed.Title, terms, 3.0); titleScore > 0 {
 		matches = append(matches, Match{
 			Field:  "title",
@@ -121,7 +108,6 @@ func (e *Engine) searchFeed(feed *storage.Feed, terms []string) *SearchResult {
 		totalScore += titleScore
 	}
 
-	// Search description (medium weight)
 	if descScore := e.scoreField(feed.Description, terms, 1.5); descScore > 0 {
 		matches = append(matches, Match{
 			Field:  "description",
@@ -131,7 +117,6 @@ func (e *Engine) searchFeed(feed *storage.Feed, terms []string) *SearchResult {
 		totalScore += descScore
 	}
 
-	// Search URL (low weight)
 	if urlScore := e.scoreField(feed.URL, terms, 0.5); urlScore > 0 {
 		matches = append(matches, Match{
 			Field:  "url",
