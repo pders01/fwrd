@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/storage"
 )
@@ -70,7 +71,8 @@ func setupTestEnvironment(t *testing.T) (*storage.Store, *feed.Manager, func()) 
 		t.Fatal(err)
 	}
 
-	manager := feed.NewManager(store)
+	cfg := config.TestConfig()
+	manager := feed.NewManager(store, cfg)
 
 	cleanup := func() {
 		store.Close()
