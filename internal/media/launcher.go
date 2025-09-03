@@ -26,12 +26,21 @@ type Launcher struct {
 	pdfViewer     string
 	defaultOpener string
 	config        *config.MediaConfig
+	registry      *PlayerRegistry
 }
 
 func NewLauncher(cfg *config.Config) *Launcher {
+	// Create player registry
+	registry, err := NewPlayerRegistry()
+	if err != nil {
+		// If we can't load player definitions, continue with basic functionality
+		registry = &PlayerRegistry{players: make(map[string]PlayerDefinition)}
+	}
+
 	l := &Launcher{
 		config:        &cfg.Media,
 		defaultOpener: cfg.Media.DefaultOpener,
+		registry:      registry,
 	}
 
 	// Get platform-specific players from config
@@ -82,50 +91,38 @@ func NewLauncher(cfg *config.Config) *Launcher {
 func (l *Launcher) Open(url string) error {
 	mediaType := detectMediaType(url)
 
-	var cmd *exec.Cmd
+	// Determine which player to use
+	var playerName string
 	switch mediaType {
 	case MediaTypeVideo:
 		if l.videoPlayer == "" {
 			return fmt.Errorf("no video player found")
 		}
-		// Special handling for different video players
-		switch l.videoPlayer {
-		case "iina":
-			// iina needs --no-stdin flag for URLs to work properly
-			cmd = exec.Command(l.videoPlayer, "--no-stdin", url)
-		case "mpv":
-			// mpv works with URLs directly, but we can add useful flags
-			cmd = exec.Command(l.videoPlayer, "--force-window", url)
-		case "vlc":
-			// VLC needs special flags for better URL handling
-			cmd = exec.Command(l.videoPlayer, "--intf", "macosx", url)
-		default:
-			// Fallback for other players
-			cmd = exec.Command(l.videoPlayer, url)
-		}
+		playerName = l.videoPlayer
 	case MediaTypeImage:
 		if l.imageViewer == "" {
 			return fmt.Errorf("no image viewer found")
 		}
-		cmd = exec.Command(l.imageViewer, url)
+		playerName = l.imageViewer
 	case MediaTypeAudio:
 		if l.audioPlayer == "" {
 			return fmt.Errorf("no audio player found")
 		}
-		// Audio players may also need special handling for URLs
-		switch l.audioPlayer {
-		case "mpv":
-			cmd = exec.Command(l.audioPlayer, "--force-window", "--keep-open", url)
-		default:
-			cmd = exec.Command(l.audioPlayer, url)
-		}
+		playerName = l.audioPlayer
 	case MediaTypePDF:
 		if l.pdfViewer == "" {
 			return fmt.Errorf("no PDF viewer found")
 		}
-		cmd = exec.Command(l.pdfViewer, url)
+		playerName = l.pdfViewer
 	default:
-		cmd = exec.Command(l.defaultOpener, url)
+		playerName = l.defaultOpener
+	}
+
+	// Use the registry to get the appropriate command
+	cmd, err := l.registry.GetCommand(playerName, mediaType, url)
+	if err != nil {
+		// Fallback to simple command if registry fails
+		cmd = exec.Command(playerName, url)
 	}
 
 	// For GUI applications like iina, we want to start them detached

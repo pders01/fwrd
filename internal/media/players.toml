@@ -1,0 +1,137 @@
+# Media Player Definitions
+# This file defines how different media players should be invoked
+# for different types of content
+
+[players.iina]
+description = "IINA - modern media player for macOS"
+platforms = ["darwin"]
+
+[players.iina.video]
+args = ["--no-stdin"]  # Required for URLs to work properly
+
+[players.iina.audio]
+args = ["--no-stdin"]
+
+[players.mpv]
+description = "mpv - cross-platform media player"
+platforms = ["darwin", "linux", "windows"]
+
+[players.mpv.video]
+args = ["--force-window"]  # Ensure window opens
+
+[players.mpv.audio]
+args = ["--force-window", "--keep-open"]  # Don't close after playback
+
+[players.vlc]
+description = "VLC media player"
+platforms = ["darwin", "linux", "windows"]
+
+[players.vlc.video]
+args_darwin = ["--intf", "macosx"]
+args_linux = []
+args_windows = []
+
+[players.vlc.audio]
+args = []
+
+[players.mplayer]
+description = "MPlayer"
+platforms = ["linux"]
+
+[players.mplayer.video]
+args = []
+
+[players.mplayer.audio]
+args = []
+
+# Image viewers
+
+[players.feh]
+description = "feh - fast image viewer"
+platforms = ["linux"]
+
+[players.feh.image]
+args = ["--scale-down", "--auto-zoom"]
+
+[players.sxiv]
+description = "Simple X Image Viewer"
+platforms = ["linux"]
+
+[players.sxiv.image]
+args = ["-a"]  # Animated GIF support
+
+[players.preview]
+description = "macOS Preview"
+platforms = ["darwin"]
+
+[players.preview.image]
+args = []
+
+[players.preview.pdf]
+args = []
+
+# PDF viewers
+
+[players.zathura]
+description = "Zathura document viewer"
+platforms = ["linux"]
+
+[players.zathura.pdf]
+args = []
+
+[players.evince]
+description = "GNOME document viewer"
+platforms = ["linux"]
+
+[players.evince.pdf]
+args = []
+
+# System defaults
+
+[players.open]
+description = "macOS system opener"
+platforms = ["darwin"]
+
+[players.open.video]
+args = []
+
+[players.open.audio]
+args = []
+
+[players.open.image]
+args = []
+
+[players.open.pdf]
+args = []
+
+[players.xdg-open]
+description = "Linux system opener"
+platforms = ["linux"]
+
+[players.xdg-open.video]
+args = []
+
+[players.xdg-open.audio]
+args = []
+
+[players.xdg-open.image]
+args = []
+
+[players.xdg-open.pdf]
+args = []
+
+[players.start]
+description = "Windows system opener"
+platforms = ["windows"]
+
+[players.start.video]
+args = []
+
+[players.start.audio]
+args = []
+
+[players.start.image]
+args = []
+
+[players.start.pdf]
+args = []

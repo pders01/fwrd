@@ -1,0 +1,37 @@
+# Custom Media Player Configuration
+# Copy this to ~/.config/fwrd/players.toml to override built-in player definitions
+#
+# You can add new players or override existing ones
+# The built-in definitions are loaded first, then this file overrides them
+
+# Example: Add a custom video player
+[players.celluloid]
+description = "Celluloid (formerly GNOME MPV)"
+platforms = ["linux"]
+
+[players.celluloid.video]
+args = ["--new-window"]
+
+# Example: Override iina settings
+[players.iina]
+description = "IINA with custom settings"
+platforms = ["darwin"]
+
+[players.iina.video]
+args = ["--no-stdin", "--pip"]  # Add picture-in-picture mode
+
+# Example: Add yt-dlp as a "player" for downloading
+[players.yt-dlp]
+description = "Download videos with yt-dlp"
+platforms = ["darwin", "linux", "windows"]
+
+[players.yt-dlp.video]
+args = ["-o", "~/Downloads/%(title)s.%(ext)s"]
+
+# Example: Use streamlink for streaming
+[players.streamlink]
+description = "Stream with streamlink + mpv"
+platforms = ["darwin", "linux", "windows"]
+
+[players.streamlink.video]
+args = ["--player", "mpv", "best"]
