@@ -245,6 +245,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errorMsg:
 		a.err = msg.err
+		// Clear loading flag if we were loading an article
+		if a.loadingArticle {
+			a.loadingArticle = false
+		}
 	}
 
 	switch a.view {

@@ -66,7 +66,9 @@ func (a *App) renderArticle(article *storage.Article) tea.Cmd {
 
 		rendered, err := r.Render(content.String())
 		if err != nil {
-			return errorMsg{err: err}
+			// Return articleRenderedMsg with error message for consistency
+			// This ensures loadingArticle flag is always cleared
+			return articleRenderedMsg{content: fmt.Sprintf("# Error\n\nFailed to render article: %s\n\nPress Escape to go back.", err.Error())}
 		}
 
 		a.store.MarkArticleRead(article.ID, true)
