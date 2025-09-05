@@ -1,4 +1,8 @@
 
+{
+    admin off
+}
+
 :8080 {
 	# Serve files from this fixtures directory
 	root * .
