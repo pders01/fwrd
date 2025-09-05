@@ -148,6 +148,10 @@ make release-snapshot
 - `github.com/mmcdole/gofeed` - RSS/Atom parsing
 - `go.etcd.io/bbolt` - Embedded database
 
+## Architecture
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed information about the codebase structure.
+
 ## Media Players
 
 The application will try to use the following media players:
