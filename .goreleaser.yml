@@ -50,8 +50,9 @@ homebrew_casks:
     # For unsigned binaries, inform users how to remove quarantine on macOS.
     caveats: |
       On macOS, binaries from third-party taps may be quarantined.
-      If needed, remove quarantine:
-        xattr -dr com.apple.quarantine "$(brew --prefix)/Caskroom/fwrd/*/fwrd"
+      If needed, remove quarantine (adjust the path as needed):
+        xattr -dr com.apple.quarantine /opt/homebrew/bin/fwrd
+        xattr -dr com.apple.quarantine /usr/local/bin/fwrd
     # Generate simple cask installing the binary from archives.
     binary: fwrd
 
