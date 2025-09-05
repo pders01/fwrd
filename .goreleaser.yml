@@ -7,21 +7,28 @@ before:
     - go mod tidy
 
 builds:
-  - env:
+  - id: unix
+    env:
       - CGO_ENABLED=0
     goos:
       - linux
-      - windows
       - darwin
     goarch:
       - amd64
       - arm64
       - arm
-    ignore:
-      - goos: windows
-        goarch: arm64
-      - goos: windows
-        goarch: arm
+    main: ./cmd/rss/main.go
+    binary: fwrd
+    ldflags:
+      - -s -w -X main.Version={{.Version}}
+
+  - id: windows
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+    goarch:
+      - amd64
     main: ./cmd/rss/main.go
     binary: fwrd
     ldflags:
@@ -30,6 +37,8 @@ builds:
 archives:
   # Default: tar.gz for non-Windows
   - id: default
+    builds:
+      - unix
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
@@ -45,6 +54,8 @@ archives:
 
   # Windows: zip
   - id: windows
+    builds:
+      - windows
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
