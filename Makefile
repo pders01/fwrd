@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-integration clean run install-caddy lint coverage help
+.PHONY: build test test-unit test-integration clean run install-caddy lint coverage help release release-snapshot
 
 # Variables
 BINARY_NAME=fwrd
@@ -167,3 +167,13 @@ docker-build:
 docker-run: docker-build
 	@echo "Running fwrd in Docker..."
 	@docker run -it --rm $(BINARY_NAME):latest
+
+## release: Create a new release using GoReleaser
+release:
+	@echo "Creating release with GoReleaser..."
+	@goreleaser release --clean
+
+## release-snapshot: Create a snapshot release using GoReleaser
+release-snapshot:
+	@echo "Creating snapshot release with GoReleaser..."
+	@goreleaser release --snapshot --clean
