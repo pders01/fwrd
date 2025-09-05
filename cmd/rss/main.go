@@ -14,6 +14,9 @@ import (
 	"github.com/pders01/fwrd/internal/tui"
 )
 
+// Version is the version of the application, set at build time
+var Version = "dev"
+
 func main() {
 	var (
 		dbPath         = flag.String("db", "", "Path to database file (overrides config)")
@@ -25,7 +28,7 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Println("fwrd v1.0.0")
+		fmt.Printf("fwrd %s\n", Version)
 		fmt.Println("RSS aggregator")
 		fmt.Println("github.com/pders01/fwrd")
 		return
