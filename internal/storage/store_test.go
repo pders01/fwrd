@@ -8,20 +8,20 @@ import (
 	"time"
 )
 
-func setupTestStore(t *testing.T) (*Store, func()) {
+func setupTestStore(t *testing.T) (store *Store, cleanup func()) {
 	tmpDir, err := os.MkdirTemp("", "store-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	store, err := NewStore(dbPath)
+	store, err = NewStore(dbPath)
 	if err != nil {
 		os.RemoveAll(tmpDir)
 		t.Fatal(err)
 	}
 
-	cleanup := func() {
+	cleanup = func() {
 		store.Close()
 		os.RemoveAll(tmpDir)
 	}

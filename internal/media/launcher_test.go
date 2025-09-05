@@ -8,7 +8,7 @@ import (
 )
 
 func TestDetectMediaType(t *testing.T) {
-	detector, err := NewMediaTypeDetector()
+	detector, err := NewTypeDetector()
 	if err != nil {
 		t.Fatalf("Failed to create detector: %v", err)
 	}
@@ -16,50 +16,50 @@ func TestDetectMediaType(t *testing.T) {
 	tests := []struct {
 		name     string
 		url      string
-		expected MediaType
+		expected Type
 	}{
 		// Video tests
-		{name: "MP4 video", url: "http://example.com/video.mp4", expected: MediaTypeVideo},
-		{name: "WebM video", url: "http://example.com/video.webm", expected: MediaTypeVideo},
-		{name: "MKV video", url: "http://example.com/video.mkv", expected: MediaTypeVideo},
-		{name: "AVI video", url: "http://example.com/video.avi", expected: MediaTypeVideo},
-		{name: "MOV video", url: "http://example.com/video.mov", expected: MediaTypeVideo},
-		{name: "YouTube URL", url: "https://www.youtube.com/watch?v=abc123", expected: MediaTypeVideo},
-		{name: "YouTube short URL", url: "https://youtu.be/abc123", expected: MediaTypeVideo},
-		{name: "Vimeo URL", url: "https://vimeo.com/123456", expected: MediaTypeVideo},
-		{name: "Twitch URL", url: "https://www.twitch.tv/stream", expected: MediaTypeVideo},
+		{name: "MP4 video", url: "http://example.com/video.mp4", expected: TypeVideo},
+		{name: "WebM video", url: "http://example.com/video.webm", expected: TypeVideo},
+		{name: "MKV video", url: "http://example.com/video.mkv", expected: TypeVideo},
+		{name: "AVI video", url: "http://example.com/video.avi", expected: TypeVideo},
+		{name: "MOV video", url: "http://example.com/video.mov", expected: TypeVideo},
+		{name: "YouTube URL", url: "https://www.youtube.com/watch?v=abc123", expected: TypeVideo},
+		{name: "YouTube short URL", url: "https://youtu.be/abc123", expected: TypeVideo},
+		{name: "Vimeo URL", url: "https://vimeo.com/123456", expected: TypeVideo},
+		{name: "Twitch URL", url: "https://www.twitch.tv/stream", expected: TypeVideo},
 
 		// Image tests
-		{name: "JPEG image", url: "http://example.com/photo.jpg", expected: MediaTypeImage},
-		{name: "JPEG image alt", url: "http://example.com/photo.jpeg", expected: MediaTypeImage},
-		{name: "PNG image", url: "http://example.com/image.png", expected: MediaTypeImage},
-		{name: "GIF image", url: "http://example.com/animation.gif", expected: MediaTypeImage},
-		{name: "WebP image", url: "http://example.com/photo.webp", expected: MediaTypeImage},
-		{name: "BMP image", url: "http://example.com/bitmap.bmp", expected: MediaTypeImage},
-		{name: "SVG image", url: "http://example.com/vector.svg", expected: MediaTypeImage},
+		{name: "JPEG image", url: "http://example.com/photo.jpg", expected: TypeImage},
+		{name: "JPEG image alt", url: "http://example.com/photo.jpeg", expected: TypeImage},
+		{name: "PNG image", url: "http://example.com/image.png", expected: TypeImage},
+		{name: "GIF image", url: "http://example.com/animation.gif", expected: TypeImage},
+		{name: "WebP image", url: "http://example.com/photo.webp", expected: TypeImage},
+		{name: "BMP image", url: "http://example.com/bitmap.bmp", expected: TypeImage},
+		{name: "SVG image", url: "http://example.com/vector.svg", expected: TypeImage},
 
 		// Audio tests
-		{name: "MP3 audio", url: "http://example.com/song.mp3", expected: MediaTypeAudio},
-		{name: "OGG audio", url: "http://example.com/sound.ogg", expected: MediaTypeAudio},
-		{name: "WAV audio", url: "http://example.com/audio.wav", expected: MediaTypeAudio},
-		{name: "FLAC audio", url: "http://example.com/music.flac", expected: MediaTypeAudio},
-		{name: "M4A audio", url: "http://example.com/track.m4a", expected: MediaTypeAudio},
-		{name: "AAC audio", url: "http://example.com/audio.aac", expected: MediaTypeAudio},
+		{name: "MP3 audio", url: "http://example.com/song.mp3", expected: TypeAudio},
+		{name: "OGG audio", url: "http://example.com/sound.ogg", expected: TypeAudio},
+		{name: "WAV audio", url: "http://example.com/audio.wav", expected: TypeAudio},
+		{name: "FLAC audio", url: "http://example.com/music.flac", expected: TypeAudio},
+		{name: "M4A audio", url: "http://example.com/track.m4a", expected: TypeAudio},
+		{name: "AAC audio", url: "http://example.com/audio.aac", expected: TypeAudio},
 
 		// PDF tests
-		{name: "PDF document", url: "http://example.com/document.pdf", expected: MediaTypePDF},
-		{name: "PDF with query", url: "http://example.com/doc.pdf?version=2", expected: MediaTypePDF},
+		{name: "PDF document", url: "http://example.com/document.pdf", expected: TypePDF},
+		{name: "PDF with query", url: "http://example.com/doc.pdf?version=2", expected: TypePDF},
 
 		// Unknown tests
-		{name: "HTML page", url: "http://example.com/page.html", expected: MediaTypeUnknown},
-		{name: "Text file", url: "http://example.com/readme.txt", expected: MediaTypeUnknown},
-		{name: "No extension", url: "http://example.com/resource", expected: MediaTypeUnknown},
-		{name: "Unknown extension", url: "http://example.com/file.xyz", expected: MediaTypeUnknown},
+		{name: "HTML page", url: "http://example.com/page.html", expected: TypeUnknown},
+		{name: "Text file", url: "http://example.com/readme.txt", expected: TypeUnknown},
+		{name: "No extension", url: "http://example.com/resource", expected: TypeUnknown},
+		{name: "Unknown extension", url: "http://example.com/file.xyz", expected: TypeUnknown},
 
 		// Case insensitive tests
-		{name: "Uppercase MP4", url: "http://example.com/VIDEO.MP4", expected: MediaTypeVideo},
-		{name: "Mixed case JPEG", url: "http://example.com/Photo.JpEg", expected: MediaTypeImage},
-		{name: "Uppercase PDF", url: "http://example.com/DOCUMENT.PDF", expected: MediaTypePDF},
+		{name: "Uppercase MP4", url: "http://example.com/VIDEO.MP4", expected: TypeVideo},
+		{name: "Mixed case JPEG", url: "http://example.com/Photo.JpEg", expected: TypeImage},
+		{name: "Uppercase PDF", url: "http://example.com/DOCUMENT.PDF", expected: TypePDF},
 	}
 
 	for _, tt := range tests {
@@ -144,7 +144,7 @@ func TestNewLauncher(t *testing.T) {
 }
 
 func TestGetDefaultOpener(t *testing.T) {
-	detector, err := NewMediaTypeDetector()
+	detector, err := NewTypeDetector()
 	if err != nil {
 		t.Fatalf("Failed to create detector: %v", err)
 	}

@@ -111,8 +111,8 @@ user_agent = "test-agent"
 primary = "#FF0000"
 `
 
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
-		t.Fatal(err)
+	if writeErr := os.WriteFile(configPath, []byte(configContent), 0o644); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 
 	cfg, err := Load(configPath)
@@ -176,12 +176,12 @@ func TestSave(t *testing.T) {
 	}
 
 	savePath := filepath.Join(tmpDir, "saved-config.toml")
-	if err := Save(cfg, savePath); err != nil {
-		t.Fatalf("Save() error = %v", err)
+	if saveErr := Save(cfg, savePath); saveErr != nil {
+		t.Fatalf("Save() error = %v", saveErr)
 	}
 
 	// Verify file was created
-	if _, err := os.Stat(savePath); os.IsNotExist(err) {
+	if _, statErr := os.Stat(savePath); os.IsNotExist(statErr) {
 		t.Fatal("Save() did not create config file")
 	}
 
@@ -210,12 +210,12 @@ func TestGenerateDefaultConfig(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	configPath := filepath.Join(tmpDir, "generated.toml")
-	if err := GenerateDefaultConfig(configPath); err != nil {
-		t.Fatalf("GenerateDefaultConfig() error = %v", err)
+	if genErr := GenerateDefaultConfig(configPath); genErr != nil {
+		t.Fatalf("GenerateDefaultConfig() error = %v", genErr)
 	}
 
 	// Verify file exists
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+	if _, statErr := os.Stat(configPath); os.IsNotExist(statErr) {
 		t.Fatal("GenerateDefaultConfig() did not create file")
 	}
 

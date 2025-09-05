@@ -11,16 +11,16 @@ import (
 //go:embed media_types.toml
 var mediaTypesTOML []byte
 
-type MediaTypeConfig struct {
+type TypeConfig struct {
 	Extensions  []string `toml:"extensions"`
 	URLPatterns []string `toml:"url_patterns"`
 }
 
-type MediaTypesConfig struct {
-	Video     MediaTypeConfig           `toml:"video"`
-	Audio     MediaTypeConfig           `toml:"audio"`
-	Image     MediaTypeConfig           `toml:"image"`
-	PDF       MediaTypeConfig           `toml:"pdf"`
+type TypesConfig struct {
+	Video     TypeConfig                `toml:"video"`
+	Audio     TypeConfig                `toml:"audio"`
+	Image     TypeConfig                `toml:"image"`
+	PDF       TypeConfig                `toml:"pdf"`
 	Platforms map[string]PlatformConfig `toml:"platforms"`
 }
 
@@ -28,20 +28,20 @@ type PlatformConfig struct {
 	DefaultOpener string `toml:"default_opener"`
 }
 
-type MediaTypeDetector struct {
-	config *MediaTypesConfig
+type TypeDetector struct {
+	config *TypesConfig
 }
 
-func NewMediaTypeDetector() (*MediaTypeDetector, error) {
-	var config MediaTypesConfig
+func NewTypeDetector() (*TypeDetector, error) {
+	var config TypesConfig
 	if err := toml.Unmarshal(mediaTypesTOML, &config); err != nil {
 		return nil, err
 	}
 
-	return &MediaTypeDetector{config: &config}, nil
+	return &TypeDetector{config: &config}, nil
 }
 
-func (d *MediaTypeDetector) DetectType(url string) MediaType {
+func (d *TypeDetector) DetectType(url string) Type {
 	lower := strings.ToLower(url)
 	isURL := strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
 
@@ -60,39 +60,39 @@ func (d *MediaTypeDetector) DetectType(url string) MediaType {
 	// Check file extensions
 	if ext != "" {
 		if d.hasExtension(d.config.Video.Extensions, ext) {
-			return MediaTypeVideo
+			return TypeVideo
 		}
 		if d.hasExtension(d.config.Audio.Extensions, ext) {
-			return MediaTypeAudio
+			return TypeAudio
 		}
 		if d.hasExtension(d.config.Image.Extensions, ext) {
-			return MediaTypeImage
+			return TypeImage
 		}
 		if d.hasExtension(d.config.PDF.Extensions, ext) {
-			return MediaTypePDF
+			return TypePDF
 		}
 	}
 
 	// Check URL patterns
 	if isURL {
 		if d.matchesPattern(lower, d.config.Video.URLPatterns) {
-			return MediaTypeVideo
+			return TypeVideo
 		}
 		if d.matchesPattern(lower, d.config.Audio.URLPatterns) {
-			return MediaTypeAudio
+			return TypeAudio
 		}
 		if d.matchesPattern(lower, d.config.Image.URLPatterns) {
-			return MediaTypeImage
+			return TypeImage
 		}
 		if d.matchesPattern(lower, d.config.PDF.URLPatterns) {
-			return MediaTypePDF
+			return TypePDF
 		}
 	}
 
-	return MediaTypeUnknown
+	return TypeUnknown
 }
 
-func (d *MediaTypeDetector) GetDefaultOpener() string {
+func (d *TypeDetector) GetDefaultOpener() string {
 	platform := runtime.GOOS
 	if platformConfig, ok := d.config.Platforms[platform]; ok {
 		return platformConfig.DefaultOpener
@@ -104,7 +104,7 @@ func (d *MediaTypeDetector) GetDefaultOpener() string {
 	return "open"
 }
 
-func (d *MediaTypeDetector) hasExtension(extensions []string, ext string) bool {
+func (d *TypeDetector) hasExtension(extensions []string, ext string) bool {
 	for _, e := range extensions {
 		if e == ext {
 			return true
@@ -113,7 +113,7 @@ func (d *MediaTypeDetector) hasExtension(extensions []string, ext string) bool {
 	return false
 }
 
-func (d *MediaTypeDetector) matchesPattern(url string, patterns []string) bool {
+func (d *TypeDetector) matchesPattern(url string, patterns []string) bool {
 	for _, pattern := range patterns {
 		if strings.Contains(url, pattern) {
 			return true

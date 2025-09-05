@@ -18,13 +18,6 @@ import (
 	"github.com/pders01/fwrd/internal/storage"
 )
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 type App struct {
 	config          *config.Config
 	store           *storage.Store
@@ -221,7 +214,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.err = msg.err
 		} else {
 			a.view = ViewFeeds
-			return a, a.loadFeeds()
+			cmd := a.loadFeeds()
+			return a, cmd
 		}
 
 	case feedDeletedMsg:
@@ -230,7 +224,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			a.view = ViewFeeds
 			a.feedToDelete = nil
-			return a, a.loadFeeds()
+			cmd := a.loadFeeds()
+			return a, cmd
 		}
 
 	case searchResultsMsg:
@@ -419,11 +414,12 @@ func (a *App) View() string {
 		}
 
 		helpText := ""
-		if a.searchInput.Focused() {
+		switch {
+		case a.searchInput.Focused():
 			helpText = "Type to search • Tab/↓: results • Esc: back"
-		} else if len(a.searchList.Items()) > 0 {
+		case len(a.searchList.Items()) > 0:
 			helpText = "↑↓: navigate • Enter: select • Tab/↑: search box • Esc: back"
-		} else {
+		default:
 			helpText = "No results found • Tab/↑: search box • Esc: back"
 		}
 
@@ -552,12 +548,12 @@ func (i searchResultItem) Title() string {
 			return ReadItemStyle.Render(prefix + i.article.Title)
 		}
 		return UnreadItemStyle.Render(prefix + i.article.Title)
-	} else {
-		return lipgloss.NewStyle().
-			Foreground(SecondaryColor).
-			Bold(true).
-			Render("📁 " + i.feed.Title)
 	}
+
+	return lipgloss.NewStyle().
+		Foreground(SecondaryColor).
+		Bold(true).
+		Render("📁 " + i.feed.Title)
 }
 
 func (i searchResultItem) Description() string {
@@ -587,11 +583,11 @@ func (i searchResultItem) Description() string {
 		return lipgloss.NewStyle().
 			Foreground(MutedColor).
 			Render(desc + " • from " + feedName + " • " + timeStr)
-	} else {
-		return lipgloss.NewStyle().
-			Foreground(MutedColor).
-			Render(i.feed.URL)
 	}
+
+	return lipgloss.NewStyle().
+		Foreground(MutedColor).
+		Render(i.feed.URL)
 }
 
 func (i searchResultItem) FilterValue() string {
@@ -603,22 +599,24 @@ func (i searchResultItem) FilterValue() string {
 
 type mediaItem struct {
 	url       string
-	mediaType media.MediaType
+	mediaType media.Type
 	index     int
 	total     int
 }
 
 func (i mediaItem) Title() string {
-	typeStr := "Media"
+	var typeStr string
 	switch i.mediaType {
-	case media.MediaTypeVideo:
+	case media.TypeVideo:
 		typeStr = "🎬 Video"
-	case media.MediaTypeImage:
+	case media.TypeImage:
 		typeStr = "🖼️  Image"
-	case media.MediaTypeAudio:
+	case media.TypeAudio:
 		typeStr = "🎵 Audio"
-	case media.MediaTypePDF:
+	case media.TypePDF:
 		typeStr = "📄 PDF"
+	default:
+		typeStr = "Unknown"
 	}
 	return fmt.Sprintf("%s %d/%d", typeStr, i.index+1, i.total)
 }

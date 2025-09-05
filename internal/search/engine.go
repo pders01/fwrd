@@ -9,7 +9,7 @@ import (
 	"github.com/pders01/fwrd/internal/storage"
 )
 
-type SearchResult struct {
+type Result struct {
 	Feed      *storage.Feed
 	Article   *storage.Article
 	IsArticle bool
@@ -31,17 +31,17 @@ func NewEngine(store *storage.Store) *Engine {
 	return &Engine{store: store}
 }
 
-func (e *Engine) Search(query string, limit int) ([]*SearchResult, error) {
+func (e *Engine) Search(query string, limit int) ([]*Result, error) {
 	if len(strings.TrimSpace(query)) < 2 {
-		return []*SearchResult{}, nil
+		return []*Result{}, nil
 	}
 
 	terms := tokenize(query)
 	if len(terms) == 0 {
-		return []*SearchResult{}, nil
+		return []*Result{}, nil
 	}
 
-	var results []*SearchResult
+	var results []*Result
 
 	feeds, err := e.store.GetAllFeeds()
 	if err != nil {
@@ -77,25 +77,25 @@ func (e *Engine) Search(query string, limit int) ([]*SearchResult, error) {
 	return results, nil
 }
 
-func (e *Engine) SearchInArticle(article *storage.Article, query string) ([]*SearchResult, error) {
+func (e *Engine) SearchInArticle(article *storage.Article, query string) ([]*Result, error) {
 	if len(strings.TrimSpace(query)) < 2 || article == nil {
-		return []*SearchResult{}, nil
+		return []*Result{}, nil
 	}
 
 	terms := tokenize(query)
 	if len(terms) == 0 {
-		return []*SearchResult{}, nil
+		return []*Result{}, nil
 	}
 
 	feed := &storage.Feed{ID: "current", Title: "Current Article"}
 	if result := e.searchArticle(feed, article, terms); result != nil {
-		return []*SearchResult{result}, nil
+		return []*Result{result}, nil
 	}
 
-	return []*SearchResult{}, nil
+	return []*Result{}, nil
 }
 
-func (e *Engine) searchFeed(feed *storage.Feed, terms []string) *SearchResult {
+func (e *Engine) searchFeed(feed *storage.Feed, terms []string) *Result {
 	var matches []Match
 	var totalScore float64
 
@@ -127,7 +127,7 @@ func (e *Engine) searchFeed(feed *storage.Feed, terms []string) *SearchResult {
 	}
 
 	if totalScore > 0 {
-		return &SearchResult{
+		return &Result{
 			Feed:      feed,
 			IsArticle: false,
 			Score:     totalScore,
@@ -139,7 +139,7 @@ func (e *Engine) searchFeed(feed *storage.Feed, terms []string) *SearchResult {
 }
 
 // searchArticle searches within an article's content
-func (e *Engine) searchArticle(feed *storage.Feed, article *storage.Article, terms []string) *SearchResult {
+func (e *Engine) searchArticle(feed *storage.Feed, article *storage.Article, terms []string) *Result {
 	var matches []Match
 	var totalScore float64
 
@@ -184,7 +184,7 @@ func (e *Engine) searchArticle(feed *storage.Feed, article *storage.Article, ter
 	}
 
 	if totalScore > 0 {
-		return &SearchResult{
+		return &Result{
 			Feed:      feed,
 			Article:   article,
 			IsArticle: true,
@@ -220,13 +220,14 @@ func (e *Engine) scoreField(text string, terms []string, weight float64) float64
 		// Word boundary matches (medium score)
 		for _, word := range words {
 			wordLower := strings.ToLower(word)
-			if wordLower == termLower {
+			switch {
+			case wordLower == termLower:
 				score += 1.5
 				matchedTerms++
-			} else if strings.HasPrefix(wordLower, termLower) || strings.HasSuffix(wordLower, termLower) {
+			case strings.HasPrefix(wordLower, termLower) || strings.HasSuffix(wordLower, termLower):
 				score += 1.0
 				matchedTerms++
-			} else if strings.Contains(wordLower, termLower) {
+			case strings.Contains(wordLower, termLower):
 				score += 0.5
 				matchedTerms++
 			}
@@ -317,7 +318,7 @@ func truncate(text string, maxLen int) string {
 }
 
 // calculateRecencyBoost gives slight preference to newer articles
-func calculateRecencyBoost(published interface{}) float64 {
+func calculateRecencyBoost(_ interface{}) float64 {
 	// Simple implementation - could be enhanced with actual time comparison
 	// For now, return minimal boost to avoid complexity
 	return 0.05 // 5% boost for any dated article

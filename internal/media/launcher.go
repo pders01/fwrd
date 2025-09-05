@@ -8,14 +8,14 @@ import (
 	"github.com/pders01/fwrd/internal/config"
 )
 
-type MediaType int
+type Type int
 
 const (
-	MediaTypeVideo MediaType = iota
-	MediaTypeImage
-	MediaTypeAudio
-	MediaTypePDF
-	MediaTypeUnknown
+	TypeVideo Type = iota
+	TypeImage
+	TypeAudio
+	TypePDF
+	TypeUnknown
 )
 
 type Launcher struct {
@@ -26,7 +26,7 @@ type Launcher struct {
 	defaultOpener string
 	config        *config.MediaConfig
 	registry      *PlayerRegistry
-	detector      *MediaTypeDetector
+	detector      *TypeDetector
 }
 
 func NewLauncher(cfg *config.Config) *Launcher {
@@ -36,10 +36,10 @@ func NewLauncher(cfg *config.Config) *Launcher {
 		registry = &PlayerRegistry{players: make(map[string]PlayerDefinition)}
 	}
 
-	detector, err := NewMediaTypeDetector()
+	detector, err := NewTypeDetector()
 	if err != nil {
 		// Fallback to a basic detector if config can't be loaded
-		detector = &MediaTypeDetector{config: &MediaTypesConfig{}}
+		detector = &TypeDetector{config: &TypesConfig{}}
 	}
 
 	// Ensure we always have a default opener
@@ -101,22 +101,22 @@ func (l *Launcher) Open(url string) error {
 
 	var playerName string
 	switch mediaType {
-	case MediaTypeVideo:
+	case TypeVideo:
 		if l.videoPlayer == "" {
 			return fmt.Errorf("no video player found")
 		}
 		playerName = l.videoPlayer
-	case MediaTypeImage:
+	case TypeImage:
 		if l.imageViewer == "" {
 			return fmt.Errorf("no image viewer found")
 		}
 		playerName = l.imageViewer
-	case MediaTypeAudio:
+	case TypeAudio:
 		if l.audioPlayer == "" {
 			return fmt.Errorf("no audio player found")
 		}
 		playerName = l.audioPlayer
-	case MediaTypePDF:
+	case TypePDF:
 		if l.pdfViewer == "" {
 			return fmt.Errorf("no PDF viewer found")
 		}
@@ -145,10 +145,7 @@ func (l *Launcher) Open(url string) error {
 	}
 
 	go func() {
-		if err := cmd.Wait(); err != nil {
-			// Log error or handle it appropriately
-			// For now, we're just ignoring it as it's running in a goroutine
-		}
+		_ = cmd.Wait()
 	}()
 
 	return nil

@@ -26,8 +26,8 @@ func NewStore(dbPath string) (*Store, error) {
 
 	err = db.Update(func(tx *bolt.Tx) error {
 		for _, bucket := range [][]byte{feedsBucket, articlesBucket, metaBucket} {
-			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
-				return err
+			if _, createErr := tx.CreateBucketIfNotExists(bucket); createErr != nil {
+				return createErr
 			}
 		}
 		return nil
@@ -72,7 +72,7 @@ func (s *Store) GetAllFeeds() ([]*Feed, error) {
 	var feeds []*Feed
 	err := s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(feedsBucket)
-		return b.ForEach(func(k, v []byte) error {
+		return b.ForEach(func(_ []byte, v []byte) error {
 			var feed Feed
 			if err := json.Unmarshal(v, &feed); err != nil {
 				return err

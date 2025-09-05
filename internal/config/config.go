@@ -230,7 +230,7 @@ func Save(config *Config, path string) error {
 	v.Set("keys", config.Keys)
 
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 

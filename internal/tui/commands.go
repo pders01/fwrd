@@ -72,8 +72,7 @@ func (a *App) renderArticle(article *storage.Article) tea.Cmd {
 		}
 
 		if err := a.store.MarkArticleRead(article.ID, true); err != nil {
-			// Log error but don't prevent article rendering
-			// In a real application, you might want to handle this more gracefully
+			_ = err // Explicitly ignore error
 		}
 
 		return articleRenderedMsg{content: rendered}
@@ -209,10 +208,10 @@ func (a *App) performSearch(query string) tea.Cmd {
 	return a.performSearchWithContext(query, "")
 }
 
-func (a *App) performSearchWithContext(query string, context string) tea.Cmd {
+func (a *App) performSearchWithContext(query, context string) tea.Cmd {
 	return func() tea.Msg {
 		// Use the new intelligent search engine
-		var searchResults []*search.SearchResult
+		var searchResults []*search.Result
 		var err error
 
 		if context == "article" && a.currentArticle != nil {

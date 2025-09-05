@@ -72,16 +72,16 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer store.Close()
 
 	app := tui.NewApp(store, cfg)
 	p := tea.NewProgram(app, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		store.Close()
+		_ = store.Close()
 		os.Exit(1)
 	}
+	_ = store.Close()
 }
 
 func showBanner() {

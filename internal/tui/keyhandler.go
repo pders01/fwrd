@@ -215,8 +215,7 @@ func (kh *KeyHandler) handleArticlesCustomKeys(key string) (tea.Model, tea.Cmd, 
 
 // handleReaderCustomKeys handles only custom action keys in reader view
 func (kh *KeyHandler) handleReaderCustomKeys(key string) (tea.Model, tea.Cmd, bool) {
-	switch key {
-	case kh.modifierKey + "o":
+	if key == kh.modifierKey+"o" {
 		if kh.app.currentArticle != nil {
 			// If there are multiple media URLs, show media list
 			if len(kh.app.currentArticle.MediaURLs) > 1 {
@@ -347,8 +346,7 @@ func (kh *KeyHandler) handleMediaCustomKeys(key string) (tea.Model, tea.Cmd, boo
 }
 
 func (kh *KeyHandler) handleDeleteConfirmKeys(key string) (tea.Model, tea.Cmd, bool) {
-	switch key {
-	case "enter":
+	if key == "enter" {
 		if kh.app.feedToDelete != nil {
 			return kh.app, kh.app.deleteFeed(kh.app.feedToDelete.ID), true
 		}
@@ -372,16 +370,16 @@ func (kh *KeyHandler) selectSearchResult(result searchResultItem) (tea.Model, te
 		markReadCmd := kh.app.markArticleRead(result.article)
 		renderCmd := kh.app.renderArticle(result.article)
 		return kh.app, tea.Batch(markReadCmd, renderCmd)
-	} else {
-		// Validate feed data
-		if result.feed == nil {
-			return kh.app, nil
-		}
-		kh.app.currentFeed = result.feed
-		kh.app.cameFromSearch = false
-		kh.app.view = ViewArticles
-		return kh.app, kh.app.loadArticles(result.feed.ID)
 	}
+
+	// Validate feed data
+	if result.feed == nil {
+		return kh.app, nil
+	}
+	kh.app.currentFeed = result.feed
+	kh.app.cameFromSearch = false
+	kh.app.view = ViewArticles
+	return kh.app, kh.app.loadArticles(result.feed.ID)
 }
 
 // navigateBack implements smart back navigation
@@ -416,10 +414,9 @@ func (kh *KeyHandler) navigateBack() (tea.Model, tea.Cmd) {
 			// Focus search results list, not input, for quick navigation
 			kh.app.searchInput.Blur()
 			return kh.app, nil
-		} else {
-			kh.app.view = ViewArticles
-			return kh.app, nil
 		}
+		kh.app.view = ViewArticles
+		return kh.app, nil
 
 	default:
 		return kh.app, tea.Quit
@@ -508,10 +505,10 @@ func (kh *KeyHandler) openMediaList() (tea.Model, tea.Cmd) {
 
 	// Prepare media items for the list
 	items := make([]list.Item, len(kh.app.currentArticle.MediaURLs))
-	detector, _ := media.NewMediaTypeDetector()
+	detector, _ := media.NewTypeDetector()
 
 	for i, url := range kh.app.currentArticle.MediaURLs {
-		mediaType := media.MediaTypeUnknown
+		mediaType := media.TypeUnknown
 		if detector != nil {
 			mediaType = detector.DetectType(url)
 		}

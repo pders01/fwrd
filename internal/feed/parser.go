@@ -73,9 +73,7 @@ func extractMediaURLs(item *gofeed.Item) []string {
 	}
 
 	content := item.Content + " " + item.Description
-	for _, match := range findMediaInHTML(content) {
-		urls = append(urls, match)
-	}
+	urls = append(urls, findMediaInHTML(content)...)
 
 	return uniqueStrings(urls)
 }

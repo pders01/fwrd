@@ -77,7 +77,7 @@ func (r *PlayerRegistry) loadUserConfig() {
 	}
 }
 
-func (r *PlayerRegistry) GetCommand(playerName string, mediaType MediaType, url string) (*exec.Cmd, error) {
+func (r *PlayerRegistry) GetCommand(playerName string, mediaType Type, url string) (*exec.Cmd, error) {
 	player, exists := r.players[playerName]
 	if !exists {
 		return exec.Command(playerName, url), nil
@@ -97,13 +97,13 @@ func (r *PlayerRegistry) GetCommand(playerName string, mediaType MediaType, url 
 
 	var config *PlayerMediaTypeConfig
 	switch mediaType {
-	case MediaTypeVideo:
+	case TypeVideo:
 		config = player.Video
-	case MediaTypeAudio:
+	case TypeAudio:
 		config = player.Audio
-	case MediaTypeImage:
+	case TypeImage:
 		config = player.Image
-	case MediaTypePDF:
+	case TypePDF:
 		config = player.PDF
 	}
 

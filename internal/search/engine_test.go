@@ -47,9 +47,9 @@ func TestSearchMinLength(t *testing.T) {
 	}
 }
 
-func TestSearchResultStructure(t *testing.T) {
-	// Test that SearchResult has the expected fields
-	result := &SearchResult{
+func TestResultStructure(t *testing.T) {
+	// Test that Result has the expected fields
+	result := &Result{
 		Article:   &storage.Article{},
 		Feed:      &storage.Feed{},
 		IsArticle: true,

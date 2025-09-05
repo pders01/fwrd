@@ -1,5 +1,7 @@
+
 :8080 {
-	root * /Users/paulderscheid/Projects/pers/rss/test/fixtures
+	# Serve files from this fixtures directory
+	root * .
 	file_server
 
 	# RSS feed endpoints

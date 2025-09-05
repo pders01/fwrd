@@ -75,7 +75,7 @@ func TestFetcher_Fetch(t *testing.T) {
 				ID:  "test4",
 				URL: "",
 			},
-			serverResponse: func(w http.ResponseWriter, r *http.Request) {
+			serverResponse: func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusInternalServerError)
 			},
 			expectUpdated: false,
@@ -87,7 +87,7 @@ func TestFetcher_Fetch(t *testing.T) {
 				ID:  "test5",
 				URL: "",
 			},
-			serverResponse: func(w http.ResponseWriter, r *http.Request) {
+			serverResponse: func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Retry-After", "60")
 				w.WriteHeader(http.StatusTooManyRequests)
 			},
@@ -131,7 +131,7 @@ func TestFetcher_UpdateFeedMetadata(t *testing.T) {
 		URL: "http://example.com",
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("ETag", "\"new-etag\"")
 		w.Header().Set("Last-Modified", "Thu, 02 Jan 2025 00:00:00 GMT")
 		w.WriteHeader(http.StatusOK)
@@ -185,7 +185,7 @@ func TestFetcher_GetRetryAfter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				if tt.retryAfter != "" {
 					w.Header().Set("Retry-After", tt.retryAfter)
 				}
