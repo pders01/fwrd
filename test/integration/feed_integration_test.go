@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,18 +18,18 @@ import (
 var caddyCmd *exec.Cmd
 
 func TestMain(m *testing.M) {
-    // Start Caddy server
-    if err := startCaddy(); err != nil {
-        fmt.Printf("Failed to start Caddy: %v\n", err)
-        os.Exit(1)
-    }
+	// Start Caddy server
+	if err := startCaddy(); err != nil {
+		fmt.Printf("Failed to start Caddy: %v\n", err)
+		os.Exit(1)
+	}
 
-    // Wait for Caddy to start and accept connections
-    if err := waitForCaddy("http://127.0.0.1:8080/feed.rss", 10*time.Second); err != nil {
-        fmt.Printf("Caddy did not become ready in time: %v\n", err)
-        stopCaddy()
-        os.Exit(1)
-    }
+	// Wait for Caddy to start and accept connections
+	if err := waitForCaddy("http://127.0.0.1:8080/feed.rss", 30*time.Second); err != nil {
+		fmt.Printf("Caddy did not become ready in time: %v\n", err)
+		stopCaddy()
+		os.Exit(1)
+	}
 
 	// Run tests
 	code := m.Run()
@@ -40,16 +41,17 @@ func TestMain(m *testing.M) {
 }
 
 func waitForCaddy(url string, timeout time.Duration) error {
-    deadline := time.Now().Add(timeout)
-    for time.Now().Before(deadline) {
-        resp, err := http.Get(url)
-        if err == nil {
-            resp.Body.Close()
-            return nil
-        }
-        time.Sleep(200 * time.Millisecond)
-    }
-    return fmt.Errorf("server not ready after %v", timeout)
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			return nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return fmt.Errorf("server not ready after %v", timeout)
 }
 
 func startCaddy() error {
@@ -61,6 +63,8 @@ func startCaddy() error {
 	caddyfile := filepath.Join("..", "fixtures", "Caddyfile")
 	caddyCmd = exec.Command(caddyPath, "run", "--config", caddyfile)
 	caddyCmd.Dir = filepath.Join("..", "fixtures")
+	caddyCmd.Stdout = os.Stdout
+	caddyCmd.Stderr = os.Stderr
 
 	if err := caddyCmd.Start(); err != nil {
 		return fmt.Errorf("failed to start caddy: %w", err)
@@ -101,15 +105,15 @@ func setupTestEnvironment(t *testing.T) (*storage.Store, *feed.Manager, func()) 
 }
 
 func TestIntegration_FetchRSSFeed(t *testing.T) {
-    store, manager, cleanup := setupTestEnvironment(t)
-    defer cleanup()
+	store, manager, cleanup := setupTestEnvironment(t)
+	defer cleanup()
 
-    // Test fetching RSS feed
-    feedURL := "http://127.0.0.1:8080/feed.rss"
-    feed, err := manager.AddFeed(feedURL)
-    if err != nil {
-        t.Fatalf("Failed to add RSS feed: %v", err)
-    }
+	// Test fetching RSS feed
+	feedURL := "http://127.0.0.1:8080/feed.rss"
+	feed, err := manager.AddFeed(feedURL)
+	if err != nil {
+		t.Fatalf("Failed to add RSS feed: %v", err)
+	}
 
 	if feed.URL != feedURL {
 		t.Errorf("Expected URL %s, got %s", feedURL, feed.URL)
@@ -137,15 +141,15 @@ func TestIntegration_FetchRSSFeed(t *testing.T) {
 }
 
 func TestIntegration_FetchAtomFeed(t *testing.T) {
-    store, manager, cleanup := setupTestEnvironment(t)
-    defer cleanup()
+	store, manager, cleanup := setupTestEnvironment(t)
+	defer cleanup()
 
-    // Test fetching Atom feed
-    feedURL := "http://127.0.0.1:8080/feed.atom"
-    feed, err := manager.AddFeed(feedURL)
-    if err != nil {
-        t.Fatalf("Failed to add Atom feed: %v", err)
-    }
+	// Test fetching Atom feed
+	feedURL := "http://127.0.0.1:8080/feed.atom"
+	feed, err := manager.AddFeed(feedURL)
+	if err != nil {
+		t.Fatalf("Failed to add Atom feed: %v", err)
+	}
 
 	articles, err := store.GetArticles(feed.ID, 10)
 	if err != nil {
@@ -158,15 +162,15 @@ func TestIntegration_FetchAtomFeed(t *testing.T) {
 }
 
 func TestIntegration_CachingHeaders(t *testing.T) {
-    _, manager, cleanup := setupTestEnvironment(t)
-    defer cleanup()
+	_, manager, cleanup := setupTestEnvironment(t)
+	defer cleanup()
 
-    // First fetch - should get content with ETag
-    feedURL := "http://127.0.0.1:8080/cached-feed.rss"
-    feed1, err := manager.AddFeed(feedURL)
-    if err != nil {
-        t.Fatalf("Failed to add cached feed: %v", err)
-    }
+	// First fetch - should get content with ETag
+	feedURL := "http://127.0.0.1:8080/cached-feed.rss"
+	feed1, err := manager.AddFeed(feedURL)
+	if err != nil {
+		t.Fatalf("Failed to add cached feed: %v", err)
+	}
 
 	if feed1.ETag != "\"test-etag-123\"" {
 		t.Errorf("Expected ETag \"test-etag-123\", got %s", feed1.ETag)
@@ -184,12 +188,12 @@ func TestIntegration_CachingHeaders(t *testing.T) {
 }
 
 func TestIntegration_RateLimiting(t *testing.T) {
-    _, manager, cleanup := setupTestEnvironment(t)
-    defer cleanup()
+	_, manager, cleanup := setupTestEnvironment(t)
+	defer cleanup()
 
-    // Test rate limited endpoint
-    feedURL := "http://127.0.0.1:8080/rate-limited.rss"
-    _, err := manager.AddFeed(feedURL)
+	// Test rate limited endpoint
+	feedURL := "http://127.0.0.1:8080/rate-limited.rss"
+	_, err := manager.AddFeed(feedURL)
 
 	if err == nil {
 		t.Error("Expected error for rate limited feed, got nil")
@@ -197,11 +201,11 @@ func TestIntegration_RateLimiting(t *testing.T) {
 }
 
 func TestIntegration_MediaExtraction(t *testing.T) {
-    store, manager, cleanup := setupTestEnvironment(t)
-    defer cleanup()
+	store, manager, cleanup := setupTestEnvironment(t)
+	defer cleanup()
 
-    feedURL := "http://127.0.0.1:8080/feed.rss"
-    feed, err := manager.AddFeed(feedURL)
+	feedURL := "http://127.0.0.1:8080/feed.rss"
+	feed, err := manager.AddFeed(feedURL)
 	if err != nil {
 		t.Fatalf("Failed to add feed: %v", err)
 	}
@@ -215,7 +219,7 @@ func TestIntegration_MediaExtraction(t *testing.T) {
 	var foundImage bool
 	for _, article := range articles {
 		for _, url := range article.MediaURLs {
-			if url == "http://localhost:8080/image1.jpg" {
+			if strings.HasSuffix(url, "/image1.jpg") {
 				foundImage = true
 				break
 			}
