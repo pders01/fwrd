@@ -28,7 +28,8 @@ builds:
       - -s -w -X main.Version={{.Version}}
 
 archives:
-  - # this name template makes the OS and Arch compatible with the results of uname.
+  # Default: tar.gz for non-Windows
+  - id: default
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
@@ -36,20 +37,26 @@ archives:
       {{- else if eq .Arch "386" }}i386
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end }}
-    format_overrides:
-      - goos: windows
-        format: zip
+    format: tar.gz
+    # Exclude Windows here; it has its own archive rule
+    goos:
+      - linux
+      - darwin
 
-brews:
-  - name: fwrd
-    homepage: https://github.com/pders01/fwrd
-    description: A terminal-based RSS aggregator built with Go and Charm.sh tools
-    license: MIT
-    skip_upload: true
-    install: |
-      bin.install "fwrd"
-    test: |
-      system "#{bin}/fwrd -version"
+  # Windows: zip
+  - id: windows
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    format: zip
+    goos:
+      - windows
+
+# Homebrew formula step removed to avoid deprecation warnings.
 
 changelog:
   sort: asc
