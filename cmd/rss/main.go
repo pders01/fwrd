@@ -81,26 +81,79 @@ func main() {
 }
 
 func showBanner() {
-	logoStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FF6B6B")).
-		Bold(true)
+	// Create gradient colors for a flashier look
+	colors := []lipgloss.Color{
+		lipgloss.Color("#FF6B6B"),
+		lipgloss.Color("#FFA86B"),
+		lipgloss.Color("#95E1D3"),
+		lipgloss.Color("#4ECDC4"),
+		lipgloss.Color("#FF6B6B"),
+	}
+
+	// Generate ASCII art programmatically with gradient
+	lines := []string{
+		" ▄████ ▄     ▄▄▄▄▄▄   ▄████▄▄",
+		"██▀    ██  ▄ ██   ▀██ ██   ▀██",
+		"██▀▀▀▀ ██ ███ ██▀▀▀█ ██    ██",
+		"██     ███████ ██   ██ ██   ██",
+		"██      ██ ██  ██   ██ ███████",
+		"",
+		"    RSS Feed Aggregator v1.0",
+	}
+
+	// Apply gradient coloring to each line
+	var coloredLines []string
+	for i, line := range lines {
+		if line == "" {
+			coloredLines = append(coloredLines, line)
+			continue
+		}
+
+		// Pick color based on line index
+		colorIdx := i % len(colors)
+		style := lipgloss.NewStyle().
+			Foreground(colors[colorIdx]).
+			Bold(i < 5) // Bold for logo, normal for tagline
+
+		coloredLines = append(coloredLines, style.Render(line))
+	}
+
+	// Create fancy border with animations-like characters
+	borderChars := lipgloss.Border{
+		Top:         "═",
+		Bottom:      "═",
+		Left:        "║",
+		Right:       "║",
+		TopLeft:     "╔",
+		TopRight:    "╗",
+		BottomLeft:  "╚",
+		BottomRight: "╝",
+	}
 
 	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#95E1D3")).
-		Padding(1, 2)
+		Border(borderChars).
+		BorderForeground(lipgloss.Color("#4ECDC4")).
+		Padding(1, 3).
+		MarginTop(1)
 
-	logo := `  ___                     _
- / _|_      ___ __ __| |
-| |_\ \ /\ / / '__/ _' |
-|  _|\ V  V /| | | (_| |
-|_|   \_/\_/ |_|  \__,_|`
+	// Join all lines and render with border
+	banner := lipgloss.JoinVertical(lipgloss.Center, coloredLines...)
+	output := borderStyle.Render(banner)
 
-	banner := borderStyle.Render(logoStyle.Render(logo))
+	// Center the entire banner
+	fmt.Println(lipgloss.NewStyle().
+		Width(70).
+		Align(lipgloss.Center).
+		Render(output))
+
+	// Add a subtle separator line below
+	separator := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#95E1D3")).
+		Render("◆ ◇ ◆ ◇ ◆")
 
 	fmt.Println(lipgloss.NewStyle().
-		Width(60).
+		Width(70).
 		Align(lipgloss.Center).
-		Render(banner))
-	fmt.Println()
+		MarginBottom(1).
+		Render(separator))
 }
