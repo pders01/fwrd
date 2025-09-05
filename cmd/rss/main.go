@@ -102,7 +102,18 @@ func showBanner() {
 		"██     ███████ ██   ██ ██   ██",
 		"██      ██ ██  ██   ██ ███████",
 		"",
-		"    RSS Feed Aggregator v1.0",
+	}
+
+	// Dynamic version tagline
+	versionTag := Version
+	if versionTag != "" && versionTag != "dev" {
+		// prefix with 'v' if not already prefixed
+		if versionTag[0] != 'v' && versionTag[0] != 'V' {
+			versionTag = "v" + versionTag
+		}
+		lines = append(lines, fmt.Sprintf("    RSS Feed Aggregator %s", versionTag))
+	} else {
+		lines = append(lines, "    RSS Feed Aggregator")
 	}
 
 	// Apply gradient coloring to each line

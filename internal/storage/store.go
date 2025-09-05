@@ -3,6 +3,8 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -81,6 +83,18 @@ func (s *Store) GetAllFeeds() ([]*Feed, error) {
 			return nil
 		})
 	})
+	// Sort feeds by Title (case-insensitive), fallback to URL
+	sort.Slice(feeds, func(i, j int) bool {
+		ti := feeds[i].Title
+		tj := feeds[j].Title
+		if ti == "" {
+			ti = feeds[i].URL
+		}
+		if tj == "" {
+			tj = feeds[j].URL
+		}
+		return strings.ToLower(ti) < strings.ToLower(tj)
+	})
 	return feeds, err
 }
 
@@ -104,21 +118,24 @@ func (s *Store) GetArticles(feedID string, limit int) ([]*Article, error) {
 	var articles []*Article
 	err := s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(articlesBucket)
-		c := b.Cursor()
-
-		count := 0
-		for k, v := c.Last(); k != nil && count < limit; k, v = c.Prev() {
+		return b.ForEach(func(_ []byte, v []byte) error {
 			var article Article
 			if err := json.Unmarshal(v, &article); err != nil {
-				continue
+				return nil
 			}
 			if feedID == "" || article.FeedID == feedID {
 				articles = append(articles, &article)
-				count++
 			}
-		}
-		return nil
+			return nil
+		})
 	})
+	// Sort by Published date, newest first
+	sort.Slice(articles, func(i, j int) bool {
+		return articles[i].Published.After(articles[j].Published)
+	})
+	if limit > 0 && len(articles) > limit {
+		articles = articles[:limit]
+	}
 	return articles, err
 }
 

@@ -326,6 +326,10 @@ func (a *App) View() string {
 			content = a.viewport.View()
 		}
 	case ViewAddFeed:
+		inputCentered := lipgloss.NewStyle().
+			Width(a.width).
+			Align(lipgloss.Center, lipgloss.Center).
+			Render(a.textInput.View())
 		content = lipgloss.NewStyle().
 			Width(a.width).
 			Height(a.height-3).
@@ -335,7 +339,7 @@ func (a *App) View() string {
 					lipgloss.Center,
 					TitleStyle.Render("› add feed"),
 					"",
-					a.textInput.View(),
+					inputCentered,
 					"",
 					HelpStyle.Render("Press Enter to add, Esc to cancel"),
 				),
@@ -349,6 +353,10 @@ func (a *App) View() string {
 				current = a.feedToRename.URL
 			}
 		}
+		inputCentered := lipgloss.NewStyle().
+			Width(a.width).
+			Align(lipgloss.Center, lipgloss.Center).
+			Render(a.textInput.View())
 		content = lipgloss.NewStyle().
 			Width(a.width).
 			Height(a.height-3).
@@ -358,7 +366,7 @@ func (a *App) View() string {
 					lipgloss.Center,
 					TitleStyle.Render("› rename feed"),
 					"",
-					a.textInput.View(),
+					inputCentered,
 					"",
 					HelpStyle.Render("Enter: rename • Esc: cancel"),
 					"",

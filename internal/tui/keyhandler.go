@@ -126,6 +126,11 @@ func (kh *KeyHandler) delegateToTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		kh.app.textInput = newTextInput
 		return kh.app, cmd
 
+	case ViewRenameFeed:
+		newTextInput, cmd := kh.app.textInput.Update(msg)
+		kh.app.textInput = newTextInput
+		return kh.app, cmd
+
 	case ViewSearch:
 		// Handle search input
 		newSearchInput, cmd := kh.app.searchInput.Update(msg)

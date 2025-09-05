@@ -150,7 +150,7 @@ func (m *Manager) RefreshAllFeeds() error {
 		go func(f *storage.Feed) {
 			defer wg.Done()
 			if refreshErr := m.RefreshFeed(f.ID); refreshErr != nil {
-				errChan <- err
+				errChan <- refreshErr
 			}
 		}(feed)
 	}
