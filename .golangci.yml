@@ -1,7 +1,7 @@
 linters:
   enable:
     - gofmt
-    - golint
+    - revive
     - govet
     - errcheck
     - staticcheck
@@ -16,7 +16,8 @@ linters:
 
 linters-settings:
   govet:
-    check-shadowing: true
+    enable:
+      - shadow
   dupl:
     threshold: 100
   gocritic:
@@ -33,3 +34,6 @@ issues:
       linters:
         - dupl
         - errcheck
+
+run:
+  timeout: 5m
