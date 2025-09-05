@@ -34,22 +34,26 @@ builds:
     ldflags:
       - -s -w -X main.Version={{.Version}}
 
-brews:
+homebrew_casks:
   - name: fwrd
     repository:
       owner: pders01
       name: homebrew-fwrd
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: https://github.com/pders01/fwrd
     description: A terminal-based RSS aggregator built with Go and Charm.sh tools
     license: MIT
-    directory: Formula
+    # Default directory is Casks; keep default by omitting.
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
-    install: |
-      bin.install "fwrd"
-    test: |
-      system "#{bin}/fwrd", "-version"
+    # For unsigned binaries, inform users how to remove quarantine on macOS.
+    caveats: |
+      On macOS, binaries from third-party taps may be quarantined.
+      If needed, remove quarantine:
+        xattr -dr com.apple.quarantine "$(brew --prefix)/Caskroom/fwrd/*/fwrd"
+    # Generate simple cask installing the binary from archives.
+    binary: fwrd
 
 changelog:
   sort: asc

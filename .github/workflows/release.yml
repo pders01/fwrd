@@ -29,4 +29,7 @@ jobs:
           version: v2.12.0
           args: release --clean
         env:
+          # Token for publishing release assets to this repo
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Personal access token with contents:write permission to pders01/homebrew-fwrd
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
