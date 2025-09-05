@@ -40,6 +40,8 @@ func (kh *KeyHandler) isInTextInputMode() bool {
 	switch kh.app.view {
 	case ViewAddFeed:
 		return kh.app.textInput.Focused()
+	case ViewRenameFeed:
+		return kh.app.textInput.Focused()
 	case ViewSearch:
 		return kh.app.searchInput.Focused()
 	default:
@@ -94,6 +96,13 @@ func (kh *KeyHandler) handleTextInputEnter() (tea.Model, tea.Cmd) {
 			return kh.app, kh.app.addFeed(input)
 		}
 		return kh.app, nil
+
+	case ViewRenameFeed:
+		input := strings.TrimSpace(kh.app.textInput.Value())
+		if input == "" {
+			return kh.app, nil
+		}
+		return kh.app, kh.app.renameFeed(input)
 
 	case ViewSearch:
 		// Select first search result if available
@@ -181,6 +190,16 @@ func (kh *KeyHandler) handleFeedsCustomKeys(key string) (tea.Model, tea.Cmd, boo
 		kh.app.textInput.Reset()
 		kh.app.textInput.Focus()
 		return kh.app, nil, true
+	case kh.modifierKey + "e":
+		if len(kh.app.feeds) > 0 {
+			if i, ok := kh.app.feedList.SelectedItem().(feedItem); ok {
+				kh.app.feedToRename = i.feed
+				kh.app.view = ViewRenameFeed
+				kh.app.textInput.SetValue(i.feed.Title)
+				kh.app.textInput.Focus()
+				return kh.app, nil, true
+			}
+		}
 	case kh.modifierKey + "x":
 		if len(kh.app.feeds) > 0 {
 			if i, ok := kh.app.feedList.SelectedItem().(feedItem); ok {
@@ -385,9 +404,10 @@ func (kh *KeyHandler) selectSearchResult(result searchResultItem) (tea.Model, te
 // navigateBack implements smart back navigation
 func (kh *KeyHandler) navigateBack() (tea.Model, tea.Cmd) {
 	switch kh.app.view {
-	case ViewAddFeed, ViewDeleteConfirm:
+	case ViewAddFeed, ViewDeleteConfirm, ViewRenameFeed:
 		kh.app.view = ViewFeeds
 		kh.app.feedToDelete = nil
+		kh.app.feedToRename = nil
 		return kh.app, nil
 
 	case ViewSearch:
@@ -555,7 +575,7 @@ func (kh *KeyHandler) GetHelpForCurrentView() []string {
 	case ViewFeeds:
 		help := []string{kh.modifierKey + "n: new", kh.modifierKey + "r: refresh", kh.modifierKey + "s: search"}
 		if len(kh.app.feeds) > 0 {
-			help = append(help, kh.modifierKey+"x: delete")
+			help = append(help, kh.modifierKey+"e: rename", kh.modifierKey+"x: delete")
 		}
 		return help
 

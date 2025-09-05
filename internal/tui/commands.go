@@ -132,6 +132,24 @@ func (a *App) addFeed(url string) tea.Cmd {
 	}
 }
 
+func (a *App) renameFeed(newTitle string) tea.Cmd {
+	return func() tea.Msg {
+		if a.feedToRename == nil {
+			return feedRenamedMsg{err: fmt.Errorf("no feed selected for rename")}
+		}
+		f := *a.feedToRename
+		f.Title = strings.TrimSpace(newTitle)
+		if f.Title == "" {
+			return feedRenamedMsg{err: fmt.Errorf("title cannot be empty")}
+		}
+		f.UpdatedAt = time.Now()
+		if err := a.store.SaveFeed(&f); err != nil {
+			return feedRenamedMsg{err: err}
+		}
+		return feedRenamedMsg{err: nil}
+	}
+}
+
 func (a *App) refreshFeeds() tea.Cmd {
 	return func() tea.Msg {
 		feeds, err := a.store.GetAllFeeds()

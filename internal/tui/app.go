@@ -42,6 +42,7 @@ type App struct {
 	currentFeed     *storage.Feed
 	currentArticle  *storage.Article
 	feedToDelete    *storage.Feed
+	feedToRename    *storage.Feed
 	searchResults   []searchResultItem
 	mediaURLs       []string // Current media URLs being displayed
 	width           int
@@ -217,6 +218,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := a.loadFeeds()
 			return a, cmd
 		}
+	case feedRenamedMsg:
+		if msg.err != nil {
+			a.err = msg.err
+		} else {
+			a.view = ViewFeeds
+			a.feedToRename = nil
+			cmd := a.loadFeeds()
+			return a, cmd
+		}
 
 	case feedDeletedMsg:
 		if msg.err != nil {
@@ -328,6 +338,33 @@ func (a *App) View() string {
 					a.textInput.View(),
 					"",
 					HelpStyle.Render("Press Enter to add, Esc to cancel"),
+				),
+			)
+	case ViewRenameFeed:
+		// Prepare current feed name
+		current := ""
+		if a.feedToRename != nil {
+			current = a.feedToRename.Title
+			if current == "" {
+				current = a.feedToRename.URL
+			}
+		}
+		content = lipgloss.NewStyle().
+			Width(a.width).
+			Height(a.height-3).
+			Align(lipgloss.Center, lipgloss.Center).
+			Render(
+				lipgloss.JoinVertical(
+					lipgloss.Center,
+					TitleStyle.Render("› rename feed"),
+					"",
+					a.textInput.View(),
+					"",
+					HelpStyle.Render("Enter: rename • Esc: cancel"),
+					"",
+					lipgloss.NewStyle().
+						Foreground(MutedColor).
+						Render("Current: "+current),
 				),
 			)
 	case ViewDeleteConfirm:
@@ -660,4 +697,8 @@ type feedDeletedMsg struct {
 
 type searchResultsMsg struct {
 	results []searchResultItem
+}
+
+type feedRenamedMsg struct {
+	err error
 }

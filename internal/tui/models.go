@@ -8,6 +8,7 @@ const (
 	ViewReader
 	ViewAddFeed
 	ViewDeleteConfirm
+	ViewRenameFeed
 	ViewSearch
 	ViewMedia
 )
