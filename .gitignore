@@ -54,3 +54,6 @@ fwrd
 
 # Test artifacts created by bbolt when test uses ":memory:" paths
 **/:memory:
+
+# GoReleaser output directory (do not commit release artifacts)
+dist/
