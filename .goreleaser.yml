@@ -34,34 +34,22 @@ builds:
     ldflags:
       - -s -w -X main.Version={{.Version}}
 
-archives:
-  # Default: tar.gz for non-Windows
-  - id: default
-    builds:
-      - unix
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
-    format: tar.gz
-
-  # Windows: zip
-  - id: windows
-    builds:
-      - windows
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
-    format: zip
-
-# Homebrew formula step removed to avoid deprecation warnings.
+brews:
+  - name: fwrd
+    tap:
+      owner: pders01
+      name: homebrew-fwrd
+    homepage: https://github.com/pders01/fwrd
+    description: A terminal-based RSS aggregator built with Go and Charm.sh tools
+    license: MIT
+    folder: Formula
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    install: |
+      bin.install "fwrd"
+    test: |
+      system "#{bin}/fwrd", "-version"
 
 changelog:
   sort: asc
