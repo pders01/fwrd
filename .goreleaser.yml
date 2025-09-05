@@ -34,15 +34,15 @@ builds:
     ldflags:
       - -s -w -X main.Version={{.Version}}
 
-brews:
+homebrew:
   - name: fwrd
-    tap:
+    repository:
       owner: pders01
       name: homebrew-fwrd
     homepage: https://github.com/pders01/fwrd
     description: A terminal-based RSS aggregator built with Go and Charm.sh tools
     license: MIT
-    folder: Formula
+    directory: Formula
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
