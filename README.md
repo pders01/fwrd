@@ -16,9 +16,21 @@ A terminal-based RSS aggregator built with Go and Charm.sh tools. **fwrd** helps
 
 ## Installation
 
+### Using Go
+
 ```bash
 go build -o fwrd cmd/rss/main.go
 ```
+
+### Using Homebrew
+
+```bash
+brew install pders01/fwrd/fwrd
+```
+
+### From Release Binaries
+
+Download the appropriate binary for your platform from the [latest release](https://github.com/pders01/fwrd/releases/latest).
 
 ## Usage
 
@@ -119,6 +131,12 @@ make install
 
 # Build Docker image
 make docker-build
+
+# Create a release with GoReleaser
+make release
+
+# Create a snapshot release with GoReleaser
+make release-snapshot
 ```
 
 ## Dependencies

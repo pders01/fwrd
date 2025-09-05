@@ -40,6 +40,17 @@ archives:
       - goos: windows
         format: zip
 
+brews:
+  - name: fwrd
+    homepage: https://github.com/pders01/fwrd
+    description: A terminal-based RSS aggregator built with Go and Charm.sh tools
+    license: MIT
+    skip_upload: true
+    install: |
+      bin.install "fwrd"
+    test: |
+      system "#{bin}/fwrd -version"
+
 changelog:
   sort: asc
   filters:
