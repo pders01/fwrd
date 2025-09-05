@@ -47,10 +47,6 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end }}
     format: tar.gz
-    # Exclude Windows here; it has its own archive rule
-    goos:
-      - linux
-      - darwin
 
   # Windows: zip
   - id: windows
@@ -64,8 +60,6 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end }}
     format: zip
-    goos:
-      - windows
 
 # Homebrew formula step removed to avoid deprecation warnings.
 
