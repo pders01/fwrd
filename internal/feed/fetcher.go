@@ -26,7 +26,7 @@ func NewFetcher(cfg *config.Config) *Fetcher {
 }
 
 func (f *Fetcher) Fetch(feed *storage.Feed) (*http.Response, bool, error) {
-	req, err := http.NewRequest("GET", feed.URL, nil)
+	req, err := http.NewRequest("GET", feed.URL, http.NoBody)
 	if err != nil {
 		return nil, false, fmt.Errorf("creating request: %w", err)
 	}

@@ -442,7 +442,7 @@ func (kh *KeyHandler) validateFeedURL(input string) error {
 	input = strings.TrimSpace(input)
 
 	// Length validation
-	if len(input) == 0 {
+	if input == "" {
 		return fmt.Errorf("URL cannot be empty")
 	}
 	if len(input) > 2048 {

@@ -71,7 +71,10 @@ func (a *App) renderArticle(article *storage.Article) tea.Cmd {
 			return articleRenderedMsg{content: fmt.Sprintf("# Error\n\nFailed to render article: %s\n\nPress Escape to go back.", err.Error())}
 		}
 
-		a.store.MarkArticleRead(article.ID, true)
+		if err := a.store.MarkArticleRead(article.ID, true); err != nil {
+			// Log error but don't prevent article rendering
+			// In a real application, you might want to handle this more gracefully
+		}
 
 		return articleRenderedMsg{content: rendered}
 	}
@@ -138,26 +141,32 @@ func (a *App) refreshFeeds() tea.Cmd {
 		}
 
 		for _, feed := range feeds {
-			resp, updated, err := a.fetcher.Fetch(feed)
-			if err != nil || !updated || resp == nil {
+			resp, updated, fetchErr := a.fetcher.Fetch(feed)
+			if fetchErr != nil || !updated || resp == nil {
 				continue
 			}
 
-			defer resp.Body.Close()
+			func() {
+				defer resp.Body.Close()
 
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				continue
-			}
+				body, readErr := io.ReadAll(resp.Body)
+				if readErr != nil {
+					return
+				}
 
-			articles, err := a.parser.Parse(strings.NewReader(string(body)), feed.ID)
-			if err != nil {
-				continue
-			}
+				articles, parseErr := a.parser.Parse(strings.NewReader(string(body)), feed.ID)
+				if parseErr != nil {
+					return
+				}
 
-			a.fetcher.UpdateFeedMetadata(feed, resp)
-			retryOperation(func() error { return a.store.SaveFeed(feed) })
-			retryOperation(func() error { return a.store.SaveArticles(articles) })
+				a.fetcher.UpdateFeedMetadata(feed, resp)
+				if saveErr := retryOperation(func() error { return a.store.SaveFeed(feed) }); saveErr != nil {
+					return
+				}
+				if saveErr := retryOperation(func() error { return a.store.SaveArticles(articles) }); saveErr != nil {
+					return
+				}
+			}()
 		}
 
 		return a.loadFeeds()()

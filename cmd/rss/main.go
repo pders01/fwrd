@@ -79,6 +79,7 @@ func main() {
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		store.Close()
 		os.Exit(1)
 	}
 }

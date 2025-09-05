@@ -10,8 +10,6 @@ import (
 	"github.com/pders01/fwrd/internal/storage"
 )
 
-var mediaRegex = regexp.MustCompile(`\.(jpg|jpeg|png|gif|webp|mp4|webm|mkv|avi|mov|mp3|ogg|wav)$`)
-
 type Parser struct {
 	parser *gofeed.Parser
 }

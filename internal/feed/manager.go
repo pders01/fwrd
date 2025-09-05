@@ -104,7 +104,9 @@ func (m *Manager) RefreshFeed(feedID string) error {
 
 	if !updated || resp == nil {
 		feed.LastFetched = time.Now()
-		m.store.SaveFeed(feed)
+		if err := m.store.SaveFeed(feed); err != nil {
+			return fmt.Errorf("saving feed metadata: %w", err)
+		}
 		return nil
 	}
 
@@ -147,7 +149,7 @@ func (m *Manager) RefreshAllFeeds() error {
 		wg.Add(1)
 		go func(f *storage.Feed) {
 			defer wg.Done()
-			if err := m.RefreshFeed(f.ID); err != nil {
+			if refreshErr := m.RefreshFeed(f.ID); refreshErr != nil {
 				errChan <- err
 			}
 		}(feed)

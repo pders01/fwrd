@@ -18,7 +18,7 @@ import (
 	"github.com/pders01/fwrd/internal/storage"
 )
 
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}
@@ -261,12 +261,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.articleList = newListModel
 		cmds = append(cmds, cmd)
 	case ViewReader:
-		switch msg.(type) {
-		case tea.KeyMsg, tea.WindowSizeMsg, tea.MouseMsg:
-			newViewport, cmd := a.viewport.Update(msg)
-			a.viewport = newViewport
-			cmds = append(cmds, cmd)
-		}
+		newViewport, cmd := a.viewport.Update(msg)
+		a.viewport = newViewport
+		cmds = append(cmds, cmd)
 	case ViewAddFeed:
 		newTextInput, cmd := a.textInput.Update(msg)
 		a.textInput = newTextInput
@@ -293,31 +290,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return a, tea.Batch(cmds...)
-}
-
-func (a *App) updateSearchInput(msg tea.Msg) tea.Cmd {
-	var cmds []tea.Cmd
-
-	newSearchInput, cmd := a.searchInput.Update(msg)
-	a.searchInput = newSearchInput
-	cmds = append(cmds, cmd)
-
-	newSearchList, listCmd := a.searchList.Update(msg)
-	a.searchList = newSearchList
-	cmds = append(cmds, listCmd)
-
-	searchQuery := a.searchInput.Value()
-	if searchQuery != "" && len(searchQuery) > 1 && a.view == ViewSearch {
-		var searchCmd tea.Cmd
-		if a.previousView == ViewReader && a.currentArticle != nil {
-			searchCmd = a.performSearchWithContext(searchQuery, "article")
-		} else {
-			searchCmd = a.performSearch(searchQuery)
-		}
-		cmds = append(cmds, searchCmd)
-	}
-
-	return tea.Batch(cmds...)
 }
 
 func (a *App) View() string {

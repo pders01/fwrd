@@ -27,35 +27,3 @@ type Model struct {
 	height         int
 	err            error
 }
-
-type keyMap struct {
-	Up        string
-	Down      string
-	Left      string
-	Right     string
-	Enter     string
-	Back      string
-	Quit      string
-	Help      string
-	Add       string
-	Delete    string
-	Refresh   string
-	MarkRead  string
-	OpenMedia string
-}
-
-var keys = keyMap{
-	Up:        "k",
-	Down:      "j",
-	Left:      "h",
-	Right:     "l",
-	Enter:     "enter",
-	Back:      "esc",
-	Quit:      "q",
-	Help:      "?",
-	Add:       "a",
-	Delete:    "d",
-	Refresh:   "r",
-	MarkRead:  "m",
-	OpenMedia: "o",
-}

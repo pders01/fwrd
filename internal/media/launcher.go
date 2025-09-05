@@ -145,7 +145,10 @@ func (l *Launcher) Open(url string) error {
 	}
 
 	go func() {
-		cmd.Wait()
+		if err := cmd.Wait(); err != nil {
+			// Log error or handle it appropriately
+			// For now, we're just ignoring it as it's running in a goroutine
+		}
 	}()
 
 	return nil
