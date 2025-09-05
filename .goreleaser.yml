@@ -34,7 +34,7 @@ builds:
     ldflags:
       - -s -w -X main.Version={{.Version}}
 
-homebrew:
+brews:
   - name: fwrd
     repository:
       owner: pders01
