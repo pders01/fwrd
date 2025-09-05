@@ -4,15 +4,12 @@ A terminal-based RSS aggregator built with Go and Charm.sh tools. **fwrd** helps
 
 ## Features
 
-- **TUI Interface**: Beautiful terminal interface using Charm.sh's Bubbletea framework
-- **Polite Fetching**: Respects HTTP caching headers (ETag, Last-Modified)
-- **Media Integration**: 
-  - Videos: Opens with iina (macOS) or mpv
-  - Images: Opens with sxiv or feh
-  - PDFs: Opens with system default viewer
-- **Local Storage**: Uses BoltDB for offline reading
-- **Feed Management**: Add, refresh, and manage multiple RSS/Atom feeds
-- **Article Tracking**: Mark articles as read/unread
+- **TUI interface**: Built with Charm's Bubble Tea, Bubbles, Lip Gloss
+- **Searching**: Fast search across feeds and articles
+- **Polite fetching**: Honors ETag and Last-Modified; handles 304/Retry-After
+- **Media integration**: Detects media and opens in appropriate apps
+- **Local storage**: BoltDB-backed offline reading
+- **Feed management**: Add, refresh, delete feeds; track read/unread
 
 ## Installation
 
@@ -23,6 +20,8 @@ go build -o fwrd cmd/rss/main.go
 ```
 
 ### Using Homebrew
+
+Install from the official tap (auto-taps on first install):
 
 ```bash
 brew install pders01/fwrd/fwrd
@@ -44,28 +43,24 @@ Download the appropriate binary for your platform from the [latest release](http
 # Show version
 ./fwrd -version
 
+# Load a specific config file
+./fwrd -config /path/to/config.toml
+
 # Custom database location
 ./fwrd -db /path/to/feeds.db
+
+# Generate a default config (~/.config/fwrd/config.toml)
+./fwrd -generate-config
 ```
 
-### Keyboard Shortcuts
+### Keyboard Shortcuts (default)
 
-**Feed View:**
-- `a` - Add new feed
-- `r` - Refresh all feeds
-- `Enter` - View articles
-- `q` - Quit
+Note: The modifier key defaults to `ctrl` and can be changed in config.
 
-**Article View:**
-- `m` - Mark as read/unread
-- `Enter` - Read article
-- `Esc` - Back to feeds
-- `q` - Quit
-
-**Reader View:**
-- `o` - Open media/links
-- `Esc` - Back to articles
-- `q` - Quit
+- Feeds: `ctrl+n` add • `ctrl+r` refresh • `ctrl+x` delete • `Enter` view articles
+- Articles: `ctrl+m` toggle read • `Enter` read • `esc` back
+- Reader: `ctrl+o` open media/links • `esc` back
+- Global: `ctrl+s` search • `q` quit
 
 ## Architecture
 
@@ -79,7 +74,7 @@ The reader is designed to be a good netizen:
 
 ## Testing
 
-### Running Tests
+### Running tests
 
 ```bash
 # Run all tests
@@ -98,23 +93,12 @@ make coverage
 make test-race
 ```
 
-### Integration Testing
+### Integration testing
 
-Integration tests require Caddy web server. Install it with:
-
-```bash
-# macOS
-brew install caddy
-
-# Or use the Makefile
-make install-caddy
-```
-
-Run integration tests:
+Integration tests use a local Caddy server to serve fixtures. The test suite starts Caddy automatically and waits for readiness. To run locally (requires Caddy installed):
 
 ```bash
-cd test
-./run-integration-tests.sh
+make test-integration
 ```
 
 ## Building
@@ -132,11 +116,13 @@ make install
 # Build Docker image
 make docker-build
 
-# Create a release with GoReleaser
-make release
+# Format and lint
+make fmt
+make lint
 
-# Create a snapshot release with GoReleaser
-make release-snapshot
+# Create a release with GoReleaser (CI recommended)
+make release            # requires GoReleaser installed locally
+make release-snapshot   # builds artifacts but does not publish
 ```
 
 ## Dependencies
@@ -152,16 +138,12 @@ make release-snapshot
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed information about the codebase structure.
 
-## Media Players
+## Media players
 
-The application will try to use the following media players:
+fwrd detects media types (video, image, audio, PDF) and tries players in order configured by platform. You can customize these in the config file.
 
-**macOS:**
-- Video: iina, mpv, vlc
-- Images: sxiv, feh, Preview
-- Audio: mpv, vlc
+Defaults (examples):
+- macOS: Video iina→mpv→vlc • Image Preview/open • Audio mpv→vlc • PDF Preview/open
+- Linux: Video mpv→vlc→mplayer • Image sxiv→feh→eog/xdg-open • Audio mpv→vlc→mplayer • PDF zathura→evince→xdg-open
 
-**Linux:**
-- Video: mpv, vlc, mplayer
-- Images: sxiv, feh, eog
-- Audio: mpv, vlc, mplayer
+If no specific player is found, fwrd falls back to the platform default opener (`open`, `xdg-open`, `start`).
