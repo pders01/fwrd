@@ -59,15 +59,14 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Override database path if provided via flag
+	// Override database path if provided via flag and expand it
 	if *dbPath != "" {
 		cfg.Database.Path = *dbPath
-	}
-
-	// Expand tilde in database path
-	if len(cfg.Database.Path) >= 2 && cfg.Database.Path[:2] == "~/" {
-		home, _ := os.UserHomeDir()
-		cfg.Database.Path = filepath.Join(home, cfg.Database.Path[2:])
+		// Expand tilde in database path
+		if len(cfg.Database.Path) >= 2 && cfg.Database.Path[:2] == "~/" {
+			home, _ := os.UserHomeDir()
+			cfg.Database.Path = filepath.Join(home, cfg.Database.Path[2:])
+		}
 	}
 
 	store, err := storage.NewStore(cfg.Database.Path)

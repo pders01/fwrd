@@ -19,8 +19,9 @@ type Config struct {
 }
 
 type DatabaseConfig struct {
-	Path    string        `mapstructure:"path"`
-	Timeout time.Duration `mapstructure:"timeout"`
+	Path        string        `mapstructure:"path"`
+	Timeout     time.Duration `mapstructure:"timeout"`
+	SearchIndex string        `mapstructure:"search_index"`
 }
 
 type FeedConfig struct {
@@ -87,11 +88,13 @@ type KeyBindings struct {
 func defaultConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
 	dbPath := filepath.Join(homeDir, ".fwrd.db")
+	searchIndexPath := filepath.Join(homeDir, ".fwrd", "index.bleve")
 
 	return &Config{
 		Database: DatabaseConfig{
-			Path:    dbPath,
-			Timeout: 1 * time.Second,
+			Path:        dbPath,
+			Timeout:     1 * time.Second,
+			SearchIndex: searchIndexPath,
 		},
 		Feed: FeedConfig{
 			HTTPTimeout:       30 * time.Second,
@@ -204,7 +207,38 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
+	// Expand paths after loading
+	expandPaths(&config)
+
 	return &config, nil
+}
+
+// expandPath expands ~ to home directory and converts to absolute path
+func expandPath(path string) string {
+	if path == "" {
+		return path
+	}
+
+	// Expand tilde
+	if len(path) >= 2 && path[:2] == "~/" {
+		home, _ := os.UserHomeDir()
+		path = filepath.Join(home, path[2:])
+	}
+
+	// Convert to absolute path if not already absolute
+	if !filepath.IsAbs(path) {
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+	}
+
+	return path
+}
+
+// expandPaths expands all paths in the config
+func expandPaths(cfg *Config) {
+	cfg.Database.Path = expandPath(cfg.Database.Path)
+	cfg.Database.SearchIndex = expandPath(cfg.Database.SearchIndex)
 }
 
 func Save(config *Config, path string) error {
@@ -212,8 +246,9 @@ func Save(config *Config, path string) error {
 
 	// Convert durations to strings for TOML readability
 	dbCfg := map[string]interface{}{
-		"path":    config.Database.Path,
-		"timeout": config.Database.Timeout.String(),
+		"path":         config.Database.Path,
+		"timeout":      config.Database.Timeout.String(),
+		"search_index": config.Database.SearchIndex,
 	}
 
 	feedCfg := map[string]interface{}{

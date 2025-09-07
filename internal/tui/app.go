@@ -136,24 +136,22 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 	}
 
 	// Prefer Bleve-backed engine if available (build with -tags=bleve)
-	// Index path is based on DB path with .bleve extension
-	idxPath := func() string {
+	// Use search index path from config, with fallback logic for special cases
+	idxPath := cfg.Database.SearchIndex
+	if idxPath == "" {
+		// Fallback: derive from DB path
 		dbPath := cfg.Database.Path
-		if dbPath == "" {
-			return "fwrd.bleve"
+		switch {
+		case dbPath == "":
+			idxPath = "fwrd.bleve"
+		case dbPath == ":memory:":
+			// Special case for tests: in-memory DB path
+			idxPath = filepath.Join(os.TempDir(), fmt.Sprintf("fwrd-index-%d.bleve", time.Now().UnixNano()))
+		default:
+			base := strings.TrimSuffix(dbPath, filepath.Ext(dbPath))
+			idxPath = base + ".bleve"
 		}
-		// If using default ~/.fwrd.db, place index at ~/.fwrd/index.bleve
-		home, _ := os.UserHomeDir()
-		if filepath.Base(dbPath) == ".fwrd.db" && filepath.Dir(dbPath) == home {
-			return filepath.Join(home, ".fwrd", "index.bleve")
-		}
-		// Special case for tests: in-memory DB path
-		if dbPath == ":memory:" {
-			return filepath.Join(os.TempDir(), fmt.Sprintf("fwrd-index-%d.bleve", time.Now().UnixNano()))
-		}
-		base := strings.TrimSuffix(dbPath, filepath.Ext(dbPath))
-		return base + ".bleve"
-	}()
+	}
 	if be, err := search.NewBleveEngine(store, idxPath); err == nil && be != nil {
 		app.searchEngine = be
 	} else {

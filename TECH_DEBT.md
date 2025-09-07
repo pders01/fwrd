@@ -21,6 +21,7 @@ This document tracks architectural and maintenance work items for fwrd.
 - [x] Optional `-debug` flag with simple file logger under `~/.fwrd/`
 - [x] Bleve search engine improvements: Close(), snippets/fragments, batch updates
 - [x] Add consistent error message helpers with context via `wrapErr`
+- [x] Published-date index for efficient article sorting without full in-memory sort
 
 ## Search Layer
 
@@ -32,12 +33,12 @@ This document tracks architectural and maintenance work items for fwrd.
 ## Storage Layer
 
 - [x] Avoid scanning all articles: add `articles_by_feed` index
-- [ ] Consider a published‑date index for faster paging without full in‑memory sort
+- [x] Consider a published‑date index for faster paging without full in‑memory sort
 
 ## TUI / UI
 
 - [x] Extract UI components (functional style): `renderHeader(title, subtitle)`, `renderCentered(content)`, `renderInputFrame(...)`
-- [ ] Move repeated styles to branding helpers; reduce ad‑hoc style chains
+- [x] Move repeated styles to branding helpers; reduce ad‑hoc style chains
 - [x] Add a StatusManager with severity (info/success/warn/error)
 - [x] Uniform header/subtitle truncation utilities for narrow terminals
 
@@ -48,8 +49,8 @@ This document tracks architectural and maintenance work items for fwrd.
 
 ## Config / Paths
 
-- [ ] Normalize/expand DB and index paths once during config load; share helpers
-- [ ] Optional config override for search index path (advanced users)
+- [x] Normalize/expand DB and index paths once during config load; share helpers
+- [x] Optional config override for search index path (advanced users)
 
 ## Performance / UX Polish
 
