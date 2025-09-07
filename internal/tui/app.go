@@ -388,16 +388,23 @@ func (a *App) View() string {
 	switch a.view {
 	case ViewFeeds:
 		if len(a.feeds) == 0 {
-			content = lipgloss.NewStyle().
-				Width(a.width).
-				Height(a.height-3).
-				Align(lipgloss.Center, lipgloss.Center).
-				Render(GetWelcomeMessage())
+			content = renderCentered(a.width, a.height-3, GetWelcomeMessage())
 		} else {
-			content = a.feedList.View()
+			header := renderHeader("› feeds", "", a.width)
+			content = lipgloss.JoinVertical(lipgloss.Top, header, "", a.feedList.View())
 		}
 	case ViewArticles:
-		content = a.articleList.View()
+		subtitle := ""
+		if a.currentFeed != nil {
+			// Show feed title or URL as subtitle, truncated
+			st := a.currentFeed.Title
+			if st == "" {
+				st = a.currentFeed.URL
+			}
+			subtitle = truncateEnd(st, a.width-10)
+		}
+		header := renderHeader("› articles", subtitle, a.width)
+		content = lipgloss.JoinVertical(lipgloss.Top, header, "", a.articleList.View())
 	case ViewReader:
 		if a.loadingArticle {
 			content = renderCentered(a.width, a.height-3, renderMuted(MsgLoadingArticle))
