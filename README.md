@@ -69,8 +69,12 @@ Note: The modifier key defaults to `ctrl` and can be changed in config.
 - Search is backed by a Bleve index by default:
   - Default DB path `~/.fwrd.db` ⇒ index at `~/.fwrd/index.bleve`
   - Custom DB path ⇒ index sits next to the DB with a `.bleve` suffix
-  - The index is created on first run, re‑indexed at startup, and updated on add/refresh/delete of feeds and articles.
-  - To force a rebuild, remove the index directory and start fwrd again.
+- The index is created on first run, re‑indexed at startup, and updated on add/refresh/delete of feeds and articles.
+- To force a rebuild, remove the index directory and start fwrd again.
+
+Status Bar
+
+- The bottom status bar provides brief messages and a subtle spinner during long‑running actions like feed refresh or article loading.
 
 ## Architecture
 
