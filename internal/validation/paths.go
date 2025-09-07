@@ -37,7 +37,7 @@ func (ph *PathHandler) GetSecureDBPath(userPath string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		userPath = filepath.Join(homeDir, ".fwrd.db")
+		userPath = filepath.Join(homeDir, ".fwrd", "fwrd.db")
 	}
 
 	return ph.validator.ValidateFile(userPath)

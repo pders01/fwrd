@@ -88,7 +88,7 @@ type KeyBindings struct {
 
 func defaultConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
-	dbPath := filepath.Join(homeDir, ".fwrd.db")
+	dbPath := filepath.Join(homeDir, ".fwrd", "fwrd.db")
 	searchIndexPath := filepath.Join(homeDir, ".fwrd", "index.bleve")
 
 	return &Config{

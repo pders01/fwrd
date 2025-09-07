@@ -33,7 +33,7 @@ Manages media playback and URL handling:
 Provides full‑text search functionality:
 - Bleve engine (default): Robust full‑text indexing and ranking
   - Index lifecycle: created on first use, reindexed at startup from the existing DB, and incrementally updated on add/refresh/delete
-  - Default index path when DB is `~/.fwrd.db`: `~/.fwrd/index.bleve`
+  - Default index path when DB is `~/.fwrd/fwrd.db`: `~/.fwrd/index.bleve`
   - For a custom DB path, the index is placed next to the DB using the same base with a `.bleve` suffix
 - Basic engine fallback: A lightweight in‑memory scorer is used only if Bleve initialization fails
 

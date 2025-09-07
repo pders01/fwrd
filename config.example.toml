@@ -5,8 +5,8 @@
 
 [database]
 # Path to the database file
-# Default: ~/.fwrd.db
-path = "~/.fwrd.db"
+# Default: ~/.fwrd/fwrd.db
+path = "~/.fwrd/fwrd.db"
 # Database operation timeout
 timeout = "1s"
 

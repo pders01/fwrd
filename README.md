@@ -67,7 +67,7 @@ Note: The modifier key defaults to `ctrl` and can be changed in config.
 - `ctrl+s` opens search. If opened from the reader view, it searches inside the current article; otherwise it searches globally across all feeds and articles. When no in‑article matches are found, fwrd automatically falls back to a global search.
 - Input is debounced (~200ms) to keep the UI responsive. A short status flash shows the result count.
 - Search is backed by a Bleve index by default:
-  - Default DB path `~/.fwrd.db` ⇒ index at `~/.fwrd/index.bleve`
+  - Default DB path `~/.fwrd/fwrd.db` ⇒ index at `~/.fwrd/index.bleve`
   - Custom DB path ⇒ index sits next to the DB with a `.bleve` suffix
 - The index is created on first run, re‑indexed at startup, and updated on add/refresh/delete of feeds and articles.
 - To force a rebuild, remove the index directory and start fwrd again.
