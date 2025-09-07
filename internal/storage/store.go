@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -16,10 +18,25 @@ var (
 	metaBucket     = []byte("metadata")
 	// Index bucket: articles_by_feed -> sub-bucket per feedID containing article IDs
 	articlesByFeedBucket = []byte("articles_by_feed")
+	// Index bucket: articles_by_date -> stores article IDs keyed by date for efficient date-sorted queries
+	articlesByDateBucket = []byte("articles_by_date")
 )
 
 type Store struct {
 	db *bolt.DB
+}
+
+// makeDateIndexKey creates a key for the date index that ensures newest-first ordering
+// when iterated with a cursor. Uses reverse timestamp (max - timestamp) for descending order.
+func makeDateIndexKey(published time.Time, articleID string) []byte {
+	// Use nanoseconds since epoch, inverted for reverse order
+	timestamp := published.UnixNano()
+	reverseTimestamp := ^timestamp // Bitwise NOT for reverse ordering
+
+	key := make([]byte, 8+len(articleID))
+	binary.BigEndian.PutUint64(key[:8], uint64(reverseTimestamp))
+	copy(key[8:], articleID) // Append article ID for uniqueness
+	return key
 }
 
 func NewStore(dbPath string) (*Store, error) {
@@ -29,7 +46,7 @@ func NewStore(dbPath string) (*Store, error) {
 	}
 
 	err = db.Update(func(tx *bolt.Tx) error {
-		for _, bucket := range [][]byte{feedsBucket, articlesBucket, metaBucket, articlesByFeedBucket} {
+		for _, bucket := range [][]byte{feedsBucket, articlesBucket, metaBucket, articlesByFeedBucket, articlesByDateBucket} {
 			if _, createErr := tx.CreateBucketIfNotExists(bucket); createErr != nil {
 				return createErr
 			}
@@ -107,6 +124,7 @@ func (s *Store) SaveArticles(articles []*Article) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(articlesBucket)
 		idxRoot := tx.Bucket(articlesByFeedBucket)
+		dateIdx := tx.Bucket(articlesByDateBucket)
 		for _, article := range articles {
 			data, err := json.Marshal(article)
 			if err != nil {
@@ -116,13 +134,21 @@ func (s *Store) SaveArticles(articles []*Article) error {
 				return err
 			}
 
-			// Update index: ensure sub-bucket for this feed exists and record article ID
+			// Update feed index: ensure sub-bucket for this feed exists and record article ID
 			if idxRoot != nil {
 				fb, err := idxRoot.CreateBucketIfNotExists([]byte(article.FeedID))
 				if err != nil {
 					return err
 				}
 				if err := fb.Put([]byte(article.ID), []byte{1}); err != nil {
+					return err
+				}
+			}
+
+			// Update date index: store article ID with reverse timestamp key for newest-first ordering
+			if dateIdx != nil {
+				dateKey := makeDateIndexKey(article.Published, article.ID)
+				if err := dateIdx.Put(dateKey, []byte(article.ID)); err != nil {
 					return err
 				}
 			}
@@ -136,13 +162,16 @@ func (s *Store) GetArticles(feedID string, limit int) ([]*Article, error) {
 		return []*Article{}, nil
 	}
 	var articles []*Article
+	usedDateIndex := false
+
 	err := s.db.View(func(tx *bolt.Tx) error {
 		ab := tx.Bucket(articlesBucket)
 		if ab == nil {
 			return nil
 		}
+
 		if feedID != "" {
-			// Use index for specific feed
+			// Specific feed: collect article IDs from feed index, then sort by date
 			idxRoot := tx.Bucket(articlesByFeedBucket)
 			if idxRoot == nil {
 				return nil
@@ -151,6 +180,8 @@ func (s *Store) GetArticles(feedID string, limit int) ([]*Article, error) {
 			if fb == nil {
 				return nil
 			}
+
+			// Collect all article IDs for this feed
 			c := fb.Cursor()
 			for k, _ := c.First(); k != nil; k, _ = c.Next() {
 				v := ab.Get(k)
@@ -163,26 +194,53 @@ func (s *Store) GetArticles(feedID string, limit int) ([]*Article, error) {
 				}
 				articles = append(articles, &article)
 			}
+			// Will sort after transaction
 			return nil
 		}
 
-		// No feed specified: fall back to scanning all (could be optimized later)
-		return ab.ForEach(func(_ []byte, v []byte) error {
+		// No feed specified: use date index for efficient sorted retrieval
+		dateIdx := tx.Bucket(articlesByDateBucket)
+		if dateIdx == nil {
+			// Fallback to old behavior if index doesn't exist
+			return ab.ForEach(func(_ []byte, v []byte) error {
+				var article Article
+				if err := json.Unmarshal(v, &article); err != nil {
+					return nil
+				}
+				articles = append(articles, &article)
+				return nil
+			})
+		}
+
+		// Use date index cursor to iterate in date order (newest first)
+		usedDateIndex = true
+		c := dateIdx.Cursor()
+		count := 0
+		for k, articleID := c.First(); k != nil && (limit <= 0 || count < limit); k, articleID = c.Next() {
+			v := ab.Get(articleID)
+			if v == nil {
+				continue
+			}
 			var article Article
 			if err := json.Unmarshal(v, &article); err != nil {
-				return nil
+				continue
 			}
 			articles = append(articles, &article)
-			return nil
+			count++
+		}
+		return nil
+	})
+
+	// Sort if we didn't use the date index
+	if !usedDateIndex {
+		sort.Slice(articles, func(i, j int) bool {
+			return articles[i].Published.After(articles[j].Published)
 		})
-	})
-	// Sort by Published date, newest first
-	sort.Slice(articles, func(i, j int) bool {
-		return articles[i].Published.After(articles[j].Published)
-	})
-	if limit > 0 && len(articles) > limit {
-		articles = articles[:limit]
+		if limit > 0 && len(articles) > limit {
+			articles = articles[:limit]
+		}
 	}
+
 	return articles, err
 }
 
@@ -220,12 +278,17 @@ func (s *Store) DeleteFeed(id string) error {
 
 		// Remove its articles using the index
 		ab := tx.Bucket(articlesBucket)
+		dateIdx := tx.Bucket(articlesByDateBucket)
 		idxRoot := tx.Bucket(articlesByFeedBucket)
+
+		var articleIDs [][]byte // Collect article IDs for date index cleanup
+
 		if idxRoot != nil {
 			fb := idxRoot.Bucket([]byte(id))
 			if fb != nil {
 				c := fb.Cursor()
 				for k, _ := c.First(); k != nil; k, _ = c.Next() {
+					articleIDs = append(articleIDs, append([]byte(nil), k...)) // Copy the key
 					if ab != nil {
 						_ = ab.Delete(k)
 					}
@@ -234,6 +297,21 @@ func (s *Store) DeleteFeed(id string) error {
 				if err := idxRoot.DeleteBucket([]byte(id)); err != nil {
 					// If bucket deletion fails, continue to avoid partial state
 					_ = err
+				}
+			}
+		}
+
+		// Clean up date index entries for deleted articles
+		if dateIdx != nil {
+			for _, articleID := range articleIDs {
+				// We need to find and remove entries from date index
+				// Since we don't have the exact date key, we need to scan for entries with this article ID
+				c := dateIdx.Cursor()
+				for k, v := c.First(); k != nil; k, v = c.Next() {
+					if bytes.Equal(v, articleID) {
+						_ = dateIdx.Delete(k)
+						break // Each article should only have one entry
+					}
 				}
 			}
 		}
