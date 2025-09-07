@@ -411,25 +411,20 @@ func (a *App) View() string {
 			content = a.viewport.View()
 		}
 	case ViewAddFeed:
-		inputCentered := lipgloss.NewStyle().
+		header := renderHeader("› add feed", "Enter a feed URL and press Enter")
+		inputBox := lipgloss.NewStyle().
 			Width(a.width).
 			Align(lipgloss.Center, lipgloss.Center).
-			Render(a.textInput.View())
-		content = lipgloss.NewStyle().
-			Width(a.width).
-			Height(a.height-3).
-			Align(lipgloss.Center, lipgloss.Center).
-			Render(
-				lipgloss.JoinVertical(
-					lipgloss.Center,
-					HeaderStyle.Render("› add feed"),
-					lipgloss.NewStyle().Foreground(MutedColor).Render("Enter a feed URL and press Enter"),
-					"",
-					inputCentered,
-					"",
-					HelpStyle.Render("Press Enter to add, Esc to cancel"),
-				),
-			)
+			Render(renderInputFrame(a.textInput.View(), a.textInput.Focused(), a.width-4))
+		body := lipgloss.JoinVertical(
+			lipgloss.Center,
+			header,
+			"",
+			inputBox,
+			"",
+			HelpStyle.Render("Press Enter to add, Esc to cancel"),
+		)
+		content = renderCentered(a.width, a.height-3, body)
 	case ViewRenameFeed:
 		// Prepare current feed name
 		current := ""
@@ -439,29 +434,24 @@ func (a *App) View() string {
 				current = a.feedToRename.URL
 			}
 		}
-		inputCentered := lipgloss.NewStyle().
+		header := renderHeader("› rename feed", "Update the feed title and press Enter")
+		inputBox := lipgloss.NewStyle().
 			Width(a.width).
 			Align(lipgloss.Center, lipgloss.Center).
-			Render(a.textInput.View())
-		content = lipgloss.NewStyle().
-			Width(a.width).
-			Height(a.height-3).
-			Align(lipgloss.Center, lipgloss.Center).
-			Render(
-				lipgloss.JoinVertical(
-					lipgloss.Center,
-					HeaderStyle.Render("› rename feed"),
-					lipgloss.NewStyle().Foreground(MutedColor).Render("Update the feed title and press Enter"),
-					"",
-					inputCentered,
-					"",
-					HelpStyle.Render("Enter: rename • Esc: cancel"),
-					"",
-					lipgloss.NewStyle().
-						Foreground(MutedColor).
-						Render("Current: "+current),
-				),
-			)
+			Render(renderInputFrame(a.textInput.View(), a.textInput.Focused(), a.width-4))
+		body := lipgloss.JoinVertical(
+			lipgloss.Center,
+			header,
+			"",
+			inputBox,
+			"",
+			HelpStyle.Render("Enter: rename • Esc: cancel"),
+			"",
+			lipgloss.NewStyle().
+				Foreground(MutedColor).
+				Render("Current: "+current),
+		)
+		content = renderCentered(a.width, a.height-3, body)
 	case ViewDeleteConfirm:
 		feedName := "Unknown Feed"
 		if a.feedToDelete != nil {
@@ -483,106 +473,81 @@ func (a *App) View() string {
 			feedName = feedName[:modalWidth-7] + "..."
 		}
 
-		content = lipgloss.NewStyle().
-			Width(a.width).
-			Height(a.height-3).
-			Align(lipgloss.Center, lipgloss.Center).
-			Render(
-				lipgloss.JoinVertical(
-					lipgloss.Center,
-					HeaderStyle.Render("› delete feed"),
-					lipgloss.NewStyle().
-						Foreground(ErrorColor).
-						Bold(true).
-						Render("This action cannot be undone"),
-					"",
-					lipgloss.NewStyle().
-						Foreground(TextColor).
-						Width(modalWidth).
-						Align(lipgloss.Center).
-						Render("Delete this feed?"),
-					"",
-					lipgloss.NewStyle().
-						Foreground(UnreadColor).
-						Bold(true).
-						Width(modalWidth).
-						Align(lipgloss.Center).
-						Render(feedName),
-					"",
-					lipgloss.NewStyle().
-						Foreground(MutedColor).
-						Width(modalWidth).
-						Align(lipgloss.Center).
-						Render("This removes all articles."),
-					"",
-					"",
-					HelpStyle.Render("Enter: confirm • Esc: cancel"),
-				),
-			)
-	case ViewSearch:
-		searchInputWidth := a.width - 8 // Account for border, padding, and margins
-		if searchInputWidth < 10 {
-			searchInputWidth = a.width - 4
-		}
-		a.searchInput.Width = searchInputWidth
-
-		inputBorderColor := MutedColor
-		if a.searchInput.Focused() {
-			inputBorderColor = AccentColor
-		}
-
-		searchInput := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(inputBorderColor).
-			Padding(0, 1).
-			Width(searchInputWidth + 4).
-			Render(a.searchInput.View())
-
-		searchHeader := "› search"
-		if a.previousView == ViewReader && a.currentArticle != nil {
-			searchHeader = "› search in article: " + a.currentArticle.Title
-			if len(searchHeader) > a.width-10 {
-				searchHeader = "› search in article: " + a.currentArticle.Title[:a.width-25] + "…"
-			}
-		}
-
-		// Annotate engine type for clarity
-		if _, ok := a.searchEngine.(search.DebugStatser); ok {
-			searchHeader += " • full-text"
-		} else {
-			searchHeader += " • basic"
-		}
-
-		helpText := ""
-		switch {
-		case a.searchInput.Focused():
-			helpText = "Type to search • Tab/↓: results • Esc: back"
-		case len(a.searchList.Items()) > 0:
-			helpText = "↑↓: navigate • Enter: select • Tab/↑: search box • Esc: back"
-		default:
-			helpText = "No results found • Tab/↑: search box • Esc: back"
-		}
-
-		searchContent := lipgloss.JoinVertical(
-			lipgloss.Top,
-			lipgloss.NewStyle().
-				Foreground(SecondaryColor).
-				Bold(true).
-				Render(searchHeader),
+		header := renderHeader("› delete feed", "This action cannot be undone")
+		body := lipgloss.JoinVertical(
+			lipgloss.Center,
+			header,
 			"",
-			searchInput,
+			lipgloss.NewStyle().
+				Foreground(TextColor).
+				Width(modalWidth).
+				Align(lipgloss.Center).
+				Render("Delete this feed?"),
+			"",
+			lipgloss.NewStyle().
+				Foreground(UnreadColor).
+				Bold(true).
+				Width(modalWidth).
+				Align(lipgloss.Center).
+				Render(feedName),
+			"",
 			lipgloss.NewStyle().
 				Foreground(MutedColor).
-				Render(helpText),
+				Width(modalWidth).
+				Align(lipgloss.Center).
+				Render("This removes all articles."),
 			"",
-			a.searchList.View(),
+			"",
+			HelpStyle.Render("Enter: confirm • Esc: cancel"),
 		)
+		content = renderCentered(a.width, a.height-3, body)
+    case ViewSearch:
+        searchInputWidth := a.width - 8 // Account for border, padding, and margins
+        if searchInputWidth < 10 {
+            searchInputWidth = a.width - 4
+        }
+        a.searchInput.Width = searchInputWidth
 
-		content = lipgloss.NewStyle().
-			Width(a.width).
-			Height(a.height - 3).
-			MaxHeight(a.height - 3).
-			Render(searchContent)
+        // Build header + subtitle with engine/context
+        subtitle := "global"
+        if a.previousView == ViewReader && a.currentArticle != nil {
+            subtitle = "in article: " + a.currentArticle.Title
+        }
+        if _, ok := a.searchEngine.(search.DebugStatser); ok {
+            subtitle += " • full-text"
+        } else {
+            subtitle += " • basic"
+        }
+        // Simple truncation until we add a helper
+        if max := a.width - 10; max > 0 && len(subtitle) > max {
+            subtitle = subtitle[:max] + "…"
+        }
+        header := renderHeader("› search", subtitle)
+
+        // Framed input
+        framedInput := renderInputFrame(a.searchInput.View(), a.searchInput.Focused(), searchInputWidth)
+
+        helpText := ""
+        switch {
+        case a.searchInput.Focused():
+            helpText = "Type to search • Tab/↓: results • Esc: back"
+        case len(a.searchList.Items()) > 0:
+            helpText = "↑↓: navigate • Enter: select • Tab/↑: search box • Esc: back"
+        default:
+            helpText = "No results found • Tab/↑: search box • Esc: back"
+        }
+
+        searchContent := lipgloss.JoinVertical(
+            lipgloss.Top,
+            lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render(header),
+            "",
+            framedInput,
+            lipgloss.NewStyle().Foreground(MutedColor).Render(helpText),
+            "",
+            a.searchList.View(),
+        )
+
+        content = lipgloss.NewStyle().Width(a.width).Height(a.height-3).MaxHeight(a.height-3).Render(searchContent)
 	case ViewMedia:
 		content = a.mediaList.View()
 	}

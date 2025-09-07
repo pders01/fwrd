@@ -10,25 +10,30 @@ This document tracks architectural and maintenance work items for fwrd.
 - [x] Add subtle spinner during refresh and article loading
 - [x] Standardize headers (add/rename/delete) + muted subtitles
 - [x] Centralize status messages/formatters
+- [x] Add StatusKind severity for status/spinner styling
+- [x] Promote Bleve tests to default (remove build tag)
+- [x] Fix test stability (unique index path for :memory:, nil DB guards)
+- [x] Index hygiene: delete all article docs on feed delete
+- [x] Reindex errors surfaced (no silent ignore)
+- [x] Storage perf: add `articles_by_feed` index; speed up `GetArticles` and `DeleteFeed`
 
 ## Search Layer
 
-- [ ] Delete hygiene: remove all article docs for a feed on delete (not just the feed doc)
-- [ ] Surface reindex errors (startup) via status/logging instead of ignoring
+- [x] Delete hygiene: remove all article docs for a feed on delete
+- [x] Surface reindex errors (startup) via error return
 - [ ] Add Close() to search engine to flush resources on exit (optional)
 - [ ] Snippets: show highlighted fragments for search results (Bleve fragments)
-- [ ] Promote Bleve tests to default (keep heavy tests behind a tag if needed)
 
 ## Storage Layer
 
-- [ ] Avoid scanning all articles: add `articles_by_feed` index (IDs) or per‑feed buckets
+- [x] Avoid scanning all articles: add `articles_by_feed` index
 - [ ] Consider a published‑date index for faster paging without full in‑memory sort
 
 ## TUI / UI
 
-- [ ] Extract render helpers: `renderHeader(title, subtitle)`, `renderCenteredBox(content)`
+- [ ] Extract UI components (functional style): `renderHeader(title, subtitle)`, `renderCentered(content)`, `renderInputFrame(...)`
 - [ ] Move repeated styles to branding helpers; reduce ad‑hoc style chains
-- [ ] Add a StatusManager (extend current status helpers) with severity (info/warn/error)
+- [x] Add a StatusManager with severity (info/success/warn/error)
 - [ ] Uniform header/subtitle truncation utilities for narrow terminals
 
 ## Error Handling / Observability
@@ -45,4 +50,3 @@ This document tracks architectural and maintenance work items for fwrd.
 
 - [ ] Batch index updates across a refresh loop (single index.Batch)
 - [ ] Add small highlighted snippets in search results for quick scanning
-
