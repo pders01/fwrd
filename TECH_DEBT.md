@@ -97,8 +97,11 @@ This document tracks code quality issues, technical debt, and improvement opport
   - ✅ Added GetArticlesWithCursor() for "next page" operations without rescanning
   - ✅ Improved query performance from O(n log n) to O(n) for feed-specific queries
 
-- [ ] **Dependency Management** (`go.mod`)
-  - Reduce binary size and potential security surface area
+- [x] **Dependency Management** (`go.mod`) ✅ **COMPLETED**
+  - ✅ Consolidated dual TOML libraries (BurntSushi/toml → pelletier/go-toml/v2)
+  - ✅ Cleaned up dependency tree and reduced redundancy
+  - **Decision**: Keep Viper (essential config management) and Bleve (core search functionality)
+  - **Result**: Cleaner dependencies while maintaining all essential functionality
 
 ## Testing & Coverage Improvements
 

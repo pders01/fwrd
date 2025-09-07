@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml/v2"
 )
 
 //go:embed media_types.toml
