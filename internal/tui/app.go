@@ -139,6 +139,10 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 		if filepath.Base(dbPath) == ".fwrd.db" && filepath.Dir(dbPath) == home {
 			return filepath.Join(home, ".fwrd", "index.bleve")
 		}
+		// Special case for tests: in-memory DB path
+		if dbPath == ":memory:" {
+			return filepath.Join(os.TempDir(), fmt.Sprintf("fwrd-index-%d.bleve", time.Now().UnixNano()))
+		}
 		base := strings.TrimSuffix(dbPath, filepath.Ext(dbPath))
 		return base + ".bleve"
 	}()

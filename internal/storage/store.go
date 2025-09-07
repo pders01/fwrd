@@ -73,6 +73,9 @@ func (s *Store) GetFeed(id string) (*Feed, error) {
 }
 
 func (s *Store) GetAllFeeds() ([]*Feed, error) {
+	if s == nil || s.db == nil {
+		return []*Feed{}, nil
+	}
 	var feeds []*Feed
 	err := s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(feedsBucket)
@@ -129,6 +132,9 @@ func (s *Store) SaveArticles(articles []*Article) error {
 }
 
 func (s *Store) GetArticles(feedID string, limit int) ([]*Article, error) {
+	if s == nil || s.db == nil {
+		return []*Article{}, nil
+	}
 	var articles []*Article
 	err := s.db.View(func(tx *bolt.Tx) error {
 		ab := tx.Bucket(articlesBucket)
