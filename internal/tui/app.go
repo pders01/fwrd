@@ -269,7 +269,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.err = msg.err
 		} else {
 			a.view = ViewFeeds
-			a.setStatus(fmt.Sprintf("Added feed '%s' (%d articles)", strings.TrimSpace(msg.title), msg.added), 0)
+			a.setStatus(MsgAddedFeed(msg.title, msg.added), 0)
 			cmd := a.loadFeeds()
 			return a, cmd
 		}
@@ -279,7 +279,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			a.view = ViewFeeds
 			a.feedToRename = nil
-			a.setStatus("Feed renamed", 0)
+			a.setStatus(MsgFeedRenamed, 0)
 			cmd := a.loadFeeds()
 			return a, cmd
 		}
@@ -289,7 +289,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.err = msg.err
 		} else {
 			a.view = ViewFeeds
-			a.setStatus("Feed deleted", 0)
+			a.setStatus(MsgFeedDeleted, 0)
 			a.feedToDelete = nil
 			cmd := a.loadFeeds()
 			return a, cmd
@@ -297,24 +297,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case refreshDoneMsg:
 		// Show a concise summary in the status bar
-		summary := fmt.Sprintf(
-			"Refreshed: %d feeds • %d articles%s%s",
-			msg.updatedFeeds,
-			msg.addedArticles,
-			func() string {
-				if msg.errors > 0 {
-					return fmt.Sprintf(" • %d errors", msg.errors)
-				}
-				return ""
-			}(),
-			func() string {
-				if msg.docCount >= 0 {
-					return fmt.Sprintf(" • idx: %d docs", msg.docCount)
-				}
-				return ""
-			}(),
-		)
-		a.setStatus(summary, 0)
+		a.setStatus(MsgRefreshSummary(msg.updatedFeeds, msg.addedArticles, msg.errors, msg.docCount), 0)
 		a.stopSpinner()
 
 	case searchResultsMsg:
@@ -329,9 +312,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Briefly show result count
 			count := len(msg.results)
 			if count == 0 {
-				a.setStatus("No results", 0)
+				a.setStatus(MsgNoResults, 0)
 			} else {
-				a.setStatus(fmt.Sprintf("%d results", count), 0)
+				a.setStatus(MsgResultsCount(count), 0)
 			}
 		}
 
@@ -417,7 +400,7 @@ func (a *App) View() string {
 				Align(lipgloss.Center, lipgloss.Center).
 				Render(lipgloss.NewStyle().
 					Foreground(MutedColor).
-					Render("Loading article..."))
+					Render(MsgLoadingArticle))
 		} else {
 			content = a.viewport.View()
 		}
@@ -426,21 +409,21 @@ func (a *App) View() string {
 			Width(a.width).
 			Align(lipgloss.Center, lipgloss.Center).
 			Render(a.textInput.View())
-    content = lipgloss.NewStyle().
-        Width(a.width).
-        Height(a.height-3).
-        Align(lipgloss.Center, lipgloss.Center).
-        Render(
-            lipgloss.JoinVertical(
-                lipgloss.Center,
-                HeaderStyle.Render("› add feed"),
-                lipgloss.NewStyle().Foreground(MutedColor).Render("Enter a feed URL and press Enter"),
-                "",
-                inputCentered,
-                "",
-                HelpStyle.Render("Press Enter to add, Esc to cancel"),
-            ),
-        )
+		content = lipgloss.NewStyle().
+			Width(a.width).
+			Height(a.height-3).
+			Align(lipgloss.Center, lipgloss.Center).
+			Render(
+				lipgloss.JoinVertical(
+					lipgloss.Center,
+					HeaderStyle.Render("› add feed"),
+					lipgloss.NewStyle().Foreground(MutedColor).Render("Enter a feed URL and press Enter"),
+					"",
+					inputCentered,
+					"",
+					HelpStyle.Render("Press Enter to add, Esc to cancel"),
+				),
+			)
 	case ViewRenameFeed:
 		// Prepare current feed name
 		current := ""
@@ -454,25 +437,25 @@ func (a *App) View() string {
 			Width(a.width).
 			Align(lipgloss.Center, lipgloss.Center).
 			Render(a.textInput.View())
-    content = lipgloss.NewStyle().
-        Width(a.width).
-        Height(a.height-3).
-        Align(lipgloss.Center, lipgloss.Center).
-        Render(
-            lipgloss.JoinVertical(
-                lipgloss.Center,
-                HeaderStyle.Render("› rename feed"),
-                lipgloss.NewStyle().Foreground(MutedColor).Render("Update the feed title and press Enter"),
-                "",
-                inputCentered,
-                "",
-                HelpStyle.Render("Enter: rename • Esc: cancel"),
-                "",
-                lipgloss.NewStyle().
-                    Foreground(MutedColor).
-                    Render("Current: "+current),
-            ),
-        )
+		content = lipgloss.NewStyle().
+			Width(a.width).
+			Height(a.height-3).
+			Align(lipgloss.Center, lipgloss.Center).
+			Render(
+				lipgloss.JoinVertical(
+					lipgloss.Center,
+					HeaderStyle.Render("› rename feed"),
+					lipgloss.NewStyle().Foreground(MutedColor).Render("Update the feed title and press Enter"),
+					"",
+					inputCentered,
+					"",
+					HelpStyle.Render("Enter: rename • Esc: cancel"),
+					"",
+					lipgloss.NewStyle().
+						Foreground(MutedColor).
+						Render("Current: "+current),
+				),
+			)
 	case ViewDeleteConfirm:
 		feedName := "Unknown Feed"
 		if a.feedToDelete != nil {
@@ -494,24 +477,24 @@ func (a *App) View() string {
 			feedName = feedName[:modalWidth-7] + "..."
 		}
 
-    content = lipgloss.NewStyle().
-        Width(a.width).
-        Height(a.height-3).
-        Align(lipgloss.Center, lipgloss.Center).
-        Render(
-            lipgloss.JoinVertical(
-                lipgloss.Center,
-                HeaderStyle.Render("› delete feed"),
-                lipgloss.NewStyle().
-                    Foreground(ErrorColor).
-                    Bold(true).
-                    Render("This action cannot be undone"),
-                "",
-                lipgloss.NewStyle().
-                    Foreground(TextColor).
-                    Width(modalWidth).
-                    Align(lipgloss.Center).
-                    Render("Delete this feed?"),
+		content = lipgloss.NewStyle().
+			Width(a.width).
+			Height(a.height-3).
+			Align(lipgloss.Center, lipgloss.Center).
+			Render(
+				lipgloss.JoinVertical(
+					lipgloss.Center,
+					HeaderStyle.Render("› delete feed"),
+					lipgloss.NewStyle().
+						Foreground(ErrorColor).
+						Bold(true).
+						Render("This action cannot be undone"),
+					"",
+					lipgloss.NewStyle().
+						Foreground(TextColor).
+						Width(modalWidth).
+						Align(lipgloss.Center).
+						Render("Delete this feed?"),
 					"",
 					lipgloss.NewStyle().
 						Foreground(UnreadColor).

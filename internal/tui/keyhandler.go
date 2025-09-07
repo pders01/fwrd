@@ -95,7 +95,7 @@ func (kh *KeyHandler) handleTextInputEnter() (tea.Model, tea.Cmd) {
 			if err := kh.validateFeedURL(input); err != nil {
 				return kh.app, func() tea.Msg { return errorMsg{err: err} }
 			}
-			kh.app.setStatus("Adding feed…", 0)
+			kh.app.setStatus(MsgAddingFeed, 0)
 			return kh.app, kh.app.addFeed(input)
 		}
 		return kh.app, nil
@@ -105,7 +105,7 @@ func (kh *KeyHandler) handleTextInputEnter() (tea.Model, tea.Cmd) {
 		if input == "" {
 			return kh.app, nil
 		}
-		kh.app.setStatus("Renaming…", 0)
+		kh.app.setStatus(MsgRenaming, 0)
 		return kh.app, kh.app.renameFeed(input)
 
 	case ViewSearch:
@@ -214,8 +214,8 @@ func (kh *KeyHandler) handleFeedsCustomKeys(key string) (tea.Model, tea.Cmd, boo
 			}
 		}
 	case kh.modifierKey + "r":
-		kh.app.setStatus("Refreshing…", 0)
-		return kh.app, tea.Batch(kh.app.startSpinner("Refreshing…"), kh.app.refreshFeeds()), true
+		kh.app.setStatus(MsgRefreshing, 0)
+		return kh.app, tea.Batch(kh.app.startSpinner(MsgRefreshing), kh.app.refreshFeeds()), true
 	}
 	return kh.app, nil, false
 }
@@ -291,12 +291,12 @@ func (kh *KeyHandler) delegateToCharm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				kh.app.currentArticle = i.article
 				kh.app.cameFromSearch = false
 				kh.app.loadingArticle = true // Set loading flag
-				kh.app.setStatus("Loading article…", 0)
+				kh.app.setStatus(MsgLoadingArticle, 0)
 				kh.app.view = ViewReader
 				// Mark article as read when opened
 				markReadCmd := kh.app.markArticleRead(i.article)
 				renderCmd := kh.app.renderArticle(i.article)
-				return kh.app, tea.Batch(kh.app.startSpinner("Loading article…"), markReadCmd, renderCmd)
+				return kh.app, tea.Batch(kh.app.startSpinner(MsgLoadingArticle), markReadCmd, renderCmd)
 			}
 		}
 		return kh.app, cmd
@@ -374,7 +374,7 @@ func (kh *KeyHandler) handleMediaCustomKeys(key string) (tea.Model, tea.Cmd, boo
 func (kh *KeyHandler) handleDeleteConfirmKeys(key string) (tea.Model, tea.Cmd, bool) {
 	if key == "enter" {
 		if kh.app.feedToDelete != nil {
-			kh.app.setStatus("Deleting…", 0)
+			kh.app.setStatus(MsgDeleting, 0)
 			return kh.app, kh.app.deleteFeed(kh.app.feedToDelete.ID), true
 		}
 	}
@@ -392,12 +392,12 @@ func (kh *KeyHandler) selectSearchResult(result searchResultItem) (tea.Model, te
 		kh.app.currentFeed = result.feed
 		kh.app.cameFromSearch = true
 		kh.app.loadingArticle = true // Set loading flag
-		kh.app.setStatus("Loading article…", 0)
+		kh.app.setStatus(MsgLoadingArticle, 0)
 		kh.app.view = ViewReader
 		// Mark article as read when opened
 		markReadCmd := kh.app.markArticleRead(result.article)
 		renderCmd := kh.app.renderArticle(result.article)
-		return kh.app, tea.Batch(kh.app.startSpinner("Loading article…"), markReadCmd, renderCmd)
+		return kh.app, tea.Batch(kh.app.startSpinner(MsgLoadingArticle), markReadCmd, renderCmd)
 	}
 
 	// Validate feed data
