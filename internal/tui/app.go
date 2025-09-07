@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/pders01/fwrd/internal/config"
+	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/media"
 	"github.com/pders01/fwrd/internal/search"
@@ -23,38 +24,39 @@ import (
 )
 
 type App struct {
-	config          *config.Config
-	store           *storage.Store
-	fetcher         *feed.Fetcher
-	parser          *feed.Parser
-	launcher        *media.Launcher
-	searchEngine    search.Searcher
-	keyHandler      *KeyHandler
-	feedList        list.Model
-	articleList     list.Model
-	searchList      list.Model
-	mediaList       list.Model
-	searchInput     textinput.Model
-	viewport        viewport.Model
-	textInput       textinput.Model
-	help            help.Model
-	view            View
-	previousView    View
-	cameFromSearch  bool // Track if current article was selected from search
-	feeds           []*storage.Feed
-	articles        []*storage.Article
-	currentFeed     *storage.Feed
-	currentArticle  *storage.Article
-	feedToDelete    *storage.Feed
-	feedToRename    *storage.Feed
-	searchResults   []searchResultItem
-	mediaURLs       []string // Current media URLs being displayed
-	width           int
-	height          int
-	err             error
-	glamourRenderer *glamour.TermRenderer
-	rendererWidth   int  // Track the width used for the renderer
-	loadingArticle  bool // Track if we're loading an article
+	config           *config.Config
+	store            *storage.Store
+	fetcher          *feed.Fetcher
+	parser           *feed.Parser
+	launcher         *media.Launcher
+	searchEngine     search.Searcher
+	searchEngineType string // "bleve" or "basic" - for UI display
+	keyHandler       *KeyHandler
+	feedList         list.Model
+	articleList      list.Model
+	searchList       list.Model
+	mediaList        list.Model
+	searchInput      textinput.Model
+	viewport         viewport.Model
+	textInput        textinput.Model
+	help             help.Model
+	view             View
+	previousView     View
+	cameFromSearch   bool // Track if current article was selected from search
+	feeds            []*storage.Feed
+	articles         []*storage.Article
+	currentFeed      *storage.Feed
+	currentArticle   *storage.Article
+	feedToDelete     *storage.Feed
+	feedToRename     *storage.Feed
+	searchResults    []searchResultItem
+	mediaURLs        []string // Current media URLs being displayed
+	width            int
+	height           int
+	err              error
+	glamourRenderer  *glamour.TermRenderer
+	rendererWidth    int  // Track the width used for the renderer
+	loadingArticle   bool // Track if we're loading an article
 
 	// Debounced search state
 	searchSeq            int
@@ -152,10 +154,17 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 			idxPath = base + ".bleve"
 		}
 	}
+	// Initialize search engine with fallback strategy
+	debuglog.Infof("Initializing search engine with index path: %s", idxPath)
 	if be, err := search.NewBleveEngine(store, idxPath); err == nil && be != nil {
 		app.searchEngine = be
+		app.searchEngineType = "bleve"
+		debuglog.Infof("Successfully initialized Bleve search engine")
 	} else {
+		debuglog.Errorf("Bleve search engine initialization failed: %v", err)
+		debuglog.Infof("Falling back to basic search engine")
 		app.searchEngine = search.NewEngine(store)
+		app.searchEngineType = "basic"
 	}
 
 	app.keyHandler = NewKeyHandler(app, cfg)
@@ -648,6 +657,18 @@ func (a *App) statusStyle(kind StatusKind) lipgloss.Style {
 		return StatusErrorStyle
 	default:
 		return StatusInfoStyle
+	}
+}
+
+// getSearchEngineStatus returns a formatted string showing the search engine type and status.
+func (a *App) getSearchEngineStatus() string {
+	switch a.searchEngineType {
+	case "bleve":
+		return StatusSuccessStyle.Render("🔍 bleve")
+	case "basic":
+		return StatusWarnStyle.Render("🔍 basic")
+	default:
+		return StatusInfoStyle.Render("🔍 unknown")
 	}
 }
 

@@ -572,7 +572,9 @@ func (kh *KeyHandler) GetHelpForCurrentView() []string {
 		return []string{kh.modifierKey + "o: open media", kh.modifierKey + "s: search"}
 
 	case ViewSearch:
-		return []string{kh.modifierKey + "s: search"}
+		// Include search engine status in search view
+		searchStatus := kh.app.getSearchEngineStatus()
+		return []string{kh.modifierKey + "s: search", searchStatus}
 
 	case ViewMedia:
 		return []string{"enter: open", kh.modifierKey + "o: open", "esc: back"}

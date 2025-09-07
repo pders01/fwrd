@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/storage"
 )
@@ -32,30 +33,57 @@ func (a *App) loadArticles(feedID string) tea.Cmd {
 	}
 }
 
+// Content size limits for security and performance
+const (
+	maxContentSize     = 1024 * 1024 // 1MB max content size
+	maxDescriptionSize = 64 * 1024   // 64KB max description size
+	maxTitleSize       = 1024        // 1KB max title size
+	maxURLSize         = 2048        // 2KB max URL size
+)
+
+// sanitizeAndLimitContent safely truncates content to prevent memory issues
+// and protects against malicious oversized content.
+func sanitizeAndLimitContent(content string, maxSize int) string {
+	if len(content) > maxSize {
+		debuglog.Errorf("Content size (%d bytes) exceeds limit (%d bytes), truncating", len(content), maxSize)
+		truncated := content[:maxSize-100] // Leave room for truncation message
+		return truncated + "\n\n**[Content truncated due to size limit]**"
+	}
+	return content
+}
+
 func (a *App) renderArticle(article *storage.Article) tea.Cmd {
 	return func() tea.Msg {
 		var content strings.Builder
-		content.WriteString(fmt.Sprintf("# %s\n\n", article.Title))
+
+		// Apply size limits for security and performance
+		safeTitle := sanitizeAndLimitContent(article.Title, maxTitleSize)
+		content.WriteString(fmt.Sprintf("# %s\n\n", safeTitle))
 		content.WriteString(fmt.Sprintf("*Published: %s*\n\n", article.Published.Format(time.RFC1123)))
 
 		if article.URL != "" {
-			content.WriteString(fmt.Sprintf("[Read Online](%s)\n\n", article.URL))
+			safeURL := sanitizeAndLimitContent(article.URL, maxURLSize)
+			content.WriteString(fmt.Sprintf("[Read Online](%s)\n\n", safeURL))
 		}
 
 		if len(article.MediaURLs) > 0 {
 			content.WriteString("**Media:**\n")
 			for _, url := range article.MediaURLs {
-				content.WriteString(fmt.Sprintf("- %s\n", url))
+				safeMediaURL := sanitizeAndLimitContent(url, maxURLSize)
+				content.WriteString(fmt.Sprintf("- %s\n", safeMediaURL))
 			}
 			content.WriteString("\n")
 		}
 
 		content.WriteString("---\n\n")
 
+		// Apply content size limits with appropriate maximums
 		if article.Content != "" {
-			content.WriteString(article.Content)
+			safeContent := sanitizeAndLimitContent(article.Content, maxContentSize)
+			content.WriteString(safeContent)
 		} else {
-			content.WriteString(article.Description)
+			safeDescription := sanitizeAndLimitContent(article.Description, maxDescriptionSize)
+			content.WriteString(safeDescription)
 		}
 
 		// Use cached renderer for better performance
