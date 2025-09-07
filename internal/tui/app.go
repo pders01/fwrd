@@ -416,15 +416,15 @@ func (a *App) View() string {
 			Width(a.width).
 			Align(lipgloss.Center, lipgloss.Center).
 			Render(renderInputFrame(a.textInput.View(), a.textInput.Focused(), a.width-4))
-		body := lipgloss.JoinVertical(
-			lipgloss.Center,
-			header,
-			"",
-			inputBox,
-			"",
-			HelpStyle.Render("Press Enter to add, Esc to cancel"),
-		)
-		content = renderCentered(a.width, a.height-3, body)
+        body := lipgloss.JoinVertical(
+            lipgloss.Center,
+            header,
+            "",
+            inputBox,
+            "",
+            renderHelp("Press Enter to add, Esc to cancel"),
+        )
+        content = renderCentered(a.width, a.height-3, body)
 	case ViewRenameFeed:
 		// Prepare current feed name
 		current := ""
@@ -439,19 +439,19 @@ func (a *App) View() string {
 			Width(a.width).
 			Align(lipgloss.Center, lipgloss.Center).
 			Render(renderInputFrame(a.textInput.View(), a.textInput.Focused(), a.width-4))
-		body := lipgloss.JoinVertical(
-			lipgloss.Center,
-			header,
-			"",
-			inputBox,
-			"",
-			HelpStyle.Render("Enter: rename • Esc: cancel"),
-			"",
-			lipgloss.NewStyle().
-				Foreground(MutedColor).
-				Render("Current: "+current),
-		)
-		content = renderCentered(a.width, a.height-3, body)
+        body := lipgloss.JoinVertical(
+            lipgloss.Center,
+            header,
+            "",
+            inputBox,
+            "",
+            renderHelp("Enter: rename • Esc: cancel"),
+            "",
+            lipgloss.NewStyle().
+                Foreground(MutedColor).
+                Render("Current: "+current),
+        )
+        content = renderCentered(a.width, a.height-3, body)
 	case ViewDeleteConfirm:
 		feedName := "Unknown Feed"
 		if a.feedToDelete != nil {
@@ -472,33 +472,33 @@ func (a *App) View() string {
 		feedName = truncateEnd(feedName, modalWidth-4)
 
 		header := renderHeader("› delete feed", "This action cannot be undone", a.width)
-		body := lipgloss.JoinVertical(
-			lipgloss.Center,
-			header,
-			"",
-			lipgloss.NewStyle().
-				Foreground(TextColor).
-				Width(modalWidth).
-				Align(lipgloss.Center).
-				Render("Delete this feed?"),
-			"",
-			lipgloss.NewStyle().
-				Foreground(UnreadColor).
-				Bold(true).
-				Width(modalWidth).
-				Align(lipgloss.Center).
-				Render(feedName),
-			"",
-			lipgloss.NewStyle().
-				Foreground(MutedColor).
-				Width(modalWidth).
-				Align(lipgloss.Center).
-				Render("This removes all articles."),
-			"",
-			"",
-			HelpStyle.Render("Enter: confirm • Esc: cancel"),
-		)
-		content = renderCentered(a.width, a.height-3, body)
+        body := lipgloss.JoinVertical(
+            lipgloss.Center,
+            header,
+            "",
+            lipgloss.NewStyle().
+                Foreground(TextColor).
+                Width(modalWidth).
+                Align(lipgloss.Center).
+                Render("Delete this feed?"),
+            "",
+            lipgloss.NewStyle().
+                Foreground(UnreadColor).
+                Bold(true).
+                Width(modalWidth).
+                Align(lipgloss.Center).
+                Render(feedName),
+            "",
+            lipgloss.NewStyle().
+                Foreground(MutedColor).
+                Width(modalWidth).
+                Align(lipgloss.Center).
+                Render("This removes all articles."),
+            "",
+            "",
+            renderHelp("Enter: confirm • Esc: cancel"),
+        )
+        content = renderCentered(a.width, a.height-3, body)
 	case ViewSearch:
 		searchInputWidth := a.width - 8 // Account for border, padding, and margins
 		if searchInputWidth < 10 {
@@ -518,30 +518,30 @@ func (a *App) View() string {
 		}
 		// Truncate subtitle to fit
 		subtitle = truncateEnd(subtitle, a.width-10)
-		header := renderHeader("› search", subtitle, a.width)
+        header := renderHeader("› search", subtitle, a.width)
 
 		// Framed input
 		framedInput := renderInputFrame(a.searchInput.View(), a.searchInput.Focused(), searchInputWidth)
 
-		helpText := ""
-		switch {
-		case a.searchInput.Focused():
-			helpText = "Type to search • Tab/↓: results • Esc: back"
-		case len(a.searchList.Items()) > 0:
-			helpText = "↑↓: navigate • Enter: select • Tab/↑: search box • Esc: back"
-		default:
-			helpText = "No results found • Tab/↑: search box • Esc: back"
-		}
+        helpText := ""
+        switch {
+        case a.searchInput.Focused():
+            helpText = "Type to search • Tab/↓: results • Esc: back"
+        case len(a.searchList.Items()) > 0:
+            helpText = "↑↓: navigate • Enter: select • Tab/↑: search box • Esc: back"
+        default:
+            helpText = "No results found • Tab/↑: search box • Esc: back"
+        }
 
-		searchContent := lipgloss.JoinVertical(
-			lipgloss.Top,
-			lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render(header),
-			"",
-			framedInput,
-			lipgloss.NewStyle().Foreground(MutedColor).Render(helpText),
-			"",
-			a.searchList.View(),
-		)
+        searchContent := lipgloss.JoinVertical(
+            lipgloss.Top,
+            header,
+            "",
+            framedInput,
+            renderMuted(helpText),
+            "",
+            a.searchList.View(),
+        )
 
 		content = lipgloss.NewStyle().Width(a.width).Height(a.height - 3).MaxHeight(a.height - 3).Render(searchContent)
 	case ViewMedia:
@@ -726,14 +726,14 @@ func (i searchResultItem) Title() string {
 }
 
 func (i searchResultItem) Description() string {
-	if i.isArticle {
-		desc := i.article.Description
-		// Make search result description responsive
-		// Use a reasonable description length for search results
-		maxDescLength := 50
-		if len(desc) > maxDescLength {
-			desc = desc[:maxDescLength] + "…"
-		}
+    if i.isArticle {
+        desc := i.article.Description
+        // Make search result description responsive
+        // Use a reasonable description length for search results
+        maxDescLength := 50
+        if len(desc) > maxDescLength {
+            desc = desc[:maxDescLength] + "…"
+        }
 
 		// Show which feed this article belongs to
 		feedName := "Unknown Feed"
@@ -749,14 +749,15 @@ func (i searchResultItem) Description() string {
 			timeStr = i.article.Published.Format("Jan 2")
 		}
 
-		return lipgloss.NewStyle().
-			Foreground(MutedColor).
-			Render(desc + " • from " + feedName + " • " + timeStr)
-	}
+        return lipgloss.NewStyle().
+            Foreground(MutedColor).
+            Render(desc + " • from " + feedName + " • " + timeStr)
+    }
 
-	return lipgloss.NewStyle().
-		Foreground(MutedColor).
-		Render(i.feed.URL)
+    url := truncateMiddle(i.feed.URL, 80)
+    return lipgloss.NewStyle().
+        Foreground(MutedColor).
+        Render(url)
 }
 
 func (i searchResultItem) FilterValue() string {
@@ -791,12 +792,9 @@ func (i mediaItem) Title() string {
 }
 
 func (i mediaItem) Description() string {
-	// Show truncated URL
-	url := i.url
-	if len(url) > 80 {
-		url = url[:77] + "..."
-	}
-	return url
+    // Show truncated URL
+    url := truncateMiddle(i.url, 80)
+    return url
 }
 
 func (i mediaItem) FilterValue() string {
