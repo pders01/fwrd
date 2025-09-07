@@ -29,6 +29,13 @@ func NewManager(store *storage.Store, cfg *config.Config) *Manager {
 	}
 }
 
+// SetForceRefresh configures the manager to ignore ETag/Last-Modified headers
+func (m *Manager) SetForceRefresh(force bool) {
+	if m.fetcher != nil {
+		m.fetcher.SetIgnoreCache(force)
+	}
+}
+
 func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

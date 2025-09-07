@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/debuglog"
+	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/storage"
 	"github.com/pders01/fwrd/internal/tui"
 )
@@ -257,10 +258,22 @@ func addFeed(_ *cobra.Command, args []string) {
 		log.Fatal(err)
 	}
 
-	// TODO: Implement feed addition logic
-	// This would involve fetching the feed, parsing it, and saving it
+	manager := feed.NewManager(store, cfg)
+
 	fmt.Printf("Adding feed: %s\n", url)
-	fmt.Println("Note: Feed addition via CLI not yet implemented. Use the TUI interface.")
+	feed, err := manager.AddFeed(url)
+	if err != nil {
+		store.Close()
+		log.Fatalf("Failed to add feed: %v", err)
+	}
+
+	fmt.Printf("Successfully added feed: %s (%s)\n", feed.Title, feed.URL)
+	fmt.Printf("Feed ID: %s\n", feed.ID)
+
+	// Get article count
+	articles, _ := store.GetArticles(feed.ID, 0)
+	fmt.Printf("Articles fetched: %d\n", len(articles))
+
 	store.Close()
 }
 
@@ -320,12 +333,21 @@ func refreshFeeds(_ *cobra.Command, _ []string) {
 		log.Fatal(err)
 	}
 
-	// TODO: Implement CLI refresh logic with force option
-	fmt.Println("Refreshing feeds...")
+	manager := feed.NewManager(store, cfg)
+
+	// Set force refresh if requested
 	if forceRefresh {
 		fmt.Println("Force refresh enabled - ignoring ETag/Last-Modified headers")
+		manager.SetForceRefresh(true)
 	}
-	fmt.Println("Note: Feed refresh via CLI not yet implemented. Use the TUI interface.")
+
+	fmt.Println("Refreshing all feeds...")
+	if err := manager.RefreshAllFeeds(); err != nil {
+		store.Close()
+		log.Fatalf("Failed to refresh feeds: %v", err)
+	}
+
+	fmt.Println("Successfully refreshed all feeds.")
 	store.Close()
 }
 
