@@ -26,7 +26,7 @@ func (a *App) loadArticles(feedID string) tea.Cmd {
 	return func() tea.Msg {
 		articles, err := a.store.GetArticles(feedID, 50)
 		if err != nil {
-			return errorMsg{err: err}
+			return errorMsg{err: wrapErr("load articles", err)}
 		}
 		return articlesLoadedMsg{articles: articles}
 	}
@@ -95,7 +95,7 @@ func (a *App) addFeed(url string) tea.Cmd {
 
 		resp, updated, err := a.fetcher.Fetch(newFeed)
 		if err != nil {
-			return feedAddedMsg{err: err}
+			return feedAddedMsg{err: wrapErr("fetch feed", err)}
 		}
 
 		if !updated || resp == nil {
@@ -106,12 +106,12 @@ func (a *App) addFeed(url string) tea.Cmd {
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return feedAddedMsg{err: err}
+			return feedAddedMsg{err: wrapErr("read feed response", err)}
 		}
 
 		articles, err := a.parser.Parse(strings.NewReader(string(body)), feedID)
 		if err != nil {
-			return feedAddedMsg{err: err}
+			return feedAddedMsg{err: wrapErr("parse feed", err)}
 		}
 
 		if len(articles) > 0 && articles[0].Title != "" {
@@ -121,11 +121,11 @@ func (a *App) addFeed(url string) tea.Cmd {
 		a.fetcher.UpdateFeedMetadata(newFeed, resp)
 
 		if err := retryOperation(func() error { return a.store.SaveFeed(newFeed) }); err != nil {
-			return feedAddedMsg{err: err}
+			return feedAddedMsg{err: wrapErr("save feed", err)}
 		}
 
 		if err := retryOperation(func() error { return a.store.SaveArticles(articles) }); err != nil {
-			return feedAddedMsg{err: err}
+			return feedAddedMsg{err: wrapErr("save articles", err)}
 		}
 
 		// Notify search engine to index the new feed and articles
@@ -261,11 +261,14 @@ func (a *App) markArticleRead(article *storage.Article) tea.Cmd {
 func (a *App) deleteFeed(feedID string) tea.Cmd {
 	return func() tea.Msg {
 		err := retryOperation(func() error { return a.store.DeleteFeed(feedID) })
+		if err != nil {
+			return feedDeletedMsg{err: wrapErr("delete feed", err)}
+		}
 		// Notify search engine about deletion
-		if dl, ok := a.searchEngine.(search.DeleteListener); ok && err == nil {
+		if dl, ok := a.searchEngine.(search.DeleteListener); ok {
 			dl.OnFeedDeleted(feedID)
 		}
-		return feedDeletedMsg{err: err}
+		return feedDeletedMsg{err: nil}
 	}
 }
 

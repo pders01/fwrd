@@ -38,7 +38,7 @@ This document tracks architectural and maintenance work items for fwrd.
 
 ## Error Handling / Observability
 
-- [ ] Add consistent error message helpers with context (fetch, parse, index)
+- [x] Add consistent error message helpers with context (fetch, parse, index)
 - [ ] Optional `-debug` flag writing a rotating log under `~/.fwrd/`
 
 ## Config / Paths
