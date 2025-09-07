@@ -21,26 +21,26 @@ func truncateEnd(s string, limit int) string {
 // start and end of the string with a single ellipsis in the middle.
 // Useful for URLs and paths where both ends carry meaning.
 func truncateMiddle(s string, limit int) string {
-    if limit <= 0 {
-        return ""
-    }
-    r := []rune(s)
-    n := len(r)
-    if n <= limit {
-        return s
-    }
-    if limit <= 1 {
-        return "…"
-    }
-    // Split remaining space equally around the ellipsis
-    keep := limit - 1
-    left := keep / 2
-    right := keep - left
-    if left <= 0 {
-        return "…" + string(r[n-right:])
-    }
-    if right <= 0 {
-        return string(r[:left]) + "…"
-    }
-    return string(r[:left]) + "…" + string(r[n-right:])
+	if limit <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	n := len(r)
+	if n <= limit {
+		return s
+	}
+	if limit <= 1 {
+		return "…"
+	}
+	// Split remaining space equally around the ellipsis
+	keep := limit - 1
+	left := keep / 2
+	right := keep - left
+	if left <= 0 {
+		return "…" + string(r[n-right:])
+	}
+	if right <= 0 {
+		return string(r[:left]) + "…"
+	}
+	return string(r[:left]) + "…" + string(r[n-right:])
 }
