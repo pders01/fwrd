@@ -128,7 +128,12 @@ func (a *App) addFeed(url string) tea.Cmd {
 			return feedAddedMsg{err: err}
 		}
 
-		return feedAddedMsg{err: nil}
+		// Notify search engine to index the new feed and articles
+		if ul, ok := a.searchEngine.(search.UpdateListener); ok {
+			ul.OnDataUpdated(newFeed, articles)
+		}
+
+		return feedAddedMsg{err: nil, added: len(articles), title: newFeed.Title}
 	}
 }
 
@@ -157,9 +162,15 @@ func (a *App) refreshFeeds() tea.Cmd {
 			return errorMsg{err: err}
 		}
 
+		updatedFeeds := 0
+		addedArticles := 0
+		fetchErrors := 0
 		for _, feed := range feeds {
 			resp, updated, fetchErr := a.fetcher.Fetch(feed)
 			if fetchErr != nil || !updated || resp == nil {
+				if fetchErr != nil {
+					fetchErrors++
+				}
 				continue
 			}
 
@@ -168,25 +179,47 @@ func (a *App) refreshFeeds() tea.Cmd {
 
 				body, readErr := io.ReadAll(resp.Body)
 				if readErr != nil {
+					fetchErrors++
 					return
 				}
 
 				articles, parseErr := a.parser.Parse(strings.NewReader(string(body)), feed.ID)
 				if parseErr != nil {
+					fetchErrors++
 					return
 				}
 
 				a.fetcher.UpdateFeedMetadata(feed, resp)
 				if saveErr := retryOperation(func() error { return a.store.SaveFeed(feed) }); saveErr != nil {
+					fetchErrors++
 					return
 				}
 				if saveErr := retryOperation(func() error { return a.store.SaveArticles(articles) }); saveErr != nil {
+					fetchErrors++
 					return
 				}
+
+				// Notify search engine about updated feed and articles
+				if ul, ok := a.searchEngine.(search.UpdateListener); ok {
+					ul.OnDataUpdated(feed, articles)
+				}
+
+				updatedFeeds++
+				addedArticles += len(articles)
 			}()
 		}
 
-		return a.loadFeeds()()
+		// Try to fetch doc count from search engine (if available)
+		docCount := -1
+		if ds, ok := a.searchEngine.(search.DebugStatser); ok {
+			if n, err := ds.DocCount(); err == nil {
+				docCount = n
+			}
+		}
+
+		// Reload feeds and return a summary message
+		_ = a.loadFeeds()()
+		return refreshDoneMsg{updatedFeeds: updatedFeeds, addedArticles: addedArticles, errors: fetchErrors, docCount: docCount}
 	}
 }
 
@@ -218,6 +251,10 @@ func (a *App) markArticleRead(article *storage.Article) tea.Cmd {
 func (a *App) deleteFeed(feedID string) tea.Cmd {
 	return func() tea.Msg {
 		err := retryOperation(func() error { return a.store.DeleteFeed(feedID) })
+		// Notify search engine about deletion
+		if dl, ok := a.searchEngine.(search.DeleteListener); ok && err == nil {
+			dl.OnFeedDeleted(feedID)
+		}
 		return feedDeletedMsg{err: err}
 	}
 }
@@ -235,6 +272,10 @@ func (a *App) performSearchWithContext(query, context string) tea.Cmd {
 		if context == "article" && a.currentArticle != nil {
 			// Search within current article
 			searchResults, err = a.searchEngine.SearchInArticle(a.currentArticle, query)
+			// If no results in-article, fall back to global to avoid empty UX
+			if err == nil && len(searchResults) == 0 {
+				searchResults, err = a.searchEngine.Search(query, 20)
+			}
 		} else {
 			// Global search with limit
 			searchResults, err = a.searchEngine.Search(query, 20)

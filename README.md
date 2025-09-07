@@ -5,7 +5,7 @@ A terminal-based RSS aggregator built with Go and Charm.sh tools. **fwrd** helps
 ## Features
 
 - **TUI interface**: Built with Charm's Bubble Tea, Bubbles, Lip Gloss
-- **Searching**: Fast search across feeds and articles
+- **Full‑text search**: Bleve‑powered search across feeds and articles with debounced input
 - **Polite fetching**: Honors ETag and Last-Modified; handles 304/Retry-After
 - **Media integration**: Detects media and opens in appropriate apps
 - **Local storage**: BoltDB-backed offline reading
@@ -62,6 +62,16 @@ Note: The modifier key defaults to `ctrl` and can be changed in config.
 - Reader: `ctrl+o` open media/links • `esc` back
 - Global: `ctrl+s` search • `q` quit
 
+### Search
+
+- `ctrl+s` opens search. If opened from the reader view, it searches inside the current article; otherwise it searches globally across all feeds and articles. When no in‑article matches are found, fwrd automatically falls back to a global search.
+- Input is debounced (~200ms) to keep the UI responsive. A short status flash shows the result count.
+- Search is backed by a Bleve index by default:
+  - Default DB path `~/.fwrd.db` ⇒ index at `~/.fwrd/index.bleve`
+  - Custom DB path ⇒ index sits next to the DB with a `.bleve` suffix
+  - The index is created on first run, re‑indexed at startup, and updated on add/refresh/delete of feeds and articles.
+  - To force a rebuild, remove the index directory and start fwrd again.
+
 ## Architecture
 
 The reader is designed to be a good netizen:
@@ -91,6 +101,13 @@ make coverage
 
 # Run tests with race detection
 make test-race
+```
+
+Bleve index debug (optional)
+
+```bash
+# Inspect the existing on-disk index (used for debugging)
+go test -tags=bleve -v -run TestDebugExistingIndex ./internal/search
 ```
 
 ### Integration testing
@@ -133,10 +150,15 @@ make release-snapshot   # builds artifacts but does not publish
 - `github.com/charmbracelet/glamour` - Markdown rendering
 - `github.com/mmcdole/gofeed` - RSS/Atom parsing
 - `go.etcd.io/bbolt` - Embedded database
+- `github.com/blevesearch/bleve/v2` - Full‑text search engine
 
 ## Architecture
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed information about the codebase structure.
+
+Notes on Search
+- The UI uses debounced input and shows brief status messages (500ms) for action feedback.
+- The search engine prioritizes title/description/content (with sensible boosts) and also considers URL text.
 
 ## Media players
 

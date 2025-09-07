@@ -2,7 +2,10 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/list"
@@ -24,7 +27,7 @@ type App struct {
 	fetcher         *feed.Fetcher
 	parser          *feed.Parser
 	launcher        *media.Launcher
-	searchEngine    *search.Engine
+	searchEngine    search.Searcher
 	keyHandler      *KeyHandler
 	feedList        list.Model
 	articleList     list.Model
@@ -51,6 +54,15 @@ type App struct {
 	glamourRenderer *glamour.TermRenderer
 	rendererWidth   int  // Track the width used for the renderer
 	loadingArticle  bool // Track if we're loading an article
+
+	// Debounced search state
+	searchSeq            int
+	pendingSearchQuery   string
+	searchDebounceMillis int
+
+	// Transient status bar message
+	statusText  string
+	statusUntil time.Time
 }
 
 func NewApp(store *storage.Store, cfg *config.Config) *App {
@@ -88,24 +100,46 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 	si.Placeholder = "Search feeds and articles..."
 
 	app := &App{
-		config:         cfg,
-		store:          store,
-		fetcher:        feed.NewFetcher(cfg),
-		parser:         feed.NewParser(),
-		launcher:       media.NewLauncher(cfg),
-		searchEngine:   search.NewEngine(store),
-		feedList:       feedList,
-		articleList:    articleList,
-		searchList:     searchList,
-		mediaList:      mediaList,
-		searchInput:    si,
-		viewport:       vp,
-		textInput:      ti,
-		help:           help.New(),
-		view:           ViewFeeds,
-		previousView:   ViewFeeds,            // Initialize previous view
-		cameFromSearch: false,                // Initialize navigation flag
-		searchResults:  []searchResultItem{}, // Initialize empty search results
+		config:   cfg,
+		store:    store,
+		fetcher:  feed.NewFetcher(cfg),
+		parser:   feed.NewParser(),
+		launcher: media.NewLauncher(cfg),
+		// searchEngine set below (Bleve if available, otherwise fallback)
+		feedList:             feedList,
+		articleList:          articleList,
+		searchList:           searchList,
+		mediaList:            mediaList,
+		searchInput:          si,
+		viewport:             vp,
+		textInput:            ti,
+		help:                 help.New(),
+		view:                 ViewFeeds,
+		previousView:         ViewFeeds,            // Initialize previous view
+		cameFromSearch:       false,                // Initialize navigation flag
+		searchResults:        []searchResultItem{}, // Initialize empty search results
+		searchDebounceMillis: 200,
+	}
+
+	// Prefer Bleve-backed engine if available (build with -tags=bleve)
+	// Index path is based on DB path with .bleve extension
+	idxPath := func() string {
+		dbPath := cfg.Database.Path
+		if dbPath == "" {
+			return "fwrd.bleve"
+		}
+		// If using default ~/.fwrd.db, place index at ~/.fwrd/index.bleve
+		home, _ := os.UserHomeDir()
+		if filepath.Base(dbPath) == ".fwrd.db" && filepath.Dir(dbPath) == home {
+			return filepath.Join(home, ".fwrd", "index.bleve")
+		}
+		base := strings.TrimSuffix(dbPath, filepath.Ext(dbPath))
+		return base + ".bleve"
+	}()
+	if be, err := search.NewBleveEngine(store, idxPath); err == nil && be != nil {
+		app.searchEngine = be
+	} else {
+		app.searchEngine = search.NewEngine(store)
 	}
 
 	app.keyHandler = NewKeyHandler(app, cfg)
@@ -215,6 +249,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.err = msg.err
 		} else {
 			a.view = ViewFeeds
+			a.setStatus(fmt.Sprintf("Added feed '%s' (%d articles)", strings.TrimSpace(msg.title), msg.added), 0)
 			cmd := a.loadFeeds()
 			return a, cmd
 		}
@@ -224,6 +259,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			a.view = ViewFeeds
 			a.feedToRename = nil
+			a.setStatus("Feed renamed", 0)
 			cmd := a.loadFeeds()
 			return a, cmd
 		}
@@ -233,10 +269,32 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.err = msg.err
 		} else {
 			a.view = ViewFeeds
+			a.setStatus("Feed deleted", 0)
 			a.feedToDelete = nil
 			cmd := a.loadFeeds()
 			return a, cmd
 		}
+
+	case refreshDoneMsg:
+		// Show a concise summary in the status bar
+		summary := fmt.Sprintf(
+			"Refreshed: %d feeds • %d articles%s%s",
+			msg.updatedFeeds,
+			msg.addedArticles,
+			func() string {
+				if msg.errors > 0 {
+					return fmt.Sprintf(" • %d errors", msg.errors)
+				}
+				return ""
+			}(),
+			func() string {
+				if msg.docCount >= 0 {
+					return fmt.Sprintf(" • idx: %d docs", msg.docCount)
+				}
+				return ""
+			}(),
+		)
+		a.setStatus(summary, 0)
 
 	case searchResultsMsg:
 		if a.view == ViewSearch {
@@ -246,6 +304,28 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				items[i] = result
 			}
 			a.searchList.SetItems(items)
+
+			// Briefly show result count
+			count := len(msg.results)
+			if count == 0 {
+				a.setStatus("No results", 0)
+			} else {
+				a.setStatus(fmt.Sprintf("%d results", count), 0)
+			}
+		}
+
+	case searchDebounceFireMsg:
+		// Only fire if this is the latest scheduled search
+		if msg.seq == a.searchSeq {
+			q := strings.TrimSpace(a.pendingSearchQuery)
+			if len(q) > 1 {
+				// Use context-aware search if we came from reader view
+				if a.previousView == ViewReader && a.currentArticle != nil {
+					cmds = append(cmds, a.performSearchWithContext(q, "article"))
+				} else {
+					cmds = append(cmds, a.performSearch(q))
+				}
+			}
 		}
 
 	case errorMsg:
@@ -282,12 +362,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		newSearchList, listCmd := a.searchList.Update(msg)
 		a.searchList = newSearchList
 		cmds = append(cmds, listCmd)
-
-		searchQuery := a.searchInput.Value()
-		if searchQuery != "" && len(searchQuery) > 1 {
-			searchCmd := a.performSearch(searchQuery)
-			cmds = append(cmds, searchCmd)
-		}
 	case ViewMedia:
 		newListModel, cmd := a.mediaList.Update(msg)
 		a.mediaList = newListModel
@@ -458,6 +532,13 @@ func (a *App) View() string {
 			}
 		}
 
+		// Annotate engine type for clarity
+		if _, ok := a.searchEngine.(search.DebugStatser); ok {
+			searchHeader += " • full-text"
+		} else {
+			searchHeader += " • basic"
+		}
+
 		helpText := ""
 		switch {
 		case a.searchInput.Focused():
@@ -509,12 +590,7 @@ func (a *App) View() string {
 }
 
 func (a *App) getCustomStatusBar() string {
-	commands := a.keyHandler.GetHelpForCurrentView()
-
-	if len(commands) == 0 {
-		return ""
-	}
-
+	// Highest priority: any error
 	if a.err != nil {
 		errorMsg := lipgloss.NewStyle().
 			Foreground(ErrorColor).
@@ -528,6 +604,23 @@ func (a *App) getCustomStatusBar() string {
 			Render(errorMsg)
 	}
 
+	// Next: transient status message
+	if a.statusText != "" && time.Now().Before(a.statusUntil) {
+		statusMsg := lipgloss.NewStyle().
+			Foreground(SuccessColor).
+			Render(a.statusText)
+		return lipgloss.NewStyle().
+			Width(a.width).
+			Padding(0, 1).
+			Foreground(MutedColor).
+			Render(statusMsg)
+	}
+
+	commands := a.keyHandler.GetHelpForCurrentView()
+	if len(commands) == 0 {
+		return ""
+	}
+
 	if len(commands) > 0 {
 		commandText := strings.Join(commands, " • ")
 		return lipgloss.NewStyle().
@@ -538,6 +631,17 @@ func (a *App) getCustomStatusBar() string {
 	}
 
 	return ""
+}
+
+// setStatus shows a transient status message for the given duration.
+func (a *App) setStatus(text string, d time.Duration) {
+	a.statusText = text
+	// Cap duration to 500ms by default and as a maximum
+	maxDuration := 500 * time.Millisecond
+	if d <= 0 || d > maxDuration {
+		d = maxDuration
+	}
+	a.statusUntil = time.Now().Add(d)
 }
 
 type feedItem struct {
@@ -692,7 +796,9 @@ type articleRenderedMsg struct {
 }
 
 type feedAddedMsg struct {
-	err error
+	err   error
+	added int
+	title string
 }
 
 type errorMsg struct {
@@ -709,4 +815,17 @@ type searchResultsMsg struct {
 
 type feedRenamedMsg struct {
 	err error
+}
+
+// refreshDoneMsg summarizes a refresh operation outcome
+type refreshDoneMsg struct {
+	updatedFeeds  int
+	addedArticles int
+	errors        int
+	docCount      int
+}
+
+// searchDebounceFireMsg is emitted after a short delay to trigger a debounced search.
+type searchDebounceFireMsg struct {
+	seq int
 }

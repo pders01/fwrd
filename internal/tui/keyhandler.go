@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/media"
+	"github.com/pders01/fwrd/internal/search"
 )
 
 type KeyHandler struct {
@@ -132,23 +134,19 @@ func (kh *KeyHandler) delegateToTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return kh.app, cmd
 
 	case ViewSearch:
-		// Handle search input
+		// Handle search input with debounce scheduling
+		prev := kh.app.searchInput.Value()
 		newSearchInput, cmd := kh.app.searchInput.Update(msg)
 		kh.app.searchInput = newSearchInput
 
-		// Perform search when input changes (only if still in search view)
-		searchQuery := kh.sanitizeSearchInput(kh.app.searchInput.Value())
-		if searchQuery != "" && len(searchQuery) > 1 && kh.app.view == ViewSearch {
-			// Use context-aware search based on where we came from
-			var searchCmd tea.Cmd
-			if kh.app.previousView == ViewReader && kh.app.currentArticle != nil {
-				searchCmd = kh.app.performSearchWithContext(searchQuery, "article")
-			} else {
-				searchCmd = kh.app.performSearch(searchQuery)
-			}
-			return kh.app, tea.Batch(cmd, searchCmd)
+		newVal := kh.sanitizeSearchInput(kh.app.searchInput.Value())
+		if newVal != prev {
+			kh.app.pendingSearchQuery = newVal
+			kh.app.searchSeq++
+			seq := kh.app.searchSeq
+			wait := time.Duration(kh.app.searchDebounceMillis) * time.Millisecond
+			return kh.app, tea.Batch(cmd, tea.Tick(wait, func(time.Time) tea.Msg { return searchDebounceFireMsg{seq: seq} }))
 		}
-
 		return kh.app, cmd
 
 	default:
@@ -456,6 +454,15 @@ func (kh *KeyHandler) enterSearchMode() (tea.Model, tea.Cmd) {
 	kh.app.searchInput.Focus()
 	kh.app.searchResults = []searchResultItem{}
 	kh.app.searchList.SetItems([]list.Item{})
+	// Debug: show which search engine is active and doc count if available
+	engineName := fmt.Sprintf("%T", kh.app.searchEngine)
+	if ds, ok := kh.app.searchEngine.(search.DebugStatser); ok {
+		if n, err := ds.DocCount(); err == nil {
+			kh.app.setStatus(fmt.Sprintf("Search: %s • idx: %d", engineName, n), 0)
+			return kh.app, nil
+		}
+	}
+	kh.app.setStatus(fmt.Sprintf("Search: %s", engineName), 0)
 	return kh.app, nil
 }
 
@@ -509,7 +516,7 @@ func (kh *KeyHandler) sanitizeSearchInput(input string) string {
 		input = input[:256]
 	}
 
-	// Remove potentially dangerous characters but keep common search terms
+	// Remove newlines/tabs
 	input = strings.ReplaceAll(input, "\n", " ")
 	input = strings.ReplaceAll(input, "\r", " ")
 	input = strings.ReplaceAll(input, "\t", " ")

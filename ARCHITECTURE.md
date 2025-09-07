@@ -30,9 +30,12 @@ Manages media playback and URL handling:
 - Media types: Detects media types from URLs and file extensions
 
 ### internal/search
-Provides full-text search functionality:
-- Engine: Implements search logic
-- Storage: Uses Bleve for indexing and search
+Provides full‑text search functionality:
+- Bleve engine (default): Robust full‑text indexing and ranking
+  - Index lifecycle: created on first use, reindexed at startup from the existing DB, and incrementally updated on add/refresh/delete
+  - Default index path when DB is `~/.fwrd.db`: `~/.fwrd/index.bleve`
+  - For a custom DB path, the index is placed next to the DB using the same base with a `.bleve` suffix
+- Basic engine fallback: A lightweight in‑memory scorer is used only if Bleve initialization fails
 
 ### internal/storage
 Handles local data persistence:
@@ -47,6 +50,7 @@ Implements the terminal user interface:
 - Keyhandler: Keyboard input handling
 - Commands: Bubbletea commands for asynchronous operations
 - Branding: UI styling and branding elements
+ - Search UX: Debounced input (~200ms), brief status flashes (500ms) for feedback, in‑article search with automatic fallback to global when no matches are found
 
 ## Data Flow
 
