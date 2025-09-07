@@ -80,8 +80,8 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 	feedList.SetFilteringEnabled(true)
 	feedList.SetShowHelp(true) // Let Charm show native help
 	// Remove title bar styling
-	feedList.Styles.Title = lipgloss.NewStyle()
-	feedList.Styles.TitleBar = lipgloss.NewStyle()
+	feedList.Styles.Title = EmptyStyle
+	feedList.Styles.TitleBar = EmptyStyle
 
 	articleList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	articleList.Title = ""
@@ -89,8 +89,8 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 	articleList.SetFilteringEnabled(true)
 	articleList.SetShowHelp(true) // Let Charm show native help
 	// Remove title bar styling
-	articleList.Styles.Title = lipgloss.NewStyle()
-	articleList.Styles.TitleBar = lipgloss.NewStyle()
+	articleList.Styles.Title = EmptyStyle
+	articleList.Styles.TitleBar = EmptyStyle
 
 	searchList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	searchList.Title = "› search results"
@@ -165,7 +165,7 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 	// Initialize status spinner (subtle)
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(MutedColor)
+	sp.Style = StatusInfoStyle
 	app.statusSpinner = sp
 
 	return app
@@ -475,20 +475,17 @@ func (a *App) View() string {
 			lipgloss.Center,
 			header,
 			"",
-			lipgloss.NewStyle().
-				Foreground(TextColor).
+			ModalTextStyle.
 				Width(modalWidth).
 				Align(lipgloss.Center).
 				Render("Delete this feed?"),
 			"",
-			lipgloss.NewStyle().
-				Foreground(UnreadColor).
-				Bold(true).
+			ModalHighlightStyle.
 				Width(modalWidth).
 				Align(lipgloss.Center).
 				Render(feedName),
 			"",
-			lipgloss.NewStyle().
+			EmptyStyle.
 				Width(modalWidth).
 				Align(lipgloss.Center).
 				Render(renderMuted("This removes all articles.")),
@@ -541,7 +538,7 @@ func (a *App) View() string {
 			a.searchList.View(),
 		)
 
-		content = lipgloss.NewStyle().Width(a.width).Height(a.height - 3).MaxHeight(a.height - 3).Render(searchContent)
+		content = ContentWrapper(a.width, a.height-3).Render(searchContent)
 	case ViewMedia:
 		content = a.mediaList.View()
 	}
@@ -551,9 +548,7 @@ func (a *App) View() string {
 	if separatorWidth < 0 {
 		separatorWidth = 0
 	}
-	separator := lipgloss.NewStyle().
-		Foreground(MutedColor).
-		Render("─" + strings.Repeat("─", separatorWidth))
+	separator := SeparatorStyle.Render("─" + strings.Repeat("─", separatorWidth))
 
 	return lipgloss.JoinVertical(lipgloss.Top, content, separator, customStatus)
 }
@@ -561,15 +556,10 @@ func (a *App) View() string {
 func (a *App) getCustomStatusBar() string {
 	// Highest priority: any error
 	if a.err != nil {
-		errorMsg := lipgloss.NewStyle().
-			Foreground(ErrorColor).
-			Bold(true).
-			Render(fmt.Sprintf("✗ %v", a.err))
+		errorMsg := ErrorMessageStyle.Render(fmt.Sprintf("✗ %v", a.err))
 
-		return lipgloss.NewStyle().
+		return StatusBarStyleWithPadding().
 			Width(a.width).
-			Padding(0, 1).
-			Foreground(MutedColor).
 			Render(errorMsg)
 	}
 
@@ -582,10 +572,8 @@ func (a *App) getCustomStatusBar() string {
 		}
 		st := a.statusStyle(a.spinnerKind)
 		msg := st.Render(left + " " + label)
-		return lipgloss.NewStyle().
+		return StatusBarStyleWithPadding().
 			Width(a.width).
-			Padding(0, 1).
-			Foreground(MutedColor).
 			Render(msg)
 	}
 
@@ -593,10 +581,8 @@ func (a *App) getCustomStatusBar() string {
 	if a.statusText != "" && time.Now().Before(a.statusUntil) {
 		st := a.statusStyle(a.statusKind)
 		statusMsg := st.Render(a.statusText)
-		return lipgloss.NewStyle().
+		return StatusBarStyleWithPadding().
 			Width(a.width).
-			Padding(0, 1).
-			Foreground(MutedColor).
 			Render(statusMsg)
 	}
 
@@ -605,10 +591,8 @@ func (a *App) getCustomStatusBar() string {
 	if commandText == "" {
 		commandText = " " // ensure status bar always renders a line
 	}
-	return lipgloss.NewStyle().
+	return StatusBarStyleWithPadding().
 		Width(a.width).
-		Padding(0, 1).
-		Foreground(MutedColor).
 		Render(commandText)
 }
 
@@ -652,13 +636,13 @@ func (a *App) startSpinnerWithKind(label string, kind StatusKind) tea.Cmd {
 func (a *App) statusStyle(kind StatusKind) lipgloss.Style {
 	switch kind {
 	case StatusSuccess:
-		return lipgloss.NewStyle().Foreground(SuccessColor)
+		return StatusSuccessStyle
 	case StatusWarn:
-		return lipgloss.NewStyle().Foreground(UnreadColor)
+		return StatusWarnStyle
 	case StatusError:
-		return lipgloss.NewStyle().Foreground(ErrorColor).Bold(true)
+		return StatusErrorStyle
 	default:
-		return lipgloss.NewStyle().Foreground(MutedColor)
+		return StatusInfoStyle
 	}
 }
 
@@ -695,9 +679,7 @@ func (i articleItem) Description() string {
 		timeStr = TimeStyle.Render(" • " + i.article.Published.Format("Jan 2, 15:04"))
 	}
 
-	return lipgloss.NewStyle().
-		Foreground(MutedColor).
-		Render(desc) + timeStr
+	return renderMuted(desc) + timeStr
 }
 
 func (i articleItem) FilterValue() string { return i.article.Title }
@@ -717,10 +699,7 @@ func (i searchResultItem) Title() string {
 		return UnreadItemStyle.Render(prefix + i.article.Title)
 	}
 
-	return lipgloss.NewStyle().
-		Foreground(SecondaryColor).
-		Bold(true).
-		Render("📁 " + i.feed.Title)
+	return FeedTitleStyle.Render("📁 " + i.feed.Title)
 }
 
 func (i searchResultItem) Description() string {
@@ -747,15 +726,11 @@ func (i searchResultItem) Description() string {
 			timeStr = i.article.Published.Format("Jan 2")
 		}
 
-		return lipgloss.NewStyle().
-			Foreground(MutedColor).
-			Render(desc + " • from " + feedName + " • " + timeStr)
+		return renderMuted(desc + " • from " + feedName + " • " + timeStr)
 	}
 
 	url := truncateMiddle(i.feed.URL, 80)
-	return lipgloss.NewStyle().
-		Foreground(MutedColor).
-		Render(url)
+	return renderMuted(url)
 }
 
 func (i searchResultItem) FilterValue() string {

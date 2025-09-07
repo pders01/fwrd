@@ -56,7 +56,6 @@ var (
 
 	StatusBarStyle = lipgloss.NewStyle().
 			Foreground(MutedColor).
-			Background(SurfaceColor).
 			Padding(0, 1)
 
 	UnreadItemStyle = lipgloss.NewStyle().
@@ -78,7 +77,56 @@ var (
 	TimeStyle = lipgloss.NewStyle().
 			Foreground(MutedColor).
 			Faint(true)
+
+	// Modal styles
+	ModalTextStyle = lipgloss.NewStyle().
+			Foreground(TextColor)
+
+	ModalHighlightStyle = lipgloss.NewStyle().
+				Foreground(UnreadColor).
+				Bold(true)
+
+	// Error display style
+	ErrorMessageStyle = lipgloss.NewStyle().
+				Foreground(ErrorColor).
+				Bold(true)
+
+	// Separator style
+	SeparatorStyle = lipgloss.NewStyle().
+			Foreground(MutedColor)
+
+	// Status styles by severity
+	StatusInfoStyle = lipgloss.NewStyle().
+			Foreground(MutedColor)
+
+	StatusSuccessStyle = lipgloss.NewStyle().
+				Foreground(SuccessColor)
+
+	StatusWarnStyle = lipgloss.NewStyle().
+			Foreground(UnreadColor)
+
+	StatusErrorStyle = lipgloss.NewStyle().
+				Foreground(ErrorColor).
+				Bold(true)
+
+	// Feed item styles
+	FeedTitleStyle = lipgloss.NewStyle().
+			Foreground(SecondaryColor).
+			Bold(true)
+
+	// Empty style for resetting
+	EmptyStyle = lipgloss.NewStyle()
 )
+
+// StatusBarStyleWithPadding returns a properly formatted status bar style with padding
+func StatusBarStyleWithPadding() lipgloss.Style {
+	return StatusBarStyle.Padding(0, 1)
+}
+
+// ContentWrapper returns a style for wrapping content with width and height constraints
+func ContentWrapper(width, height int) lipgloss.Style {
+	return EmptyStyle.Width(width).Height(height).MaxHeight(height)
+}
 
 func GetWelcomeMessage() string {
 	return lipgloss.JoinVertical(
