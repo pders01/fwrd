@@ -10,9 +10,10 @@ import (
 )
 
 type Fetcher struct {
-	client    *http.Client
-	config    *config.FeedConfig
-	userAgent string
+	client      *http.Client
+	config      *config.FeedConfig
+	userAgent   string
+	ignoreCache bool
 }
 
 func NewFetcher(cfg *config.Config) *Fetcher {
@@ -20,9 +21,15 @@ func NewFetcher(cfg *config.Config) *Fetcher {
 		client: &http.Client{
 			Timeout: cfg.Feed.HTTPTimeout,
 		},
-		config:    &cfg.Feed,
-		userAgent: cfg.Feed.UserAgent,
+		config:      &cfg.Feed,
+		userAgent:   cfg.Feed.UserAgent,
+		ignoreCache: false,
 	}
+}
+
+// SetIgnoreCache sets whether to ignore ETag/Last-Modified headers
+func (f *Fetcher) SetIgnoreCache(ignore bool) {
+	f.ignoreCache = ignore
 }
 
 func (f *Fetcher) Fetch(feed *storage.Feed) (*http.Response, bool, error) {
@@ -34,12 +41,15 @@ func (f *Fetcher) Fetch(feed *storage.Feed) (*http.Response, bool, error) {
 	req.Header.Set("User-Agent", f.userAgent)
 	req.Header.Set("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml")
 
-	if feed.ETag != "" {
-		req.Header.Set("If-None-Match", feed.ETag)
-	}
+	// Only set cache headers if not ignoring cache
+	if !f.ignoreCache {
+		if feed.ETag != "" {
+			req.Header.Set("If-None-Match", feed.ETag)
+		}
 
-	if feed.LastModified != "" {
-		req.Header.Set("If-Modified-Since", feed.LastModified)
+		if feed.LastModified != "" {
+			req.Header.Set("If-Modified-Since", feed.LastModified)
+		}
 	}
 
 	resp, err := f.client.Do(req)

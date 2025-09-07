@@ -169,6 +169,13 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 	return app
 }
 
+// SetForceRefresh configures the fetcher to ignore ETag/Last-Modified headers
+func (a *App) SetForceRefresh(force bool) {
+	if a.fetcher != nil {
+		a.fetcher.SetIgnoreCache(force)
+	}
+}
+
 func (a *App) getRenderer() (*glamour.TermRenderer, error) {
 	wordWrapWidth := (a.width * 9) / 10
 	if wordWrapWidth > 120 {
