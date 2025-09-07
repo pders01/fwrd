@@ -38,9 +38,9 @@ This document tracks code quality issues, technical debt, and improvement opport
   - ✅ Implemented circuit breaker patterns for better resilience
 
 ### Search & Memory Management
-- [ ] **Search Engine Fallback Strategy** (`internal/tui/app.go:155-159`)
-  - Add logging when search engine initialization fails
-  - Expose search engine type/status in UI
+- [x] **Search Engine Fallback Strategy** (`internal/tui/app.go:155-159`) ✅ **COMPLETED**
+  - ✅ Added comprehensive logging when search engine initialization fails
+  - ✅ Exposed search engine type/status in UI (shows "bleve" vs "basic" in search view)
   
 - [ ] **Memory Usage in Large Indexes** (`internal/search/bleve_engine.go:96-130`)
   - Implement streaming/chunked indexing for large datasets
@@ -63,10 +63,11 @@ This document tracks code quality issues, technical debt, and improvement opport
   - ✅ Integrated across config, database, and search index path handling
 
 ### Content Security
-- [ ] **Content Size Limits** (Article rendering and content handling)
-  - Implement article content size limits
-  - Add streaming for large content to prevent memory issues
-  - Protect against malicious oversized content
+- [x] **Content Size Limits** (`internal/tui/commands.go:36-53`) ✅ **COMPLETED**
+  - ✅ Implemented article content size limits (1MB content, 64KB description, 1KB title, 2KB URL)
+  - ✅ Added automatic truncation with user notification for oversized content
+  - ✅ Protected against malicious oversized content and memory issues
+  - ✅ Added debug logging for content size violations
 
 ## Low Priority Nice-to-Have Improvements
 
@@ -158,13 +159,16 @@ semaphore := make(chan struct{}, maxConcurrentRefresh)
    - ✅ **COMPLETED**: Comprehensive URL validation with security features
    - ✅ **COMPLETED**: File path security and sanitization with centralized handling
    - ✅ **COMPLETED**: HTTP client configuration improvements
-3. **Phase 3 (Infrastructure)**: Enhance configuration handling and performance
+3. **Phase 3 (Medium Priority)**: ✅ **COMPLETED** - Search engine improvements and content security
+   - ✅ **COMPLETED**: Search engine fallback strategy with comprehensive logging
+   - ✅ **COMPLETED**: Search engine type/status exposure in UI
+   - ✅ **COMPLETED**: Content size limits for security and performance
 4. **Phase 4 (Performance)**: Optimize memory usage and database operations
 5. **Phase 5 (Quality)**: Improve logging, testing, and reduce code duplication
 
 ## Notes
 
 - Current test coverage: ~37% file coverage (14 test files for 38 Go files)
-- Codebase is production-ready with Phase 1-2 improvements
+- Codebase is production-ready with Phase 1-3 improvements completed
 - Architecture shows thoughtful design decisions throughout
-- Main focus should be on robustness and scalability improvements
+- Phase 4-5 focus: Performance optimization and code quality improvements
