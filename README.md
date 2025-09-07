@@ -1,15 +1,18 @@
 # fwrd
 
-A terminal-based RSS aggregator built with Go and Charm.sh tools. **fwrd** helps you navigate through time as expressed by new content, while being a respectful netizen that honors server resources.
+A fast, terminal-based RSS feed aggregator with full-text search capabilities, built with Go and Charm.sh tools. **fwrd** helps you navigate through time as expressed by new content, while being a respectful netizen that honors server resources.
 
 ## Features
 
-- **TUI interface**: Built with Charm's Bubble Tea, Bubbles, Lip Gloss
+- **Dual Interface**: Interactive TUI (Bubble Tea) + Command-line interface (Cobra)
 - **Full‑text search**: Bleve‑powered search across feeds and articles with debounced input
-- **Polite fetching**: Honors ETag and Last-Modified; handles 304/Retry-After
-- **Media integration**: Detects media and opens in appropriate apps
-- **Local storage**: BoltDB-backed offline reading
-- **Feed management**: Add, refresh, delete feeds; track read/unread
+- **Comprehensive CLI**: Complete feed management from command line (add, list, delete, refresh)
+- **Smart caching**: Honors ETag and Last-Modified; handles 304/Retry-After responses
+- **Security-focused**: URL validation, path sanitization, content size limits
+- **Media integration**: Detects media types and opens in appropriate applications
+- **Local storage**: BoltDB-backed offline reading with optimized indexing
+- **Debug logging**: Structured logging system with configurable levels
+- **Cross-platform**: Builds for Linux, macOS, Windows (amd64, arm64, arm)
 
 ## Installation
 
@@ -33,24 +36,40 @@ Download the appropriate binary for your platform from the [latest release](http
 
 ## Usage
 
+### Interactive TUI Mode
+
 ```bash
-# Run with startup banner
+# Run interactive TUI (default mode)
 ./fwrd
 
-# Skip banner
-./fwrd -quiet
+# Skip startup banner
+./fwrd --quiet
 
+# Enable debug logging
+./fwrd --debug
+
+# Custom config and database
+./fwrd --config /path/to/config.toml --db /path/to/feeds.db
+```
+
+### Command Line Interface
+
+```bash
 # Show version
-./fwrd -version
+./fwrd version
 
-# Load a specific config file
-./fwrd -config /path/to/config.toml
+# Generate default config
+./fwrd config generate
 
-# Custom database location
-./fwrd -db /path/to/feeds.db
+# Feed management
+./fwrd feed add "https://example.com/feed.xml"
+./fwrd feed list
+./fwrd feed refresh
+./fwrd feed delete <feed-id>
 
-# Generate a default config (~/.config/fwrd/config.toml)
-./fwrd -generate-config
+# Get help for any command
+./fwrd --help
+./fwrd feed --help
 ```
 
 ### Keyboard Shortcuts (default)
@@ -149,12 +168,15 @@ make release-snapshot   # builds artifacts but does not publish
 ## Dependencies
 
 - `github.com/charmbracelet/bubbletea` - TUI framework
-- `github.com/charmbracelet/bubbles` - TUI components
+- `github.com/charmbracelet/bubbles` - TUI components  
 - `github.com/charmbracelet/lipgloss` - Styling
 - `github.com/charmbracelet/glamour` - Markdown rendering
+- `github.com/spf13/cobra` - CLI framework
+- `github.com/spf13/viper` - Configuration management
 - `github.com/mmcdole/gofeed` - RSS/Atom parsing
 - `go.etcd.io/bbolt` - Embedded database
 - `github.com/blevesearch/bleve/v2` - Full‑text search engine
+- `github.com/pelletier/go-toml/v2` - TOML configuration
 
 ## Architecture
 
