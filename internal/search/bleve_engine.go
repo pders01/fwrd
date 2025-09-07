@@ -120,7 +120,12 @@ func (b *bleveEngine) reindexAll() error {
 		return err
 	}
 
-	debuglog.Infof("Starting chunked reindexing for %d feeds", len(feeds))
+	logger := debuglog.WithFields(map[string]interface{}{
+		"component": "search",
+		"operation": "reindexAll",
+		"feedCount": len(feeds),
+	})
+	logger.Infof("Starting chunked reindexing for %d feeds", len(feeds))
 
 	// Process feeds in small batches to prevent OOM
 	batch := b.idx.NewBatch()
@@ -164,7 +169,7 @@ func (b *bleveEngine) reindexAll() error {
 		totalProcessed += batchCount
 	}
 
-	debuglog.Infof("Completed chunked reindexing: %d total documents processed", totalProcessed)
+	logger.Infof("Completed chunked reindexing: %d total documents processed", totalProcessed)
 	return nil
 }
 

@@ -45,7 +45,7 @@ const (
 // and protects against malicious oversized content.
 func sanitizeAndLimitContent(content string, maxSize int) string {
 	if len(content) > maxSize {
-		debuglog.Errorf("Content size (%d bytes) exceeds limit (%d bytes), truncating", len(content), maxSize)
+		debuglog.Warnf("Content size (%d bytes) exceeds limit (%d bytes), truncating", len(content), maxSize)
 		truncated := content[:maxSize-100] // Leave room for truncation message
 		return truncated + "\n\n**[Content truncated due to size limit]**"
 	}

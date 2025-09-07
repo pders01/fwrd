@@ -209,7 +209,7 @@ func runTUI(_ *cobra.Command, _ []string) {
 
 	// Setup debug logging if requested
 	if debugFlag {
-		debuglog.Setup(true)
+		debuglog.SetupWithBool(true)
 	}
 
 	if err := withStoreAndConfig(func(store *storage.Store, cfg *config.Config) error {
