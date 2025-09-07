@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/viper"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/feed"
@@ -162,6 +161,12 @@ func getStore(cfg *config.Config) (*storage.Store, error) {
 		return nil, fmt.Errorf("invalid database path: %w", err)
 	}
 
+	// Ensure the parent directory exists before opening the database
+	dbDir := filepath.Dir(validatedPath)
+	if _, err := pathHandler.EnsureSecureDirectory(dbDir); err != nil {
+		return nil, fmt.Errorf("failed to create database directory: %w", err)
+	}
+
 	return storage.NewStore(validatedPath)
 }
 
@@ -199,7 +204,7 @@ func withStoreAndConfig(fn func(*storage.Store, *config.Config) error) error {
 
 func runTUI(_ *cobra.Command, _ []string) {
 	if !quiet {
-		showBanner()
+		tui.ShowBanner(Version)
 	}
 
 	// Setup debug logging if requested
@@ -345,95 +350,6 @@ func refreshFeeds(_ *cobra.Command, _ []string) {
 	}); err != nil {
 		log.Fatalf("Error: %v", err)
 	}
-}
-
-func showBanner() {
-	// Create gradient colors for a flashier look
-	colors := []lipgloss.Color{
-		lipgloss.Color("#FF6B6B"),
-		lipgloss.Color("#FFA86B"),
-		lipgloss.Color("#95E1D3"),
-		lipgloss.Color("#4ECDC4"),
-		lipgloss.Color("#FF6B6B"),
-	}
-
-	// Generate ASCII art programmatically with gradient
-	lines := []string{
-		" ▄████ ▄     ▄▄▄▄▄▄   ▄████▄▄",
-		"██▀    ██  ▄ ██   ▀██ ██   ▀██",
-		"██▀▀▀▀ ██ ███ ██▀▀▀█ ██    ██",
-		"██     ███████ ██   ██ ██   ██",
-		"██      ██ ██  ██   ██ ███████",
-		"",
-	}
-
-	// Dynamic version tagline
-	versionTag := Version
-	if versionTag != "" && versionTag != "dev" {
-		// prefix with 'v' if not already prefixed
-		if versionTag[0] != 'v' && versionTag[0] != 'V' {
-			versionTag = "v" + versionTag
-		}
-		lines = append(lines, fmt.Sprintf("    RSS Feed Aggregator %s", versionTag))
-	} else {
-		lines = append(lines, "    RSS Feed Aggregator")
-	}
-
-	// Apply gradient coloring to each line
-	var coloredLines []string
-	for i, line := range lines {
-		if line == "" {
-			coloredLines = append(coloredLines, line)
-			continue
-		}
-
-		// Pick color based on line index
-		colorIdx := i % len(colors)
-		style := lipgloss.NewStyle().
-			Foreground(colors[colorIdx]).
-			Bold(i < 5) // Bold for logo, normal for tagline
-
-		coloredLines = append(coloredLines, style.Render(line))
-	}
-
-	// Create fancy border with animations-like characters
-	borderChars := lipgloss.Border{
-		Top:         "═",
-		Bottom:      "═",
-		Left:        "║",
-		Right:       "║",
-		TopLeft:     "╔",
-		TopRight:    "╗",
-		BottomLeft:  "╚",
-		BottomRight: "╝",
-	}
-
-	borderStyle := lipgloss.NewStyle().
-		Border(borderChars).
-		BorderForeground(lipgloss.Color("#4ECDC4")).
-		Padding(1, 3).
-		MarginTop(1)
-
-	// Join all lines and render with border
-	banner := lipgloss.JoinVertical(lipgloss.Center, coloredLines...)
-	output := borderStyle.Render(banner)
-
-	// Center the entire banner
-	fmt.Println(lipgloss.NewStyle().
-		Width(70).
-		Align(lipgloss.Center).
-		Render(output))
-
-	// Add a subtle separator line below
-	separator := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#95E1D3")).
-		Render("◆ ◇ ◆ ◇ ◆")
-
-	fmt.Println(lipgloss.NewStyle().
-		Width(70).
-		Align(lipgloss.Center).
-		MarginBottom(1).
-		Render(separator))
 }
 
 func main() {

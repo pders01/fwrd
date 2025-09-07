@@ -91,40 +91,6 @@ func TestGenerateConfigFlag(t *testing.T) {
 	}
 }
 
-func TestShowBanner(t *testing.T) {
-	// Capture stdout
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	outC := make(chan string)
-	go func() {
-		var buf bytes.Buffer
-		io.Copy(&buf, r)
-		outC <- buf.String()
-	}()
-
-	// Call showBanner
-	showBanner()
-
-	w.Close()
-	os.Stdout = old
-	out := <-outC
-
-	// Check if banner contains expected elements
-	if !strings.Contains(out, "RSS Feed Aggregator") {
-		t.Errorf("Expected banner to contain 'RSS Feed Aggregator', got: %s", out)
-	}
-	// Check for border characters
-	if !strings.Contains(out, "╔") || !strings.Contains(out, "╝") {
-		t.Errorf("Expected banner to contain border characters, got: %s", out)
-	}
-	// Check for separator
-	if !strings.Contains(out, "◆") {
-		t.Errorf("Expected banner to contain separator symbols, got: %s", out)
-	}
-}
-
 func TestExpandTildePath(t *testing.T) {
 	tests := []struct {
 		name     string

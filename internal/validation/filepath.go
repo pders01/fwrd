@@ -206,17 +206,27 @@ func (v *FilePathValidator) ValidateDirectory(path string, createIfNotExist bool
 		return "", err
 	}
 
-	// Check if it's meant to be a directory (not a file)
-	// Special case: .bleve extensions are actually directories (Bleve search indexes)
-	ext := filepath.Ext(validatedPath)
-	if ext != "" && ext != ".bleve" {
-		return "", fmt.Errorf("path appears to be a file, not a directory")
-	}
-
-	if createIfNotExist {
-		// Create directory with secure permissions
-		if err := os.MkdirAll(validatedPath, 0o755); err != nil {
-			return "", fmt.Errorf("failed to create directory: %w", err)
+	// Check if path exists
+	info, err := os.Stat(validatedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if createIfNotExist {
+				// Create directory with secure permissions
+				if mkErr := os.MkdirAll(validatedPath, 0o755); mkErr != nil {
+					return "", fmt.Errorf("failed to create directory: %w", mkErr)
+				}
+			} else {
+				// Directory doesn't exist and we're not creating it
+				// This is OK for parent directory checks
+				return validatedPath, nil
+			}
+		} else {
+			return "", fmt.Errorf("checking directory: %w", err)
+		}
+	} else {
+		// Path exists, verify it's a directory
+		if !info.IsDir() {
+			return "", fmt.Errorf("path exists but is not a directory: %s", validatedPath)
 		}
 	}
 
@@ -232,8 +242,16 @@ func (v *FilePathValidator) ValidateFile(path string) (string, error) {
 
 	// Ensure parent directory is also within allowed paths
 	parentDir := filepath.Dir(validatedPath)
-	if _, err := v.ValidateDirectory(parentDir, false); err != nil {
+	// Just validate the parent path is within allowed directories
+	if err := v.validateBaseDirs(parentDir); err != nil {
 		return "", fmt.Errorf("parent directory not allowed: %w", err)
+	}
+
+	// Check if file exists and is actually a file (not a directory)
+	if info, err := os.Stat(validatedPath); err == nil {
+		if info.IsDir() {
+			return "", fmt.Errorf("path is a directory, not a file: %s", validatedPath)
+		}
 	}
 
 	return validatedPath, nil

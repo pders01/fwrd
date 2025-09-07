@@ -1,21 +1,41 @@
 package tui
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/lipgloss"
 )
 
 const AppName = "fwrd"
 
-// ASCII art logo for fwrd
+// ASCII art logo lines for fwrd - canonical definition
+var LogoLines = []string{
+	" ▄████ ▄     ▄▄▄▄▄▄   ▄████▄▄",
+	"██▀    ██  ▄ ██   ▀██ ██   ▀██",
+	"██▀▀▀▀ ██ ███ ██▀▀▀█ ██    ██",
+	"██     ███████ ██   ██ ██   ██",
+	"██      ██ ██  ██   ██ ███████",
+}
+
+// Legacy logo constant for backwards compatibility
 const Logo = `
-  ___                     _ 
- / _|_      ___ __ __| |
-| |_\ \ /\ / / '__/ _' |
-|  _|\ V  V /| | | (_| |
-|_|   \_/\_/ |_|  \__,_|
+ ▄████ ▄     ▄▄▄▄▄▄   ▄████▄▄
+██▀    ██  ▄ ██   ▀██ ██   ▀██
+██▀▀▀▀ ██ ███ ██▀▀▀█ ██    ██
+██     ███████ ██   ██ ██   ██
+██      ██ ██  ██   ██ ███████
 `
 
 const CompactLogo = `fwrd ›`
+
+// Banner gradient colors
+var BannerColors = []lipgloss.Color{
+	lipgloss.Color("#FF6B6B"),
+	lipgloss.Color("#FFA86B"),
+	lipgloss.Color("#95E1D3"),
+	lipgloss.Color("#4ECDC4"),
+	lipgloss.Color("#FF6B6B"),
+}
 
 // Brand colors inspired by time progression
 // Dawn -> Day -> Dusk -> Night
@@ -129,10 +149,97 @@ func ContentWrapper(width, height int) lipgloss.Style {
 }
 
 func GetWelcomeMessage() string {
+	return GetCompactBanner("Press ctrl+n to add your first feed")
+}
+
+func GetCompactBanner(message string) string {
+	// Use the canonical logo lines
+	var coloredLines []string
+	for _, line := range LogoLines {
+		coloredLines = append(coloredLines, LogoStyle.Render(line))
+	}
+
+	logo := lipgloss.JoinVertical(lipgloss.Center, coloredLines...)
+
 	return lipgloss.JoinVertical(
 		lipgloss.Center,
-		LogoStyle.Render(Logo),
+		logo,
 		"",
-		HelpStyle.Render("Press 'a' to add your first feed"),
+		HelpStyle.Render(message),
 	)
+}
+
+func ShowBanner(version string) {
+	// Start with the canonical logo lines and add empty line
+	lines := make([]string, len(LogoLines)+1)
+	copy(lines, LogoLines)
+	lines[len(LogoLines)] = ""
+
+	// Dynamic version tagline
+	versionTag := version
+	if versionTag != "" && versionTag != "dev" {
+		// prefix with 'v' if not already prefixed
+		if versionTag[0] != 'v' && versionTag[0] != 'V' {
+			versionTag = "v" + versionTag
+		}
+		lines = append(lines, fmt.Sprintf("    RSS Feed Aggregator %s", versionTag))
+	} else {
+		lines = append(lines, "    RSS Feed Aggregator")
+	}
+
+	// Apply gradient coloring to each line
+	var coloredLines []string
+	for i, line := range lines {
+		if line == "" {
+			coloredLines = append(coloredLines, line)
+			continue
+		}
+
+		// Pick color based on line index
+		colorIdx := i % len(BannerColors)
+		style := lipgloss.NewStyle().
+			Foreground(BannerColors[colorIdx]).
+			Bold(i < len(LogoLines)) // Bold for logo, normal for tagline
+
+		coloredLines = append(coloredLines, style.Render(line))
+	}
+
+	// Create fancy border with animations-like characters
+	borderChars := lipgloss.Border{
+		Top:         "═",
+		Bottom:      "═",
+		Left:        "║",
+		Right:       "║",
+		TopLeft:     "╔",
+		TopRight:    "╗",
+		BottomLeft:  "╚",
+		BottomRight: "╝",
+	}
+
+	borderStyle := lipgloss.NewStyle().
+		Border(borderChars).
+		BorderForeground(lipgloss.Color("#4ECDC4")).
+		Padding(1, 3).
+		MarginTop(1)
+
+	// Join all lines and render with border
+	banner := lipgloss.JoinVertical(lipgloss.Center, coloredLines...)
+	output := borderStyle.Render(banner)
+
+	// Center the entire banner
+	fmt.Println(lipgloss.NewStyle().
+		Width(70).
+		Align(lipgloss.Center).
+		Render(output))
+
+	// Add a subtle separator line below
+	separator := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#95E1D3")).
+		Render("◆ ◇ ◆ ◇ ◆")
+
+	fmt.Println(lipgloss.NewStyle().
+		Width(70).
+		Align(lipgloss.Center).
+		MarginBottom(1).
+		Render(separator))
 }
