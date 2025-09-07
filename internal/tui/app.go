@@ -187,20 +187,20 @@ func (a *App) SetForceRefresh(force bool) {
 
 func (a *App) getRenderer() (*glamour.TermRenderer, error) {
 	wordWrapWidth := (a.width * 9) / 10
-	if wordWrapWidth > 120 {
-		wordWrapWidth = 120 // maximum for readability
+	if wordWrapWidth > MaxReadableWidth {
+		wordWrapWidth = MaxReadableWidth // maximum for readability
 	}
-	if wordWrapWidth < 40 {
-		wordWrapWidth = 40 // minimum for readability
+	if wordWrapWidth < MinReadableWidth {
+		wordWrapWidth = MinReadableWidth // minimum for readability
 	}
-	if a.width < 50 {
+	if a.width < NarrowScreenThreshold {
 		wordWrapWidth = getContentWidth(a.width)
-		if wordWrapWidth < 20 {
-			wordWrapWidth = 20
+		if wordWrapWidth < MinNarrowWidth {
+			wordWrapWidth = MinNarrowWidth
 		}
 	}
 
-	if a.glamourRenderer == nil || abs(a.rendererWidth-wordWrapWidth) > 10 {
+	if a.glamourRenderer == nil || abs(a.rendererWidth-wordWrapWidth) > RendererWidthTolerance {
 		r, err := glamour.NewTermRenderer(
 			glamour.WithAutoStyle(),
 			glamour.WithWordWrap(wordWrapWidth),
@@ -475,9 +475,9 @@ func (a *App) View() string {
 		}
 
 		modalWidth := (a.width * 4) / 5
-		if modalWidth < 20 {
+		if modalWidth < MinNarrowWidth {
 			modalWidth = getModalWidth(a.width)
-			if modalWidth < 15 {
+			if modalWidth < MinModalWidth {
 				modalWidth = a.width
 			}
 		}
@@ -606,8 +606,8 @@ func (a *App) setStatus(text string, d time.Duration) {
 func (a *App) setStatusWithKind(text string, kind StatusKind, d time.Duration) {
 	a.statusText = text
 	a.statusKind = kind
-	// Cap duration to 500ms by default and as a maximum
-	maxDuration := 500 * time.Millisecond
+	// Cap duration to DefaultStatusDuration by default and as a maximum
+	maxDuration := DefaultStatusDuration
 	if d <= 0 || d > maxDuration {
 		d = maxDuration
 	}

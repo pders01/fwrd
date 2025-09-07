@@ -85,7 +85,7 @@ func getContentWidth(totalWidth int) int {
 // getInputWidth calculates width for input fields, accounting for borders and padding.
 func getInputWidth(totalWidth int) int {
 	inputWidth := totalWidth - 8 // Account for border, padding, and margins
-	if inputWidth < 10 {
+	if inputWidth < MinInputWidth {
 		inputWidth = totalWidth - 4 // Fallback for narrow screens
 	}
 	return inputWidth

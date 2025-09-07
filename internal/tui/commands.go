@@ -25,7 +25,7 @@ func (a *App) loadFeeds() tea.Cmd {
 
 func (a *App) loadArticles(feedID string) tea.Cmd {
 	return func() tea.Msg {
-		articles, err := a.store.GetArticles(feedID, 50)
+		articles, err := a.store.GetArticles(feedID, DefaultArticleLimit)
 		if err != nil {
 			return errorMsg{err: wrapErr("load articles", err)}
 		}
@@ -340,10 +340,10 @@ func (a *App) performSearchWithContext(query, context string) tea.Cmd {
 	}
 }
 
-// retryOperation retries a database operation up to 3 times with exponential backoff
+// retryOperation retries a database operation up to MaxDatabaseRetries times with exponential backoff
 func retryOperation(operation func() error) error {
-	maxRetries := 3
-	baseDelay := 100 * time.Millisecond
+	maxRetries := MaxDatabaseRetries
+	baseDelay := BaseDatabaseRetryDelay
 
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
