@@ -98,7 +98,6 @@ This document tracks code quality issues, technical debt, and improvement opport
   - ✅ Improved query performance from O(n log n) to O(n) for feed-specific queries
 
 - [ ] **Dependency Management** (`go.mod`)
-  - Consider build tags for optional features (e.g., Bleve)
   - Reduce binary size and potential security surface area
 
 ## Testing & Coverage Improvements
