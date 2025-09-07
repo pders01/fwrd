@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/pders01/fwrd/internal/config"
+	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/storage"
 	"github.com/pders01/fwrd/internal/tui"
 )
@@ -24,6 +25,7 @@ func main() {
 		generateConfig = flag.Bool("generate-config", false, "Generate default config file")
 		version        = flag.Bool("version", false, "Show version information")
 		quiet          = flag.Bool("quiet", false, "Skip startup banner")
+		debugFlag      = flag.Bool("debug", false, "Enable debug logging to ~/.fwrd/fwrd.log")
 	)
 	flag.Parse()
 
@@ -71,6 +73,11 @@ func main() {
 	store, err := storage.NewStore(cfg.Database.Path)
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	// Setup debug logging if requested
+	if *debugFlag {
+		debuglog.Setup(true)
 	}
 
 	app := tui.NewApp(store, cfg)

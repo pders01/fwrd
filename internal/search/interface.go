@@ -24,3 +24,9 @@ type DeleteListener interface {
 type DebugStatser interface {
 	DocCount() (int, error)
 }
+
+// BatchIndexer allows grouping multiple updates into one index batch for performance.
+type BatchIndexer interface {
+	BeginBatch()
+	CommitBatch()
+}

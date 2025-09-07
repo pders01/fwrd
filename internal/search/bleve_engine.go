@@ -9,12 +9,14 @@ import (
 	"github.com/blevesearch/bleve/v2/analysis/analyzer/standard"
 	"github.com/blevesearch/bleve/v2/mapping"
 	bleveQuery "github.com/blevesearch/bleve/v2/search/query"
+	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/storage"
 )
 
 type bleveEngine struct {
-	store *storage.Store
-	idx   bleve.Index
+	store   *storage.Store
+	idx     bleve.Index
+	pending *bleve.Batch
 }
 
 // NewBleveEngine creates or opens a Bleve index at indexPath and indexes current data.
@@ -42,8 +44,10 @@ func NewBleveEngine(store *storage.Store, indexPath string) (Searcher, error) {
 	be := &bleveEngine{store: store, idx: idx}
 	// Initial load
 	if err := be.reindexAll(); err != nil {
+		debuglog.Errorf("reindexAll failed: %v", err)
 		return nil, err
 	}
+	debuglog.Infof("bleve index ready at %s", indexPath)
 	return be, nil
 }
 
@@ -118,7 +122,11 @@ func (b *bleveEngine) reindexAll() error {
 			})
 		}
 	}
-	return b.idx.Batch(batch)
+	err = b.idx.Batch(batch)
+	if err != nil {
+		debuglog.Errorf("bleve batch index error: %v", err)
+	}
+	return err
 }
 
 func (b *bleveEngine) Search(query string, limit int) ([]*Result, error) {
@@ -172,6 +180,7 @@ func (b *bleveEngine) Search(query string, limit int) ([]*Result, error) {
 	q := bleve.NewDisjunctionQuery(qs...)
 	srch := bleve.NewSearchRequestOptions(q, limit, 0, false)
 	srch.Fields = []string{"title", "description", "feed_id", "url"}
+	srch.Highlight = bleve.NewHighlight()
 	res, err := b.idx.Search(srch)
 	if err != nil {
 		return nil, err
@@ -213,6 +222,12 @@ func (b *bleveEngine) Search(query string, limit int) ([]*Result, error) {
 			}
 			r.Article = a
 			r.IsArticle = true
+			// Attach a snippet if available
+			if frags, ok := h.Fragments["content"]; ok && len(frags) > 0 {
+				r.Matches = append(r.Matches, Match{Field: "content", Text: frags[0], Weight: 1})
+			} else if frags, ok := h.Fragments["description"]; ok && len(frags) > 0 {
+				r.Matches = append(r.Matches, Match{Field: "description", Text: frags[0], Weight: 1})
+			}
 		}
 		out = append(out, r)
 	}
@@ -235,7 +250,12 @@ func (b *bleveEngine) SearchInArticle(article *storage.Article, query string) ([
 
 // OnDataUpdated indexes the provided feed and its articles.
 func (b *bleveEngine) OnDataUpdated(feed *storage.Feed, articles []*storage.Article) {
-	batch := b.idx.NewBatch()
+	var batch *bleve.Batch
+	if b.pending != nil {
+		batch = b.pending
+	} else {
+		batch = b.idx.NewBatch()
+	}
 	if feed != nil {
 		_ = batch.Index(docIDForFeed(feed.ID), map[string]any{
 			"type":        "feed",
@@ -256,7 +276,9 @@ func (b *bleveEngine) OnDataUpdated(feed *storage.Feed, articles []*storage.Arti
 			"url":         a.URL,
 		})
 	}
-	_ = b.idx.Batch(batch)
+	if b.pending == nil {
+		_ = b.idx.Batch(batch)
+	}
 }
 
 // DocCount reports total documents in the index.
@@ -299,6 +321,23 @@ func (b *bleveEngine) OnFeedDeleted(feedID string) {
 		from += size
 	}
 }
+
+// Batch index support
+var _ interface {
+	BeginBatch()
+	CommitBatch()
+} = (*bleveEngine)(nil)
+
+func (b *bleveEngine) BeginBatch() { b.pending = b.idx.NewBatch() }
+func (b *bleveEngine) CommitBatch() {
+	if b.pending != nil {
+		_ = b.idx.Batch(b.pending)
+		b.pending = nil
+	}
+}
+
+// Close closes the underlying index
+func (b *bleveEngine) Close() error { return b.idx.Close() }
 
 func docIDForFeed(feedID string) string   { return "feed:" + feedID }
 func docIDForArticle(artID string) string { return "article:" + artID }

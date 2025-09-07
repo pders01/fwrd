@@ -169,6 +169,12 @@ func (a *App) refreshFeeds() tea.Cmd {
 		updatedFeeds := 0
 		addedArticles := 0
 		fetchErrors := 0
+
+		// If the search engine supports batch updates, begin a batch
+		if bi, ok := a.searchEngine.(search.BatchIndexer); ok {
+			bi.BeginBatch()
+			defer bi.CommitBatch()
+		}
 		for _, feed := range feeds {
 			resp, updated, fetchErr := a.fetcher.Fetch(feed)
 			if fetchErr != nil || !updated || resp == nil {
