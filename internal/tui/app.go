@@ -75,13 +75,13 @@ type App struct {
 
 func NewApp(store *storage.Store, cfg *config.Config) *App {
 	feedList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
-	feedList.Title = "› feeds"
+	feedList.Title = ""
 	feedList.SetShowStatusBar(false)
 	feedList.SetFilteringEnabled(true)
 	feedList.SetShowHelp(true) // Let Charm show native help
 
 	articleList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
-	articleList.Title = "› articles"
+	articleList.Title = ""
 	articleList.SetShowStatusBar(false)
 	articleList.SetFilteringEnabled(true)
 	articleList.SetShowHelp(true) // Let Charm show native help
@@ -441,9 +441,7 @@ func (a *App) View() string {
 			"",
 			renderHelp("Enter: rename • Esc: cancel"),
 			"",
-			lipgloss.NewStyle().
-				Foreground(MutedColor).
-				Render("Current: "+current),
+			renderMuted("Current: "+current),
 		)
 		content = renderCentered(a.width, a.height-3, body)
 	case ViewDeleteConfirm:
@@ -484,10 +482,9 @@ func (a *App) View() string {
 				Render(feedName),
 			"",
 			lipgloss.NewStyle().
-				Foreground(MutedColor).
 				Width(modalWidth).
 				Align(lipgloss.Center).
-				Render("This removes all articles."),
+				Render(renderMuted("This removes all articles.")),
 			"",
 			"",
 			renderHelp("Enter: confirm • Esc: cancel"),
