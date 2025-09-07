@@ -16,13 +16,18 @@ This document tracks architectural and maintenance work items for fwrd.
 - [x] Index hygiene: delete all article docs on feed delete
 - [x] Reindex errors surfaced (no silent ignore)
 - [x] Storage perf: add `articles_by_feed` index; speed up `GetArticles` and `DeleteFeed`
+- [x] Extract UI components: `renderHeader`, `renderCentered`, `renderInputFrame`, `renderMuted`, `renderHelp`
+- [x] Add text truncation utilities: `truncateEnd`, `truncateMiddle` for narrow terminals
+- [x] Optional `-debug` flag with simple file logger under `~/.fwrd/`
+- [x] Bleve search engine improvements: Close(), snippets/fragments, batch updates
+- [x] Add consistent error message helpers with context via `wrapErr`
 
 ## Search Layer
 
 - [x] Delete hygiene: remove all article docs for a feed on delete
 - [x] Surface reindex errors (startup) via error return
-- [ ] Add Close() to search engine to flush resources on exit (optional)
-- [ ] Snippets: show highlighted fragments for search results (Bleve fragments)
+- [x] Add Close() to search engine to flush resources on exit (optional)
+- [x] Snippets: show highlighted fragments for search results (Bleve fragments)
 
 ## Storage Layer
 
@@ -31,15 +36,15 @@ This document tracks architectural and maintenance work items for fwrd.
 
 ## TUI / UI
 
-- [ ] Extract UI components (functional style): `renderHeader(title, subtitle)`, `renderCentered(content)`, `renderInputFrame(...)`
+- [x] Extract UI components (functional style): `renderHeader(title, subtitle)`, `renderCentered(content)`, `renderInputFrame(...)`
 - [ ] Move repeated styles to branding helpers; reduce ad‑hoc style chains
 - [x] Add a StatusManager with severity (info/success/warn/error)
-- [ ] Uniform header/subtitle truncation utilities for narrow terminals
+- [x] Uniform header/subtitle truncation utilities for narrow terminals
 
 ## Error Handling / Observability
 
 - [x] Add consistent error message helpers with context (fetch, parse, index)
-- [ ] Optional `-debug` flag writing a rotating log under `~/.fwrd/`
+- [x] Optional `-debug` flag writing a rotating log under `~/.fwrd/`
 
 ## Config / Paths
 
@@ -48,5 +53,5 @@ This document tracks architectural and maintenance work items for fwrd.
 
 ## Performance / UX Polish
 
-- [ ] Batch index updates across a refresh loop (single index.Batch)
-- [ ] Add small highlighted snippets in search results for quick scanning
+- [x] Batch index updates across a refresh loop (single index.Batch)
+- [x] Add small highlighted snippets in search results for quick scanning
