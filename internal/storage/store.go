@@ -191,33 +191,33 @@ func (s *Store) GetArticlesWithCursor(feedID string, limit int, cursor string) (
 func (s *Store) getArticlesForFeedOptimized(tx *bolt.Tx, ab *bolt.Bucket, feedID string, limit int, cursor string, articles *[]*Article) error {
 	// First, create a set of article IDs for the target feed for O(1) lookup
 	feedArticleIDs := make(map[string]bool)
-	
+
 	idxRoot := tx.Bucket(articlesByFeedBucket)
 	if idxRoot == nil {
 		return nil // No feed index, no articles
 	}
-	
+
 	fb := idxRoot.Bucket([]byte(feedID))
 	if fb == nil {
 		return nil // Feed not found
 	}
-	
+
 	// Build lookup set of article IDs for this feed
 	c := fb.Cursor()
 	for k, _ := c.First(); k != nil; k, _ = c.Next() {
 		feedArticleIDs[string(k)] = true
 	}
-	
+
 	// Now iterate through date index (newest first) and filter by feed
 	dateIdx := tx.Bucket(articlesByDateBucket)
 	if dateIdx == nil {
 		// Fallback: collect all articles for feed and sort manually
 		return s.getArticlesForFeedFallback(tx, ab, feedID, limit, cursor, articles)
 	}
-	
+
 	dateCursor := dateIdx.Cursor()
 	count := 0
-	
+
 	// Position cursor after the last seen article if cursor is provided
 	var k, articleID []byte
 	if cursor != "" {
@@ -240,27 +240,27 @@ func (s *Store) getArticlesForFeedOptimized(tx *bolt.Tx, ab *bolt.Bucket, feedID
 		// No cursor, start from beginning
 		k, articleID = dateCursor.First()
 	}
-	
+
 	for ; k != nil && (limit <= 0 || count < limit); k, articleID = dateCursor.Next() {
 		// Check if this article belongs to our target feed
 		if !feedArticleIDs[string(articleID)] {
 			continue
 		}
-		
+
 		v := ab.Get(articleID)
 		if v == nil {
 			continue
 		}
-		
+
 		var article Article
 		if err := json.Unmarshal(v, &article); err != nil {
 			continue
 		}
-		
+
 		*articles = append(*articles, &article)
 		count++
 	}
-	
+
 	return nil
 }
 
@@ -270,12 +270,12 @@ func (s *Store) getArticlesForFeedFallback(tx *bolt.Tx, ab *bolt.Bucket, feedID 
 	if idxRoot == nil {
 		return nil
 	}
-	
+
 	fb := idxRoot.Bucket([]byte(feedID))
 	if fb == nil {
 		return nil
 	}
-	
+
 	// Collect articles for this feed
 	c := fb.Cursor()
 	for k, _ := c.First(); k != nil; k, _ = c.Next() {
@@ -283,20 +283,20 @@ func (s *Store) getArticlesForFeedFallback(tx *bolt.Tx, ab *bolt.Bucket, feedID 
 		if v == nil {
 			continue
 		}
-		
+
 		var article Article
 		if err := json.Unmarshal(v, &article); err != nil {
 			continue
 		}
-		
+
 		*articles = append(*articles, &article)
 	}
-	
-	// Sort by date (newest first) 
+
+	// Sort by date (newest first)
 	sort.Slice(*articles, func(i, j int) bool {
 		return (*articles)[i].Published.After((*articles)[j].Published)
 	})
-	
+
 	// Apply cursor-based filtering after sorting
 	if cursor != "" {
 		// Find cursor position and slice from there
@@ -313,12 +313,12 @@ func (s *Store) getArticlesForFeedFallback(tx *bolt.Tx, ab *bolt.Bucket, feedID 
 			*articles = []*Article{} // Cursor not found or no more articles
 		}
 	}
-	
+
 	// Apply limit after cursor filtering
 	if limit > 0 && len(*articles) > limit {
 		*articles = (*articles)[:limit]
 	}
-	
+
 	return nil
 }
 
@@ -340,7 +340,7 @@ func (s *Store) getArticlesGlobalOptimized(tx *bolt.Tx, ab *bolt.Bucket, limit i
 	// Use date index cursor to iterate in date order (newest first)
 	c := dateIdx.Cursor()
 	count := 0
-	
+
 	// Position cursor after the last seen article if cursor is provided
 	var k, articleID []byte
 	if cursor != "" {
@@ -363,22 +363,22 @@ func (s *Store) getArticlesGlobalOptimized(tx *bolt.Tx, ab *bolt.Bucket, limit i
 		// No cursor, start from beginning
 		k, articleID = c.First()
 	}
-	
+
 	for ; k != nil && (limit <= 0 || count < limit); k, articleID = c.Next() {
 		v := ab.Get(articleID)
 		if v == nil {
 			continue
 		}
-		
+
 		var article Article
 		if err := json.Unmarshal(v, &article); err != nil {
 			continue
 		}
-		
+
 		*articles = append(*articles, &article)
 		count++
 	}
-	
+
 	return nil
 }
 

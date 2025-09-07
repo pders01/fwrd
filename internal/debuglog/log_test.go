@@ -43,7 +43,7 @@ func TestParseLogLevel(t *testing.T) {
 		{"OFF", LevelOff},
 		{"off", LevelOff},
 		{"INVALID", LevelInfo}, // Default to INFO
-		{"", LevelInfo},         // Default to INFO
+		{"", LevelInfo},        // Default to INFO
 	}
 
 	for _, test := range tests {
@@ -80,8 +80,8 @@ func TestSetupWithLevel(t *testing.T) {
 	Errorf("error message") // Should appear
 
 	// Close and read log file
-	if err := Close(); err != nil {
-		t.Errorf("Close() failed: %v", err)
+	if closeErr := Close(); closeErr != nil {
+		t.Errorf("Close() failed: %v", closeErr)
 	}
 
 	content, err := os.ReadFile(logPath)
@@ -165,8 +165,8 @@ func TestFieldLogger(t *testing.T) {
 	logger.Infof("test message with fields")
 
 	// Close and read log file
-	if err := Close(); err != nil {
-		t.Errorf("Close() failed: %v", err)
+	if closeErr := Close(); closeErr != nil {
+		t.Errorf("Close() failed: %v", closeErr)
 	}
 
 	content, err := os.ReadFile(logPath)
@@ -182,7 +182,7 @@ func TestFieldLogger(t *testing.T) {
 		t.Error("Log message should contain structured field component=test")
 	}
 	if !strings.Contains(logContent, "action=testing") {
-		t.Error("Log message should contain structured field action=testing")  
+		t.Error("Log message should contain structured field action=testing")
 	}
 	if !strings.Contains(logContent, "count=42") {
 		t.Error("Log message should contain structured field count=42")

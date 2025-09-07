@@ -22,29 +22,41 @@ const (
 // String returns the string representation of the log level
 func (l LogLevel) String() string {
 	switch l {
-		case LevelDebug: return "DEBUG"
-		case LevelInfo:  return "INFO"
-		case LevelWarn:  return "WARN"
-		case LevelError: return "ERROR"
-		case LevelOff:   return "OFF"
-		default:         return "UNKNOWN"
+	case LevelDebug:
+		return "DEBUG"
+	case LevelInfo:
+		return "INFO"
+	case LevelWarn:
+		return "WARN"
+	case LevelError:
+		return "ERROR"
+	case LevelOff:
+		return "OFF"
+	default:
+		return "UNKNOWN"
 	}
 }
 
 // ParseLogLevel parses a string into a LogLevel
 func ParseLogLevel(s string) LogLevel {
 	switch strings.ToUpper(strings.TrimSpace(s)) {
-		case "DEBUG": return LevelDebug
-		case "INFO":  return LevelInfo
-		case "WARN", "WARNING": return LevelWarn
-		case "ERROR": return LevelError
-		case "OFF":   return LevelOff
-		default:      return LevelInfo // Default to INFO
+	case "DEBUG":
+		return LevelDebug
+	case "INFO":
+		return LevelInfo
+	case "WARN", "WARNING":
+		return LevelWarn
+	case "ERROR":
+		return LevelError
+	case "OFF":
+		return LevelOff
+	default:
+		return LevelInfo // Default to INFO
 	}
 }
 
 var (
-	currentLevel LogLevel = LevelOff
+	currentLevel = LevelOff
 	logger       *log.Logger
 	logFile      *os.File
 )
@@ -53,18 +65,18 @@ var (
 // If filePath is empty, defaults to ~/.fwrd/fwrd.log.
 func Setup(level LogLevel, filePath ...string) error {
 	currentLevel = level
-	
+
 	// Close existing log file if open
 	if logFile != nil {
 		logFile.Close()
 		logFile = nil
 	}
-	
+
 	if level == LevelOff {
 		logger = nil
 		return nil
 	}
-	
+
 	// Determine log file path
 	var logPath string
 	if len(filePath) > 0 && filePath[0] != "" {
@@ -77,13 +89,13 @@ func Setup(level LogLevel, filePath ...string) error {
 		}
 		logPath = filepath.Join(dir, "fwrd.log")
 	}
-	
+
 	// Open log file
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to open log file %s: %w", logPath, err)
 	}
-	
+
 	logFile = f
 	logger = log.New(f, "fwrd ", log.LstdFlags|log.Lmicroseconds)
 	return nil
@@ -92,9 +104,9 @@ func Setup(level LogLevel, filePath ...string) error {
 // SetupWithBool provides backward compatibility with the old Setup(bool) signature
 func SetupWithBool(enabled bool) {
 	if enabled {
-		Setup(LevelInfo)
+		_ = Setup(LevelInfo)
 	} else {
-		Setup(LevelOff)
+		_ = Setup(LevelOff)
 	}
 }
 
@@ -124,7 +136,7 @@ func logf(level LogLevel, format string, args ...any) {
 	if level < currentLevel || logger == nil {
 		return
 	}
-	
+
 	message := fmt.Sprintf(format, args...)
 	logger.Printf("[%s] %s", level.String(), message)
 }
@@ -162,7 +174,7 @@ func (fl *FieldLogger) formatFields() string {
 	if len(fl.fields) == 0 {
 		return ""
 	}
-	
+
 	var parts []string
 	for key, value := range fl.fields {
 		parts = append(parts, fmt.Sprintf("%s=%v", key, value))
