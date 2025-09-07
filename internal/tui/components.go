@@ -25,11 +25,12 @@ func renderInputFrame(inputView string, focused bool, contentWidth int) string {
 	if focused {
 		borderColor = AccentColor
 	}
+	frameWidth := min(max(contentWidth, 40), 80)
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(0, 1).
-		Width(contentWidth + 4).
+		Width(frameWidth).
 		Render(inputView)
 }
 

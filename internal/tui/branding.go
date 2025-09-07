@@ -52,9 +52,7 @@ var (
 
 	HeaderStyle = lipgloss.NewStyle().
 			Foreground(SecondaryColor).
-			Background(BackgroundColor).
-			Bold(true).
-			Padding(0, 1)
+			Bold(true)
 
 	StatusBarStyle = lipgloss.NewStyle().
 			Foreground(MutedColor).

@@ -79,12 +79,18 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 	feedList.SetShowStatusBar(false)
 	feedList.SetFilteringEnabled(true)
 	feedList.SetShowHelp(true) // Let Charm show native help
+	// Remove title bar styling
+	feedList.Styles.Title = lipgloss.NewStyle()
+	feedList.Styles.TitleBar = lipgloss.NewStyle()
 
 	articleList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	articleList.Title = ""
 	articleList.SetShowStatusBar(false)
 	articleList.SetFilteringEnabled(true)
 	articleList.SetShowHelp(true) // Let Charm show native help
+	// Remove title bar styling
+	articleList.Styles.Title = lipgloss.NewStyle()
+	articleList.Styles.TitleBar = lipgloss.NewStyle()
 
 	searchList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	searchList.Title = "› search results"
@@ -223,8 +229,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		a.feedList.SetSize(msg.Width, msg.Height-3)
-		a.articleList.SetSize(msg.Width, msg.Height-3)
+		a.feedList.SetSize(msg.Width, msg.Height-5)
+		a.articleList.SetSize(msg.Width, msg.Height-5)
 		// Search view layout requires 10 lines for UI chrome
 		searchListHeight := msg.Height - 10
 		if searchListHeight < 5 {
@@ -391,7 +397,7 @@ func (a *App) View() string {
 			content = renderCentered(a.width, a.height-3, GetWelcomeMessage())
 		} else {
 			header := renderHeader("› feeds", "", a.width)
-			content = lipgloss.JoinVertical(lipgloss.Top, header, "", a.feedList.View())
+			content = lipgloss.JoinVertical(lipgloss.Top, header, a.feedList.View())
 		}
 	case ViewArticles:
 		subtitle := ""
@@ -404,7 +410,7 @@ func (a *App) View() string {
 			subtitle = truncateEnd(st, a.width-10)
 		}
 		header := renderHeader("› articles", subtitle, a.width)
-		content = lipgloss.JoinVertical(lipgloss.Top, header, "", a.articleList.View())
+		content = lipgloss.JoinVertical(lipgloss.Top, header, a.articleList.View())
 	case ViewReader:
 		if a.loadingArticle {
 			content = renderCentered(a.width, a.height-3, renderMuted(MsgLoadingArticle))
@@ -413,10 +419,7 @@ func (a *App) View() string {
 		}
 	case ViewAddFeed:
 		header := renderHeader("› add feed", "Enter a feed URL and press Enter", a.width)
-		inputBox := lipgloss.NewStyle().
-			Width(a.width).
-			Align(lipgloss.Center, lipgloss.Center).
-			Render(renderInputFrame(a.textInput.View(), a.textInput.Focused(), a.width-4))
+		inputBox := renderInputFrame(a.textInput.View(), a.textInput.Focused(), a.width-4)
 		body := lipgloss.JoinVertical(
 			lipgloss.Center,
 			header,
@@ -436,10 +439,7 @@ func (a *App) View() string {
 			}
 		}
 		header := renderHeader("› rename feed", "Update the feed title and press Enter", a.width)
-		inputBox := lipgloss.NewStyle().
-			Width(a.width).
-			Align(lipgloss.Center, lipgloss.Center).
-			Render(renderInputFrame(a.textInput.View(), a.textInput.Focused(), a.width-4))
+		inputBox := renderInputFrame(a.textInput.View(), a.textInput.Focused(), a.width-4)
 		body := lipgloss.JoinVertical(
 			lipgloss.Center,
 			header,
