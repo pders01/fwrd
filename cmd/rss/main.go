@@ -16,6 +16,7 @@ import (
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/storage"
 	"github.com/pders01/fwrd/internal/tui"
+	"github.com/pders01/fwrd/internal/validation"
 )
 
 // Version is the version of the application, set at build time
@@ -152,14 +153,16 @@ func getStore(cfg *config.Config) (*storage.Store, error) {
 	dbFilePath := cfg.Database.Path
 	if dbPath != "" {
 		dbFilePath = dbPath
-		// Expand tilde in database path
-		if len(dbFilePath) >= 2 && dbFilePath[:2] == "~/" {
-			home, _ := os.UserHomeDir()
-			dbFilePath = filepath.Join(home, dbFilePath[2:])
-		}
 	}
 
-	return storage.NewStore(dbFilePath)
+	// Use secure path handler for validation
+	pathHandler := validation.NewSecurePathHandler()
+	validatedPath, err := pathHandler.GetSecureDBPath(dbFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid database path: %w", err)
+	}
+
+	return storage.NewStore(validatedPath)
 }
 
 // withStore provides consistent resource management for store operations

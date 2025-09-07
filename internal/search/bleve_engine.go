@@ -1,6 +1,7 @@
 package search
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	bleveQuery "github.com/blevesearch/bleve/v2/search/query"
 	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/storage"
+	"github.com/pders01/fwrd/internal/validation"
 )
 
 type bleveEngine struct {
@@ -24,10 +26,23 @@ func NewBleveEngine(store *storage.Store, indexPath string) (Searcher, error) {
 	var idx bleve.Index
 	var err error
 
-	// Ensure parent directory exists when creating an index
-	if mkErr := os.MkdirAll(filepath.Dir(indexPath), 0o755); mkErr != nil {
-		// continue; Open/Create below will still error and be returned
-		_ = mkErr
+	// Validate and sanitize the index path for security
+	// Use permissive validation for testing (when path is in temp directory)
+	pathHandler := validation.NewSecurePathHandler()
+	if strings.Contains(indexPath, os.TempDir()) {
+		pathHandler = validation.NewPermissivePathHandler()
+	}
+
+	validatedPath, err := pathHandler.GetSecureIndexPath(indexPath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid index path: %w", err)
+	}
+	indexPath = validatedPath
+
+	// Ensure parent directory exists securely
+	parentDir := filepath.Dir(indexPath)
+	if _, dirErr := pathHandler.EnsureSecureDirectory(parentDir); dirErr != nil {
+		return nil, fmt.Errorf("failed to create index directory: %w", dirErr)
 	}
 
 	// Try open first

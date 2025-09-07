@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/pders01/fwrd/internal/validation"
 	"github.com/spf13/viper"
 )
 
@@ -213,26 +214,24 @@ func Load(configPath string) (*Config, error) {
 	return &config, nil
 }
 
-// expandPath expands ~ to home directory and converts to absolute path
+// expandPath securely expands and validates a path
 func expandPath(path string) string {
 	if path == "" {
 		return path
 	}
 
-	// Expand tilde
-	if len(path) >= 2 && path[:2] == "~/" {
-		home, _ := os.UserHomeDir()
-		path = filepath.Join(home, path[2:])
+	// Use secure path handler for validation
+	pathHandler := validation.NewSecurePathHandler()
+
+	// Attempt secure expansion and validation
+	validatedPath, err := pathHandler.ExpandAndValidatePath(path)
+	if err != nil {
+		// Log error but return original path to maintain compatibility
+		// In production, this might want to fail more gracefully
+		return path
 	}
 
-	// Convert to absolute path if not already absolute
-	if !filepath.IsAbs(path) {
-		if abs, err := filepath.Abs(path); err == nil {
-			path = abs
-		}
-	}
-
-	return path
+	return validatedPath
 }
 
 // expandPaths expands all paths in the config

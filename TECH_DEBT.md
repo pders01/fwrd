@@ -27,9 +27,10 @@ This document tracks code quality issues, technical debt, and improvement opport
 ## Medium Priority Improvements
 
 ### Configuration & Infrastructure  
-- [ ] **Configuration Path Handling** (`internal/config/config.go:216-242`)
-  - Centralize path handling with comprehensive edge case coverage
-  - Handle all environment-specific path scenarios
+- [x] **Configuration Path Handling** (`internal/validation/paths.go`) ✅ **COMPLETED**
+  - ✅ Centralized path handling with comprehensive security validation
+  - ✅ Unified path expansion and normalization across all modules  
+  - ✅ Added secure defaults for database, config, and index paths
   
 - [ ] **HTTP Client Configuration** (`internal/feed/fetcher.go:19-28`)
   - Add configurable timeouts and retry logic
@@ -47,14 +48,18 @@ This document tracks code quality issues, technical debt, and improvement opport
 ## Security Improvements
 
 ### Input Validation & Path Security
-- [ ] **Feed URL Validation** (`internal/tui/keyhandler.go:508-514`)
-  - Implement comprehensive URL validation beyond basic checks
-  - Whitelist allowed URL schemes for security
+- [x] **Feed URL Validation** (`internal/validation/url.go`) ✅ **COMPLETED**
+  - ✅ Implemented comprehensive URL validation with security features
+  - ✅ Added protection against localhost, private IPs, suspicious hostnames
+  - ✅ Included directory traversal and XSS prevention
+  - ✅ Created configurable validators (secure vs permissive)
   
-- [ ] **File Path Security** (Configuration and database file handling)
-  - Implement path sanitization and validation
-  - Prevent directory traversal attacks
-  - Validate user-provided file paths
+- [x] **File Path Security** (`internal/validation/filepath.go`, `internal/validation/paths.go`) ✅ **COMPLETED**
+  - ✅ Implemented comprehensive path sanitization and validation
+  - ✅ Added directory traversal attack prevention (`../`, `..\\`)
+  - ✅ Protected against null byte injection and control characters
+  - ✅ Created secure path handlers with allowlist-based directory restrictions
+  - ✅ Integrated across config, database, and search index path handling
 
 ### Content Security
 - [ ] **Content Size Limits** (Article rendering and content handling)
@@ -147,9 +152,12 @@ semaphore := make(chan struct{}, maxConcurrentRefresh)
 
 ## Priority Action Plan
 
-1. **Phase 1 (Critical)**: Fix resource cleanup and error handling patterns
-2. **Phase 2 (Important)**: Improve concurrency safety and transaction management  
-3. **Phase 3 (Security)**: Enhance input validation and path security
+1. **Phase 1 (Critical)**: ✅ **COMPLETED** - Fixed resource cleanup and error handling patterns  
+2. **Phase 2 (Security & Infrastructure)**: 🔄 **IN PROGRESS** - Security hardening and configuration improvements
+   - ✅ **COMPLETED**: Comprehensive URL validation with security features
+   - ✅ **COMPLETED**: File path security and sanitization with centralized handling
+   - 🔄 **ONGOING**: HTTP client configuration improvements
+3. **Phase 3 (Infrastructure)**: Enhance configuration handling and performance
 4. **Phase 4 (Performance)**: Optimize memory usage and database operations
 5. **Phase 5 (Quality)**: Improve logging, testing, and reduce code duplication
 
