@@ -1,5 +1,3 @@
-//go:build bleve
-
 package search
 
 import (
