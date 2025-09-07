@@ -14,6 +14,8 @@ var (
 	feedsBucket    = []byte("feeds")
 	articlesBucket = []byte("articles")
 	metaBucket     = []byte("metadata")
+	// Index bucket: articles_by_feed -> sub-bucket per feedID containing article IDs
+	articlesByFeedBucket = []byte("articles_by_feed")
 )
 
 type Store struct {
@@ -27,7 +29,7 @@ func NewStore(dbPath string) (*Store, error) {
 	}
 
 	err = db.Update(func(tx *bolt.Tx) error {
-		for _, bucket := range [][]byte{feedsBucket, articlesBucket, metaBucket} {
+		for _, bucket := range [][]byte{feedsBucket, articlesBucket, metaBucket, articlesByFeedBucket} {
 			if _, createErr := tx.CreateBucketIfNotExists(bucket); createErr != nil {
 				return createErr
 			}
@@ -101,6 +103,7 @@ func (s *Store) GetAllFeeds() ([]*Feed, error) {
 func (s *Store) SaveArticles(articles []*Article) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(articlesBucket)
+		idxRoot := tx.Bucket(articlesByFeedBucket)
 		for _, article := range articles {
 			data, err := json.Marshal(article)
 			if err != nil {
@@ -108,6 +111,17 @@ func (s *Store) SaveArticles(articles []*Article) error {
 			}
 			if err := b.Put([]byte(article.ID), data); err != nil {
 				return err
+			}
+
+			// Update index: ensure sub-bucket for this feed exists and record article ID
+			if idxRoot != nil {
+				fb, err := idxRoot.CreateBucketIfNotExists([]byte(article.FeedID))
+				if err != nil {
+					return err
+				}
+				if err := fb.Put([]byte(article.ID), []byte{1}); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -117,15 +131,42 @@ func (s *Store) SaveArticles(articles []*Article) error {
 func (s *Store) GetArticles(feedID string, limit int) ([]*Article, error) {
 	var articles []*Article
 	err := s.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(articlesBucket)
-		return b.ForEach(func(_ []byte, v []byte) error {
+		ab := tx.Bucket(articlesBucket)
+		if ab == nil {
+			return nil
+		}
+		if feedID != "" {
+			// Use index for specific feed
+			idxRoot := tx.Bucket(articlesByFeedBucket)
+			if idxRoot == nil {
+				return nil
+			}
+			fb := idxRoot.Bucket([]byte(feedID))
+			if fb == nil {
+				return nil
+			}
+			c := fb.Cursor()
+			for k, _ := c.First(); k != nil; k, _ = c.Next() {
+				v := ab.Get(k)
+				if v == nil {
+					continue
+				}
+				var article Article
+				if err := json.Unmarshal(v, &article); err != nil {
+					continue
+				}
+				articles = append(articles, &article)
+			}
+			return nil
+		}
+
+		// No feed specified: fall back to scanning all (could be optimized later)
+		return ab.ForEach(func(_ []byte, v []byte) error {
 			var article Article
 			if err := json.Unmarshal(v, &article); err != nil {
 				return nil
 			}
-			if feedID == "" || article.FeedID == feedID {
-				articles = append(articles, &article)
-			}
+			articles = append(articles, &article)
 			return nil
 		})
 	})
@@ -165,21 +206,28 @@ func (s *Store) MarkArticleRead(id string, read bool) error {
 
 func (s *Store) DeleteFeed(id string) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
+		// Remove feed record
 		feedBucket := tx.Bucket(feedsBucket)
 		if err := feedBucket.Delete([]byte(id)); err != nil {
 			return err
 		}
 
-		articleBucket := tx.Bucket(articlesBucket)
-		c := articleBucket.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			var article Article
-			if err := json.Unmarshal(v, &article); err != nil {
-				continue
-			}
-			if article.FeedID == id {
-				if err := c.Delete(); err != nil {
-					return err
+		// Remove its articles using the index
+		ab := tx.Bucket(articlesBucket)
+		idxRoot := tx.Bucket(articlesByFeedBucket)
+		if idxRoot != nil {
+			fb := idxRoot.Bucket([]byte(id))
+			if fb != nil {
+				c := fb.Cursor()
+				for k, _ := c.First(); k != nil; k, _ = c.Next() {
+					if ab != nil {
+						_ = ab.Delete(k)
+					}
+				}
+				// Delete the sub-bucket for this feed
+				if err := idxRoot.DeleteBucket([]byte(id)); err != nil {
+					// If bucket deletion fails, continue to avoid partial state
+					_ = err
 				}
 			}
 		}
