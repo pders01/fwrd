@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -11,17 +10,26 @@ import (
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/media"
 	"github.com/pders01/fwrd/internal/search"
+	"github.com/pders01/fwrd/internal/validation"
 )
 
 type KeyHandler struct {
-	app         *App
-	config      *config.Config
-	modifierKey string
+	app          *App
+	config       *config.Config
+	modifierKey  string
+	urlValidator *validation.FeedURLValidator
 }
 
 func NewKeyHandler(app *App, cfg *config.Config) *KeyHandler {
 	modifierKey := cfg.Keys.Modifier + "+"
-	return &KeyHandler{app: app, config: cfg, modifierKey: modifierKey}
+	// Use permissive validator in development environments
+	urlValidator := validation.NewPermissiveFeedURLValidator()
+	return &KeyHandler{
+		app:          app,
+		config:       cfg,
+		modifierKey:  modifierKey,
+		urlValidator: urlValidator,
+	}
 }
 
 func (kh *KeyHandler) HandleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -92,11 +100,12 @@ func (kh *KeyHandler) handleTextInputEnter() (tea.Model, tea.Cmd) {
 	case ViewAddFeed:
 		input := strings.TrimSpace(kh.app.textInput.Value())
 		if input != "" {
-			if err := kh.validateFeedURL(input); err != nil {
+			normalizedURL, err := kh.urlValidator.ValidateAndNormalize(input)
+			if err != nil {
 				return kh.app, func() tea.Msg { return errorMsg{err: err} }
 			}
 			kh.app.setStatus(MsgAddingFeed, 0)
-			return kh.app, kh.app.addFeed(input)
+			return kh.app, kh.app.addFeed(normalizedURL)
 		}
 		return kh.app, nil
 
@@ -470,47 +479,6 @@ func (kh *KeyHandler) enterSearchMode() (tea.Model, tea.Cmd) {
 	}
 	kh.app.setStatus(fmt.Sprintf("Search: %s", engineName), 0)
 	return kh.app, nil
-}
-
-// validateFeedURL validates that a URL is suitable for RSS feeds
-func (kh *KeyHandler) validateFeedURL(input string) error {
-	input = strings.TrimSpace(input)
-
-	// Length validation
-	if input == "" {
-		return fmt.Errorf("URL cannot be empty")
-	}
-	if len(input) > 2048 {
-		return fmt.Errorf("URL too long (max 2048 characters)")
-	}
-
-	// Add protocol if missing
-	if !strings.HasPrefix(input, "http://") && !strings.HasPrefix(input, "https://") {
-		input = "https://" + input
-	}
-
-	// Parse URL
-	parsedURL, err := url.Parse(input)
-	if err != nil {
-		return fmt.Errorf("invalid URL format: %w", err)
-	}
-
-	// Check scheme
-	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return fmt.Errorf("URL must use http or https protocol")
-	}
-
-	// Check host
-	if parsedURL.Host == "" {
-		return fmt.Errorf("URL must have a valid hostname")
-	}
-
-	// Basic sanitization check
-	if strings.Contains(input, "<") || strings.Contains(input, ">") {
-		return fmt.Errorf("URL contains invalid characters")
-	}
-
-	return nil
 }
 
 // sanitizeSearchInput sanitizes and limits search input length

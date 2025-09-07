@@ -95,6 +95,8 @@ func setupTestEnvironment(t *testing.T) (*storage.Store, *feed.Manager, func()) 
 
 	cfg := config.TestConfig()
 	manager := feed.NewManager(store, cfg)
+	// Enable permissive validation for testing with localhost URLs
+	manager.SetPermissiveValidation(true)
 
 	cleanup := func() {
 		store.Close()

@@ -10,22 +10,27 @@ import (
 
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/storage"
+	"github.com/pders01/fwrd/internal/validation"
 )
 
 type Manager struct {
-	store   *storage.Store
-	fetcher *Fetcher
-	parser  *Parser
-	config  *config.Config
-	mu      sync.RWMutex
+	store        *storage.Store
+	fetcher      *Fetcher
+	parser       *Parser
+	config       *config.Config
+	urlValidator *validation.FeedURLValidator
+	mu           sync.RWMutex
 }
 
 func NewManager(store *storage.Store, cfg *config.Config) *Manager {
+	// Use secure validator by default, can be made configurable later
+	urlValidator := validation.NewFeedURLValidator()
 	return &Manager{
-		store:   store,
-		fetcher: NewFetcher(cfg),
-		parser:  NewParser(),
-		config:  cfg,
+		store:        store,
+		fetcher:      NewFetcher(cfg),
+		parser:       NewParser(),
+		config:       cfg,
+		urlValidator: urlValidator,
 	}
 }
 
@@ -36,16 +41,30 @@ func (m *Manager) SetForceRefresh(force bool) {
 	}
 }
 
+// SetPermissiveValidation enables permissive URL validation for development/testing
+func (m *Manager) SetPermissiveValidation(permissive bool) {
+	if permissive {
+		m.urlValidator = validation.NewPermissiveFeedURLValidator()
+	} else {
+		m.urlValidator = validation.NewFeedURLValidator()
+	}
+}
+
 func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	url = normalizeURL(url)
-	feedID := generateFeedID(url)
+	// Validate and normalize the URL using comprehensive security checks
+	normalizedURL, err := m.urlValidator.ValidateAndNormalize(url)
+	if err != nil {
+		return nil, fmt.Errorf("invalid feed URL: %w", err)
+	}
+
+	feedID := generateFeedID(normalizedURL)
 
 	feed := &storage.Feed{
 		ID:        feedID,
-		URL:       url,
+		URL:       normalizedURL,
 		UpdatedAt: time.Now(),
 	}
 
@@ -193,14 +212,6 @@ func (m *Manager) RefreshAllFeeds() error {
 	}
 
 	return nil
-}
-
-func normalizeURL(url string) string {
-	url = strings.TrimSpace(url)
-	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		url = "https://" + url
-	}
-	return url
 }
 
 func generateFeedID(url string) string {
