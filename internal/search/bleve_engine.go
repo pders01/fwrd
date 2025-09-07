@@ -39,10 +39,12 @@ func NewBleveEngine(store *storage.Store, indexPath string) (Searcher, error) {
 		}
 	}
 
-	be := &bleveEngine{store: store, idx: idx}
-	// Initial load
-	_ = be.reindexAll()
-	return be, nil
+    be := &bleveEngine{store: store, idx: idx}
+    // Initial load
+    if err := be.reindexAll(); err != nil {
+        return nil, err
+    }
+    return be, nil
 }
 
 func buildIndexMapping() mapping.IndexMapping {
@@ -271,7 +273,31 @@ func (b *bleveEngine) DocCount() (int, error) {
 // OnFeedDeleted removes all docs for the feed. This simple approach deletes the feed doc only.
 // Removing all articles would require iterating; for brevity this only deletes the feed doc.
 func (b *bleveEngine) OnFeedDeleted(feedID string) {
-	_ = b.idx.Delete(docIDForFeed(feedID))
+    // Delete the feed document
+    _ = b.idx.Delete(docIDForFeed(feedID))
+
+    // Delete all article documents for this feed in batches
+    // Query: term query on feed_id
+    tq := bleve.NewTermQuery(feedID)
+    tq.SetField("feed_id")
+
+    from := 0
+    size := 1000
+    for {
+        req := bleve.NewSearchRequestOptions(tq, size, from, false)
+        req.Fields = []string{}
+        res, err := b.idx.Search(req)
+        if err != nil || res == nil || len(res.Hits) == 0 {
+            break
+        }
+        for _, h := range res.Hits {
+            _ = b.idx.Delete(h.ID)
+        }
+        if len(res.Hits) < size {
+            break
+        }
+        from += size
+    }
 }
 
 func docIDForFeed(feedID string) string   { return "feed:" + feedID }
