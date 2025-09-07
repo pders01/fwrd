@@ -149,22 +149,40 @@ func (m *Manager) RefreshAllFeeds() error {
 		return fmt.Errorf("getting feeds: %w", err)
 	}
 
-	var wg sync.WaitGroup
-	errChan := make(chan error, len(feeds))
-
-	for _, feed := range feeds {
-		wg.Add(1)
-		go func(f *storage.Feed) {
-			defer wg.Done()
-			if refreshErr := m.RefreshFeed(f.ID); refreshErr != nil {
-				errChan <- refreshErr
-			}
-		}(feed)
+	if len(feeds) == 0 {
+		return nil
 	}
 
+	// Use worker pool pattern to limit concurrent operations
+	const maxConcurrentRefresh = 5
+	feedChan := make(chan *storage.Feed, len(feeds))
+	errChan := make(chan error, len(feeds))
+
+	// Start workers
+	var wg sync.WaitGroup
+	for i := 0; i < maxConcurrentRefresh && i < len(feeds); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for feed := range feedChan {
+				if refreshErr := m.RefreshFeed(feed.ID); refreshErr != nil {
+					errChan <- refreshErr
+				}
+			}
+		}()
+	}
+
+	// Send feeds to workers
+	for _, feed := range feeds {
+		feedChan <- feed
+	}
+	close(feedChan)
+
+	// Wait for all workers to complete
 	wg.Wait()
 	close(errChan)
 
+	// Collect any errors
 	var errs []error
 	for err := range errChan {
 		errs = append(errs, err)

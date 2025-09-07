@@ -162,20 +162,41 @@ func getStore(cfg *config.Config) (*storage.Store, error) {
 	return storage.NewStore(dbFilePath)
 }
 
-func runTUI(_ *cobra.Command, _ []string) {
-	if !quiet {
-		showBanner()
-	}
-
-	// Load configuration
+// withStore provides consistent resource management for store operations
+func withStore(fn func(*storage.Store) error) error {
 	cfg, err := loadConfig()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	store, err := getStore(cfg)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("failed to open store: %w", err)
+	}
+	defer store.Close()
+
+	return fn(store)
+}
+
+// withStoreAndConfig provides access to both store and config with proper cleanup
+func withStoreAndConfig(fn func(*storage.Store, *config.Config) error) error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	store, err := getStore(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to open store: %w", err)
+	}
+	defer store.Close()
+
+	return fn(store, cfg)
+}
+
+func runTUI(_ *cobra.Command, _ []string) {
+	if !quiet {
+		showBanner()
 	}
 
 	// Setup debug logging if requested
@@ -183,172 +204,144 @@ func runTUI(_ *cobra.Command, _ []string) {
 		debuglog.Setup(true)
 	}
 
-	app := tui.NewApp(store, cfg)
+	if err := withStoreAndConfig(func(store *storage.Store, cfg *config.Config) error {
+		app := tui.NewApp(store, cfg)
 
-	// Pass force refresh option to TUI
-	if forceRefresh {
-		app.SetForceRefresh(true)
-	}
+		// Pass force refresh option to TUI
+		if forceRefresh {
+			app.SetForceRefresh(true)
+		}
 
-	p := tea.NewProgram(app, tea.WithAltScreen())
+		p := tea.NewProgram(app, tea.WithAltScreen())
 
-	if _, err := p.Run(); err != nil {
+		if _, err := p.Run(); err != nil {
+			return fmt.Errorf("TUI error: %w", err)
+		}
+
+		return nil
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		store.Close()
 		os.Exit(1)
 	}
-	store.Close()
 }
 
 func listFeeds(_ *cobra.Command, _ []string) {
-	cfg, err := loadConfig()
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
-	}
-
-	store, err := getStore(cfg)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	feeds, err := store.GetAllFeeds()
-	if err != nil {
-		store.Close()
-		log.Fatalf("Failed to get feeds: %v", err)
-	}
-
-	if len(feeds) == 0 {
-		fmt.Println("No feeds found.")
-		store.Close()
-		return
-	}
-
-	fmt.Printf("Found %d feeds:\n\n", len(feeds))
-	for _, feed := range feeds {
-		fmt.Printf("Title: %s\n", feed.Title)
-		fmt.Printf("URL:   %s\n", feed.URL)
-		fmt.Printf("ID:    %s\n", feed.ID)
-
-		// Get article count
-		articles, _ := store.GetArticles(feed.ID, 0)
-		fmt.Printf("Articles: %d\n", len(articles))
-
-		fmt.Printf("Last Fetched: %s\n", feed.LastFetched.Format("2006-01-02 15:04:05"))
-		if feed.ETag != "" {
-			fmt.Printf("ETag: %s\n", feed.ETag)
+	if err := withStore(func(store *storage.Store) error {
+		feeds, err := store.GetAllFeeds()
+		if err != nil {
+			return fmt.Errorf("failed to get feeds: %w", err)
 		}
-		if feed.LastModified != "" {
-			fmt.Printf("Last-Modified: %s\n", feed.LastModified)
+
+		if len(feeds) == 0 {
+			fmt.Println("No feeds found.")
+			return nil
 		}
-		fmt.Println()
+
+		fmt.Printf("Found %d feeds:\n\n", len(feeds))
+		for _, feed := range feeds {
+			fmt.Printf("Title: %s\n", feed.Title)
+			fmt.Printf("URL:   %s\n", feed.URL)
+			fmt.Printf("ID:    %s\n", feed.ID)
+
+			// Get article count
+			articles, _ := store.GetArticles(feed.ID, 0)
+			fmt.Printf("Articles: %d\n", len(articles))
+
+			fmt.Printf("Last Fetched: %s\n", feed.LastFetched.Format("2006-01-02 15:04:05"))
+			if feed.ETag != "" {
+				fmt.Printf("ETag: %s\n", feed.ETag)
+			}
+			if feed.LastModified != "" {
+				fmt.Printf("Last-Modified: %s\n", feed.LastModified)
+			}
+			fmt.Println()
+		}
+		return nil
+	}); err != nil {
+		log.Fatalf("Error: %v", err)
 	}
-	store.Close()
 }
 
 func addFeed(_ *cobra.Command, args []string) {
 	url := args[0]
 
-	cfg, err := loadConfig()
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+	if err := withStoreAndConfig(func(store *storage.Store, cfg *config.Config) error {
+		manager := feed.NewManager(store, cfg)
+
+		fmt.Printf("Adding feed: %s\n", url)
+		feed, err := manager.AddFeed(url)
+		if err != nil {
+			return fmt.Errorf("failed to add feed: %w", err)
+		}
+
+		fmt.Printf("Successfully added feed: %s (%s)\n", feed.Title, feed.URL)
+		fmt.Printf("Feed ID: %s\n", feed.ID)
+
+		// Get article count
+		articles, _ := store.GetArticles(feed.ID, 0)
+		fmt.Printf("Articles fetched: %d\n", len(articles))
+
+		return nil
+	}); err != nil {
+		log.Fatalf("Error: %v", err)
 	}
-
-	store, err := getStore(cfg)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	manager := feed.NewManager(store, cfg)
-
-	fmt.Printf("Adding feed: %s\n", url)
-	feed, err := manager.AddFeed(url)
-	if err != nil {
-		store.Close()
-		log.Fatalf("Failed to add feed: %v", err)
-	}
-
-	fmt.Printf("Successfully added feed: %s (%s)\n", feed.Title, feed.URL)
-	fmt.Printf("Feed ID: %s\n", feed.ID)
-
-	// Get article count
-	articles, _ := store.GetArticles(feed.ID, 0)
-	fmt.Printf("Articles fetched: %d\n", len(articles))
-
-	store.Close()
 }
 
 func deleteFeed(_ *cobra.Command, args []string) {
 	urlOrID := args[0]
 
-	cfg, err := loadConfig()
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
-	}
-
-	store, err := getStore(cfg)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Find feed by URL or ID
-	feeds, err := store.GetAllFeeds()
-	if err != nil {
-		store.Close()
-		log.Fatalf("Failed to get feeds: %v", err)
-	}
-
-	var targetFeed *storage.Feed
-	for _, feed := range feeds {
-		if feed.ID == urlOrID || feed.URL == urlOrID {
-			targetFeed = feed
-			break
+	if err := withStore(func(store *storage.Store) error {
+		// Find feed by URL or ID
+		feeds, err := store.GetAllFeeds()
+		if err != nil {
+			return fmt.Errorf("failed to get feeds: %w", err)
 		}
+
+		var targetFeed *storage.Feed
+		for _, feed := range feeds {
+			if feed.ID == urlOrID || feed.URL == urlOrID {
+				targetFeed = feed
+				break
+			}
+		}
+
+		if targetFeed == nil {
+			return fmt.Errorf("feed not found: %s", urlOrID)
+		}
+
+		fmt.Printf("Deleting feed: %s (%s)\n", targetFeed.Title, targetFeed.URL)
+
+		if err := store.DeleteFeed(targetFeed.ID); err != nil {
+			return fmt.Errorf("failed to delete feed: %w", err)
+		}
+
+		fmt.Println("Feed deleted successfully.")
+		return nil
+	}); err != nil {
+		log.Fatalf("Error: %v", err)
 	}
-
-	if targetFeed == nil {
-		fmt.Printf("Feed not found: %s\n", urlOrID)
-		store.Close()
-		os.Exit(1)
-	}
-
-	fmt.Printf("Deleting feed: %s (%s)\n", targetFeed.Title, targetFeed.URL)
-
-	if err := store.DeleteFeed(targetFeed.ID); err != nil {
-		store.Close()
-		log.Fatalf("Failed to delete feed: %v", err)
-	}
-
-	fmt.Println("Feed deleted successfully.")
-	store.Close()
 }
 
 func refreshFeeds(_ *cobra.Command, _ []string) {
-	cfg, err := loadConfig()
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+	if err := withStoreAndConfig(func(store *storage.Store, cfg *config.Config) error {
+		manager := feed.NewManager(store, cfg)
+
+		// Set force refresh if requested
+		if forceRefresh {
+			fmt.Println("Force refresh enabled - ignoring ETag/Last-Modified headers")
+			manager.SetForceRefresh(true)
+		}
+
+		fmt.Println("Refreshing all feeds...")
+		if err := manager.RefreshAllFeeds(); err != nil {
+			return fmt.Errorf("failed to refresh feeds: %w", err)
+		}
+
+		fmt.Println("Successfully refreshed all feeds.")
+		return nil
+	}); err != nil {
+		log.Fatalf("Error: %v", err)
 	}
-
-	store, err := getStore(cfg)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	manager := feed.NewManager(store, cfg)
-
-	// Set force refresh if requested
-	if forceRefresh {
-		fmt.Println("Force refresh enabled - ignoring ETag/Last-Modified headers")
-		manager.SetForceRefresh(true)
-	}
-
-	fmt.Println("Refreshing all feeds...")
-	if err := manager.RefreshAllFeeds(); err != nil {
-		store.Close()
-		log.Fatalf("Failed to refresh feeds: %v", err)
-	}
-
-	fmt.Println("Successfully refreshed all feeds.")
-	store.Close()
 }
 
 func showBanner() {
