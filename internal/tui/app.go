@@ -574,19 +574,15 @@ func (a *App) View() string {
 	}
 
 	customStatus := a.getCustomStatusBar()
-	if customStatus != "" {
-		separatorWidth := a.width - 2
-		if separatorWidth < 0 {
-			separatorWidth = 0
-		}
-		separator := lipgloss.NewStyle().
-			Foreground(MutedColor).
-			Render("─" + strings.Repeat("─", separatorWidth))
-
-		return lipgloss.JoinVertical(lipgloss.Top, content, separator, customStatus)
+	separatorWidth := a.width - 2
+	if separatorWidth < 0 {
+		separatorWidth = 0
 	}
+	separator := lipgloss.NewStyle().
+		Foreground(MutedColor).
+		Render("─" + strings.Repeat("─", separatorWidth))
 
-	return content
+	return lipgloss.JoinVertical(lipgloss.Top, content, separator, customStatus)
 }
 
 func (a *App) getCustomStatusBar() string {
@@ -617,20 +613,15 @@ func (a *App) getCustomStatusBar() string {
 	}
 
 	commands := a.keyHandler.GetHelpForCurrentView()
-	if len(commands) == 0 {
-		return ""
+	commandText := strings.Join(commands, " • ")
+	if commandText == "" {
+		commandText = " " // ensure status bar always renders a line
 	}
-
-	if len(commands) > 0 {
-		commandText := strings.Join(commands, " • ")
-		return lipgloss.NewStyle().
-			Width(a.width).
-			Padding(0, 1).
-			Foreground(MutedColor).
-			Render(commandText)
-	}
-
-	return ""
+	return lipgloss.NewStyle().
+		Width(a.width).
+		Padding(0, 1).
+		Foreground(MutedColor).
+		Render(commandText)
 }
 
 // setStatus shows a transient status message for the given duration.

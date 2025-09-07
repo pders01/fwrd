@@ -95,6 +95,7 @@ func (kh *KeyHandler) handleTextInputEnter() (tea.Model, tea.Cmd) {
 			if err := kh.validateFeedURL(input); err != nil {
 				return kh.app, func() tea.Msg { return errorMsg{err: err} }
 			}
+			kh.app.setStatus("Adding feed…", 0)
 			return kh.app, kh.app.addFeed(input)
 		}
 		return kh.app, nil
@@ -104,6 +105,7 @@ func (kh *KeyHandler) handleTextInputEnter() (tea.Model, tea.Cmd) {
 		if input == "" {
 			return kh.app, nil
 		}
+		kh.app.setStatus("Renaming…", 0)
 		return kh.app, kh.app.renameFeed(input)
 
 	case ViewSearch:
@@ -212,6 +214,7 @@ func (kh *KeyHandler) handleFeedsCustomKeys(key string) (tea.Model, tea.Cmd, boo
 			}
 		}
 	case kh.modifierKey + "r":
+		kh.app.setStatus("Refreshing…", 0)
 		return kh.app, kh.app.refreshFeeds(), true
 	}
 	return kh.app, nil, false
@@ -288,6 +291,7 @@ func (kh *KeyHandler) delegateToCharm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				kh.app.currentArticle = i.article
 				kh.app.cameFromSearch = false
 				kh.app.loadingArticle = true // Set loading flag
+				kh.app.setStatus("Loading article…", 0)
 				kh.app.view = ViewReader
 				// Mark article as read when opened
 				markReadCmd := kh.app.markArticleRead(i.article)
@@ -370,6 +374,7 @@ func (kh *KeyHandler) handleMediaCustomKeys(key string) (tea.Model, tea.Cmd, boo
 func (kh *KeyHandler) handleDeleteConfirmKeys(key string) (tea.Model, tea.Cmd, bool) {
 	if key == "enter" {
 		if kh.app.feedToDelete != nil {
+			kh.app.setStatus("Deleting…", 0)
 			return kh.app, kh.app.deleteFeed(kh.app.feedToDelete.ID), true
 		}
 	}
@@ -387,6 +392,7 @@ func (kh *KeyHandler) selectSearchResult(result searchResultItem) (tea.Model, te
 		kh.app.currentFeed = result.feed
 		kh.app.cameFromSearch = true
 		kh.app.loadingArticle = true // Set loading flag
+		kh.app.setStatus("Loading article…", 0)
 		kh.app.view = ViewReader
 		// Mark article as read when opened
 		markReadCmd := kh.app.markArticleRead(result.article)
@@ -603,8 +609,14 @@ func (kh *KeyHandler) GetHelpForCurrentView() []string {
 	case ViewMedia:
 		return []string{"enter: open", kh.modifierKey + "o: open", "esc: back"}
 
-	case ViewAddFeed, ViewDeleteConfirm:
-		return []string{} // These views have clear UI prompts
+	case ViewAddFeed:
+		return []string{"enter: add", "esc: cancel"}
+
+	case ViewRenameFeed:
+		return []string{"enter: rename", "esc: cancel"}
+
+	case ViewDeleteConfirm:
+		return []string{"enter: confirm", "esc: cancel"}
 
 	default:
 		return []string{}
