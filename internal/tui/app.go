@@ -63,12 +63,14 @@ type App struct {
 
 	// Transient status bar message
 	statusText  string
+	statusKind  StatusKind
 	statusUntil time.Time
 
 	// Subtle spinner in status bar for long ops
 	statusSpinner spinner.Model
 	spinnerActive bool
 	spinnerLabel  string
+	spinnerKind   StatusKind
 }
 
 func NewApp(store *storage.Store, cfg *config.Config) *App {
@@ -273,7 +275,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.err = msg.err
 		} else {
 			a.view = ViewFeeds
-			a.setStatus(MsgAddedFeed(msg.title, msg.added), 0)
+			a.setStatusWithKind(MsgAddedFeed(msg.title, msg.added), StatusSuccess, 0)
 			cmd := a.loadFeeds()
 			return a, cmd
 		}
@@ -283,7 +285,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			a.view = ViewFeeds
 			a.feedToRename = nil
-			a.setStatus(MsgFeedRenamed, 0)
+			a.setStatusWithKind(MsgFeedRenamed, StatusSuccess, 0)
 			cmd := a.loadFeeds()
 			return a, cmd
 		}
@@ -293,7 +295,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.err = msg.err
 		} else {
 			a.view = ViewFeeds
-			a.setStatus(MsgFeedDeleted, 0)
+			a.setStatusWithKind(MsgFeedDeleted, StatusSuccess, 0)
 			a.feedToDelete = nil
 			cmd := a.loadFeeds()
 			return a, cmd
@@ -619,9 +621,8 @@ func (a *App) getCustomStatusBar() string {
 		if label == "" {
 			label = "Working…"
 		}
-		msg := lipgloss.NewStyle().
-			Foreground(MutedColor).
-			Render(left + " " + label)
+		st := a.statusStyle(a.spinnerKind)
+		msg := st.Render(left + " " + label)
 		return lipgloss.NewStyle().
 			Width(a.width).
 			Padding(0, 1).
@@ -631,9 +632,8 @@ func (a *App) getCustomStatusBar() string {
 
 	// Next: transient status message
 	if a.statusText != "" && time.Now().Before(a.statusUntil) {
-		statusMsg := lipgloss.NewStyle().
-			Foreground(SuccessColor).
-			Render(a.statusText)
+		st := a.statusStyle(a.statusKind)
+		statusMsg := st.Render(a.statusText)
 		return lipgloss.NewStyle().
 			Width(a.width).
 			Padding(0, 1).
@@ -655,7 +655,13 @@ func (a *App) getCustomStatusBar() string {
 
 // setStatus shows a transient status message for the given duration.
 func (a *App) setStatus(text string, d time.Duration) {
+	a.setStatusWithKind(text, StatusInfo, d)
+}
+
+// setStatusWithKind shows a transient status message for the given duration and kind.
+func (a *App) setStatusWithKind(text string, kind StatusKind, d time.Duration) {
 	a.statusText = text
+	a.statusKind = kind
 	// Cap duration to 500ms by default and as a maximum
 	maxDuration := 500 * time.Millisecond
 	if d <= 0 || d > maxDuration {
@@ -666,15 +672,35 @@ func (a *App) setStatus(text string, d time.Duration) {
 
 // startSpinner activates the status spinner with a label and returns a Cmd to tick it.
 func (a *App) startSpinner(label string) tea.Cmd {
-	a.spinnerActive = true
-	a.spinnerLabel = label
-	return a.statusSpinner.Tick
+	return a.startSpinnerWithKind(label, StatusInfo)
 }
 
 // stopSpinner deactivates the status spinner.
 func (a *App) stopSpinner() {
 	a.spinnerActive = false
 	a.spinnerLabel = ""
+}
+
+// startSpinnerWithKind starts spinner with a severity kind.
+func (a *App) startSpinnerWithKind(label string, kind StatusKind) tea.Cmd {
+	a.spinnerActive = true
+	a.spinnerLabel = label
+	a.spinnerKind = kind
+	return a.statusSpinner.Tick
+}
+
+// statusStyle returns a style for a given status kind.
+func (a *App) statusStyle(kind StatusKind) lipgloss.Style {
+	switch kind {
+	case StatusSuccess:
+		return lipgloss.NewStyle().Foreground(SuccessColor)
+	case StatusWarn:
+		return lipgloss.NewStyle().Foreground(UnreadColor)
+	case StatusError:
+		return lipgloss.NewStyle().Foreground(ErrorColor).Bold(true)
+	default:
+		return lipgloss.NewStyle().Foreground(MutedColor)
+	}
 }
 
 type feedItem struct {
