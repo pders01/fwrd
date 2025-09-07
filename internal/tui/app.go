@@ -1,20 +1,20 @@
 package tui
 
 import (
-    "fmt"
-    "os"
-    "path/filepath"
-    "strings"
-    "time"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
-    "github.com/charmbracelet/bubbles/help"
-    "github.com/charmbracelet/bubbles/list"
-    "github.com/charmbracelet/bubbles/spinner"
-    "github.com/charmbracelet/bubbles/textinput"
-    "github.com/charmbracelet/bubbles/viewport"
-    tea "github.com/charmbracelet/bubbletea"
-    "github.com/charmbracelet/glamour"
-    "github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/media"
@@ -61,14 +61,14 @@ type App struct {
 	pendingSearchQuery   string
 	searchDebounceMillis int
 
-    // Transient status bar message
-    statusText  string
-    statusUntil time.Time
+	// Transient status bar message
+	statusText  string
+	statusUntil time.Time
 
-    // Subtle spinner in status bar for long ops
-    statusSpinner spinner.Model
-    spinnerActive bool
-    spinnerLabel  string
+	// Subtle spinner in status bar for long ops
+	statusSpinner spinner.Model
+	spinnerActive bool
+	spinnerLabel  string
 }
 
 func NewApp(store *storage.Store, cfg *config.Config) *App {
@@ -148,15 +148,15 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 		app.searchEngine = search.NewEngine(store)
 	}
 
-    app.keyHandler = NewKeyHandler(app, cfg)
+	app.keyHandler = NewKeyHandler(app, cfg)
 
-    // Initialize status spinner (subtle)
-    sp := spinner.New()
-    sp.Spinner = spinner.Dot
-    sp.Style = lipgloss.NewStyle().Foreground(MutedColor)
-    app.statusSpinner = sp
+	// Initialize status spinner (subtle)
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(MutedColor)
+	app.statusSpinner = sp
 
-    return app
+	return app
 }
 
 func (a *App) getRenderer() (*glamour.TermRenderer, error) {
@@ -204,14 +204,14 @@ func (a *App) Init() tea.Cmd {
 }
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-    var cmds []tea.Cmd
+	var cmds []tea.Cmd
 
-    // Keep spinner animated
-    var spCmd tea.Cmd
-    a.statusSpinner, spCmd = a.statusSpinner.Update(msg)
-    if a.spinnerActive && spCmd != nil {
-        cmds = append(cmds, spCmd)
-    }
+	// Keep spinner animated
+	var spCmd tea.Cmd
+	a.statusSpinner, spCmd = a.statusSpinner.Update(msg)
+	if a.spinnerActive && spCmd != nil {
+		cmds = append(cmds, spCmd)
+	}
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -256,13 +256,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.articleList.SetItems(items)
 		}
 
-    case articleRenderedMsg:
-        if a.view == ViewReader {
-            a.viewport.SetContent(msg.content)
-            a.viewport.GotoTop()
-            a.loadingArticle = false // Article has finished loading
-            a.stopSpinner()
-        }
+	case articleRenderedMsg:
+		if a.view == ViewReader {
+			a.viewport.SetContent(msg.content)
+			a.viewport.GotoTop()
+			a.loadingArticle = false // Article has finished loading
+			a.stopSpinner()
+		}
 
 	case feedAddedMsg:
 		if msg.err != nil {
@@ -295,9 +295,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, cmd
 		}
 
-    case refreshDoneMsg:
-        // Show a concise summary in the status bar
-        summary := fmt.Sprintf(
+	case refreshDoneMsg:
+		// Show a concise summary in the status bar
+		summary := fmt.Sprintf(
 			"Refreshed: %d feeds • %d articles%s%s",
 			msg.updatedFeeds,
 			msg.addedArticles,
@@ -313,9 +313,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return ""
 			}(),
-        )
-        a.setStatus(summary, 0)
-        a.stopSpinner()
+		)
+		a.setStatus(summary, 0)
+		a.stopSpinner()
 
 	case searchResultsMsg:
 		if a.view == ViewSearch {
@@ -349,14 +349,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-    case errorMsg:
-        a.err = msg.err
-        // Clear loading flag if we were loading an article
-        if a.loadingArticle {
-            a.loadingArticle = false
-            a.stopSpinner()
-        }
-    }
+	case errorMsg:
+		a.err = msg.err
+		// Clear loading flag if we were loading an article
+		if a.loadingArticle {
+			a.loadingArticle = false
+			a.stopSpinner()
+		}
+	}
 
 	switch a.view {
 	case ViewFeeds:
@@ -426,20 +426,21 @@ func (a *App) View() string {
 			Width(a.width).
 			Align(lipgloss.Center, lipgloss.Center).
 			Render(a.textInput.View())
-		content = lipgloss.NewStyle().
-			Width(a.width).
-			Height(a.height-3).
-			Align(lipgloss.Center, lipgloss.Center).
-			Render(
-				lipgloss.JoinVertical(
-					lipgloss.Center,
-					TitleStyle.Render("› add feed"),
-					"",
-					inputCentered,
-					"",
-					HelpStyle.Render("Press Enter to add, Esc to cancel"),
-				),
-			)
+    content = lipgloss.NewStyle().
+        Width(a.width).
+        Height(a.height-3).
+        Align(lipgloss.Center, lipgloss.Center).
+        Render(
+            lipgloss.JoinVertical(
+                lipgloss.Center,
+                HeaderStyle.Render("› add feed"),
+                lipgloss.NewStyle().Foreground(MutedColor).Render("Enter a feed URL and press Enter"),
+                "",
+                inputCentered,
+                "",
+                HelpStyle.Render("Press Enter to add, Esc to cancel"),
+            ),
+        )
 	case ViewRenameFeed:
 		// Prepare current feed name
 		current := ""
@@ -453,24 +454,25 @@ func (a *App) View() string {
 			Width(a.width).
 			Align(lipgloss.Center, lipgloss.Center).
 			Render(a.textInput.View())
-		content = lipgloss.NewStyle().
-			Width(a.width).
-			Height(a.height-3).
-			Align(lipgloss.Center, lipgloss.Center).
-			Render(
-				lipgloss.JoinVertical(
-					lipgloss.Center,
-					TitleStyle.Render("› rename feed"),
-					"",
-					inputCentered,
-					"",
-					HelpStyle.Render("Enter: rename • Esc: cancel"),
-					"",
-					lipgloss.NewStyle().
-						Foreground(MutedColor).
-						Render("Current: "+current),
-				),
-			)
+    content = lipgloss.NewStyle().
+        Width(a.width).
+        Height(a.height-3).
+        Align(lipgloss.Center, lipgloss.Center).
+        Render(
+            lipgloss.JoinVertical(
+                lipgloss.Center,
+                HeaderStyle.Render("› rename feed"),
+                lipgloss.NewStyle().Foreground(MutedColor).Render("Update the feed title and press Enter"),
+                "",
+                inputCentered,
+                "",
+                HelpStyle.Render("Enter: rename • Esc: cancel"),
+                "",
+                lipgloss.NewStyle().
+                    Foreground(MutedColor).
+                    Render("Current: "+current),
+            ),
+        )
 	case ViewDeleteConfirm:
 		feedName := "Unknown Feed"
 		if a.feedToDelete != nil {
@@ -492,23 +494,24 @@ func (a *App) View() string {
 			feedName = feedName[:modalWidth-7] + "..."
 		}
 
-		content = lipgloss.NewStyle().
-			Width(a.width).
-			Height(a.height-3).
-			Align(lipgloss.Center, lipgloss.Center).
-			Render(
-				lipgloss.JoinVertical(
-					lipgloss.Center,
-					lipgloss.NewStyle().
-						Foreground(ErrorColor).
-						Bold(true).
-						Render("⚠ Delete Feed"),
-					"",
-					lipgloss.NewStyle().
-						Foreground(TextColor).
-						Width(modalWidth).
-						Align(lipgloss.Center).
-						Render("Delete this feed?"),
+    content = lipgloss.NewStyle().
+        Width(a.width).
+        Height(a.height-3).
+        Align(lipgloss.Center, lipgloss.Center).
+        Render(
+            lipgloss.JoinVertical(
+                lipgloss.Center,
+                HeaderStyle.Render("› delete feed"),
+                lipgloss.NewStyle().
+                    Foreground(ErrorColor).
+                    Bold(true).
+                    Render("This action cannot be undone"),
+                "",
+                lipgloss.NewStyle().
+                    Foreground(TextColor).
+                    Width(modalWidth).
+                    Align(lipgloss.Center).
+                    Render("Delete this feed?"),
 					"",
 					lipgloss.NewStyle().
 						Foreground(UnreadColor).
@@ -608,8 +611,8 @@ func (a *App) View() string {
 }
 
 func (a *App) getCustomStatusBar() string {
-    // Highest priority: any error
-    if a.err != nil {
+	// Highest priority: any error
+	if a.err != nil {
 		errorMsg := lipgloss.NewStyle().
 			Foreground(ErrorColor).
 			Bold(true).
@@ -620,30 +623,30 @@ func (a *App) getCustomStatusBar() string {
 			Padding(0, 1).
 			Foreground(MutedColor).
 			Render(errorMsg)
-    }
+	}
 
-    // Next: spinner for ongoing operations (refresh, loading article)
-    if a.spinnerActive {
-        left := a.statusSpinner.View()
-        label := strings.TrimSpace(a.spinnerLabel)
-        if label == "" {
-            label = "Working…"
-        }
-        msg := lipgloss.NewStyle().
-            Foreground(MutedColor).
-            Render(left + " " + label)
-        return lipgloss.NewStyle().
-            Width(a.width).
-            Padding(0, 1).
-            Foreground(MutedColor).
-            Render(msg)
-    }
+	// Next: spinner for ongoing operations (refresh, loading article)
+	if a.spinnerActive {
+		left := a.statusSpinner.View()
+		label := strings.TrimSpace(a.spinnerLabel)
+		if label == "" {
+			label = "Working…"
+		}
+		msg := lipgloss.NewStyle().
+			Foreground(MutedColor).
+			Render(left + " " + label)
+		return lipgloss.NewStyle().
+			Width(a.width).
+			Padding(0, 1).
+			Foreground(MutedColor).
+			Render(msg)
+	}
 
-    // Next: transient status message
-    if a.statusText != "" && time.Now().Before(a.statusUntil) {
-        statusMsg := lipgloss.NewStyle().
-            Foreground(SuccessColor).
-            Render(a.statusText)
+	// Next: transient status message
+	if a.statusText != "" && time.Now().Before(a.statusUntil) {
+		statusMsg := lipgloss.NewStyle().
+			Foreground(SuccessColor).
+			Render(a.statusText)
 		return lipgloss.NewStyle().
 			Width(a.width).
 			Padding(0, 1).
@@ -676,15 +679,15 @@ func (a *App) setStatus(text string, d time.Duration) {
 
 // startSpinner activates the status spinner with a label and returns a Cmd to tick it.
 func (a *App) startSpinner(label string) tea.Cmd {
-    a.spinnerActive = true
-    a.spinnerLabel = label
-    return a.statusSpinner.Tick
+	a.spinnerActive = true
+	a.spinnerLabel = label
+	return a.statusSpinner.Tick
 }
 
 // stopSpinner deactivates the status spinner.
 func (a *App) stopSpinner() {
-    a.spinnerActive = false
-    a.spinnerLabel = ""
+	a.spinnerActive = false
+	a.spinnerLabel = ""
 }
 
 type feedItem struct {

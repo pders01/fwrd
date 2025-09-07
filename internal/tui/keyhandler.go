@@ -214,8 +214,8 @@ func (kh *KeyHandler) handleFeedsCustomKeys(key string) (tea.Model, tea.Cmd, boo
 			}
 		}
 	case kh.modifierKey + "r":
-    kh.app.setStatus("Refreshing…", 0)
-    return kh.app, tea.Batch(kh.app.startSpinner("Refreshing…"), kh.app.refreshFeeds()), true
+		kh.app.setStatus("Refreshing…", 0)
+		return kh.app, tea.Batch(kh.app.startSpinner("Refreshing…"), kh.app.refreshFeeds()), true
 	}
 	return kh.app, nil, false
 }
@@ -290,13 +290,13 @@ func (kh *KeyHandler) delegateToCharm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if i, ok := kh.app.articleList.SelectedItem().(articleItem); ok {
 				kh.app.currentArticle = i.article
 				kh.app.cameFromSearch = false
-                kh.app.loadingArticle = true // Set loading flag
-                kh.app.setStatus("Loading article…", 0)
-                kh.app.view = ViewReader
-                // Mark article as read when opened
-                markReadCmd := kh.app.markArticleRead(i.article)
-                renderCmd := kh.app.renderArticle(i.article)
-                return kh.app, tea.Batch(kh.app.startSpinner("Loading article…"), markReadCmd, renderCmd)
+				kh.app.loadingArticle = true // Set loading flag
+				kh.app.setStatus("Loading article…", 0)
+				kh.app.view = ViewReader
+				// Mark article as read when opened
+				markReadCmd := kh.app.markArticleRead(i.article)
+				renderCmd := kh.app.renderArticle(i.article)
+				return kh.app, tea.Batch(kh.app.startSpinner("Loading article…"), markReadCmd, renderCmd)
 			}
 		}
 		return kh.app, cmd
@@ -391,13 +391,13 @@ func (kh *KeyHandler) selectSearchResult(result searchResultItem) (tea.Model, te
 		kh.app.currentArticle = result.article
 		kh.app.currentFeed = result.feed
 		kh.app.cameFromSearch = true
-        kh.app.loadingArticle = true // Set loading flag
-        kh.app.setStatus("Loading article…", 0)
-        kh.app.view = ViewReader
-        // Mark article as read when opened
-        markReadCmd := kh.app.markArticleRead(result.article)
-        renderCmd := kh.app.renderArticle(result.article)
-        return kh.app, tea.Batch(kh.app.startSpinner("Loading article…"), markReadCmd, renderCmd)
+		kh.app.loadingArticle = true // Set loading flag
+		kh.app.setStatus("Loading article…", 0)
+		kh.app.view = ViewReader
+		// Mark article as read when opened
+		markReadCmd := kh.app.markArticleRead(result.article)
+		renderCmd := kh.app.renderArticle(result.article)
+		return kh.app, tea.Batch(kh.app.startSpinner("Loading article…"), markReadCmd, renderCmd)
 	}
 
 	// Validate feed data
