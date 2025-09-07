@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"flag"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,15 +9,16 @@ import (
 	"testing"
 )
 
-func TestVersionFlag(t *testing.T) {
+func TestVersionCommand(t *testing.T) {
 	// Capture stdout
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	// Reset flags for testing
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	os.Args = []string{"cmd", "-version"}
+	// Set args for version command
+	originalArgs := os.Args
+	os.Args = []string{"fwrd", "version"}
+	defer func() { os.Args = originalArgs }()
 
 	// Use a channel to capture output
 	outC := make(chan string)
@@ -28,16 +28,16 @@ func TestVersionFlag(t *testing.T) {
 		outC <- buf.String()
 	}()
 
-	// Run main and check if it exits properly
-	main()
+	// Execute version command directly
+	versionCmd.Run(nil, nil)
 
 	w.Close()
 	os.Stdout = old
 	out := <-outC
 
-	// Check output
-	if !strings.Contains(out, "fwrd v1.0.0") {
-		t.Errorf("Expected version output to contain 'fwrd v1.0.0', got: %s", out)
+	// Check output - Version is "dev" by default in tests
+	if !strings.Contains(out, "fwrd dev") {
+		t.Errorf("Expected version output to contain 'fwrd dev', got: %s", out)
 	}
 	if !strings.Contains(out, "RSS aggregator") {
 		t.Errorf("Expected version output to contain 'RSS aggregator', got: %s", out)
@@ -47,7 +47,7 @@ func TestVersionFlag(t *testing.T) {
 	}
 }
 
-func TestGenerateConfigFlag(t *testing.T) {
+func TestGenerateConfigCommand(t *testing.T) {
 	// Create temp directory for test
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, ".config", "fwrd", "config.toml")
@@ -62,9 +62,10 @@ func TestGenerateConfigFlag(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	// Reset flags for testing
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	os.Args = []string{"cmd", "-generate-config"}
+	// Set args for config generate command
+	originalArgs := os.Args
+	os.Args = []string{"fwrd", "config", "generate"}
+	defer func() { os.Args = originalArgs }()
 
 	outC := make(chan string)
 	go func() {
@@ -73,8 +74,8 @@ func TestGenerateConfigFlag(t *testing.T) {
 		outC <- buf.String()
 	}()
 
-	// Run main
-	main()
+	// Execute config generate command directly
+	configGenCmd.Run(nil, nil)
 
 	w.Close()
 	os.Stdout = old

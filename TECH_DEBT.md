@@ -103,8 +103,28 @@ This document tracks code quality issues, technical debt, and improvement opport
 
 ## Testing & Coverage Improvements
 
+### Test Coverage Status (Latest)
+**Current Overall Coverage: 52.7%** (18 test files for 28 Go source files - 64.3% file coverage)
+
+**Module-specific Coverage:**
+- ✅ **Validation**: 89.7% (comprehensive path, URL, and security validation tests)
+- ✅ **Feed Management**: 90.2% (complete RSS/Atom parsing, fetching, and manager tests)
+- ✅ **Configuration**: 89.5% (config loading, defaults, and path handling tests)
+- ✅ **Debug Logging**: 82.2% (structured logging and level management tests)
+- ✅ **Media**: 80.5% (type detection and launcher functionality tests)
+- ✅ **Search**: 66.6% (Bleve engine and search functionality tests)
+- ✅ **Storage**: 64.9% (database operations and indexing tests)
+- ⚠️ **TUI**: 25.2% (limited UI component testing - main gap)
+- ⚠️ **CMD**: 16.1% (basic CLI command tests - mainly tested via integration)
+
 ### Test Coverage Expansion
-- [ ] **Integration Test Coverage**
+- [x] **Core Business Logic Testing** ✅ **COMPLETED**
+  - ✅ Comprehensive validation module tests (89.7% coverage)
+  - ✅ Complete feed management test suite (90.2% coverage) 
+  - ✅ Configuration handling with edge cases (89.5% coverage)
+  - ✅ Security validation and path handling tests
+
+- [ ] **Integration Test Coverage** 
   - Add integration tests for complete TUI workflows
   - Test error recovery scenarios more thoroughly
   - Implement property-based tests for URL parsing
@@ -114,10 +134,10 @@ This document tracks code quality issues, technical debt, and improvement opport
   - Test memory usage patterns with large datasets
   - Profile concurrent refresh operations
 
-- [ ] **Error Path Testing**
-  - Increase coverage for error scenarios
-  - Test resource cleanup in failure cases
-  - Validate graceful degradation
+- [ ] **UI Component Testing** (Main Gap - TUI at 25.2%)
+  - Add tests for TUI state management and transitions
+  - Test keyboard navigation and input handling
+  - Mock Bubble Tea program testing for view rendering
 
 ## Implementation Patterns & Best Practices
 
@@ -179,8 +199,11 @@ semaphore := make(chan struct{}, maxConcurrentRefresh)
 
 ## Notes
 
-- Current test coverage: ~40% file coverage (15 test files for 38 Go files) [+debuglog tests]
+- **Current test coverage: 52.7% overall (18 test files for 28 Go source files - 64.3% file coverage)**
+- **Core business logic has excellent coverage (89-90% for validation, feed, config modules)**
+- **Main testing gaps: TUI components (25.2%) and CLI integration (16.1%)**
 - Codebase is production-ready with Phase 1-4 improvements completed
 - Architecture shows thoughtful design decisions throughout
 - All major technical debt items resolved with comprehensive testing
 - Phase 5 items (testing expansion, dependency optimization) are optional enhancements
+- **Significant test coverage improvements completed**: validation module, feed management, security features
