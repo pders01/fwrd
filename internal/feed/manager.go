@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -9,28 +10,38 @@ import (
 	"time"
 
 	"github.com/pders01/fwrd/internal/config"
+	"github.com/pders01/fwrd/internal/plugins"
 	"github.com/pders01/fwrd/internal/storage"
 	"github.com/pders01/fwrd/internal/validation"
 )
 
 type Manager struct {
-	store        *storage.Store
-	fetcher      *Fetcher
-	parser       *Parser
-	config       *config.Config
-	urlValidator *validation.FeedURLValidator
-	mu           sync.RWMutex
+	store          *storage.Store
+	fetcher        *Fetcher
+	parser         *Parser
+	config         *config.Config
+	urlValidator   *validation.FeedURLValidator
+	pluginRegistry *plugins.Registry
+	mu             sync.RWMutex
 }
 
 func NewManager(store *storage.Store, cfg *config.Config) *Manager {
 	// Use secure validator by default, can be made configurable later
 	urlValidator := validation.NewFeedURLValidator()
+
+	// Initialize plugin registry with HTTP timeout from config
+	pluginRegistry := plugins.NewRegistry(cfg.Feed.HTTPTimeout)
+
+	// Note: Default plugins should be registered by the application initialization
+	// Users can add custom plugins in the internal/plugins/user/ directory
+
 	return &Manager{
-		store:        store,
-		fetcher:      NewFetcher(cfg),
-		parser:       NewParser(),
-		config:       cfg,
-		urlValidator: urlValidator,
+		store:          store,
+		fetcher:        NewFetcher(cfg),
+		parser:         NewParser(),
+		config:         cfg,
+		urlValidator:   urlValidator,
+		pluginRegistry: pluginRegistry,
 	}
 }
 
@@ -60,12 +71,39 @@ func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
 		return nil, fmt.Errorf("invalid feed URL: %w", err)
 	}
 
-	feedID := generateFeedID(normalizedURL)
+	// Try to enhance the feed information using plugins
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	feedInfo, err := m.pluginRegistry.EnhanceFeed(ctx, normalizedURL)
+	if err != nil {
+		// Plugin enhancement failed, continue with original URL
+		feedInfo = &plugins.FeedInfo{
+			OriginalURL: normalizedURL,
+			FeedURL:     normalizedURL,
+			Title:       "",
+			Description: "",
+			Metadata:    make(map[string]string),
+		}
+	}
+
+	// Use the enhanced feed URL for fetching
+	actualFeedURL := feedInfo.FeedURL
+	if actualFeedURL == "" {
+		actualFeedURL = normalizedURL
+	}
+
+	feedID := generateFeedID(actualFeedURL)
 
 	feed := &storage.Feed{
 		ID:        feedID,
-		URL:       normalizedURL,
+		URL:       actualFeedURL,
 		UpdatedAt: time.Now(),
+	}
+
+	// Set enhanced title if available
+	if feedInfo.Title != "" {
+		feed.Title = feedInfo.Title
 	}
 
 	resp, updated, err := m.fetcher.Fetch(feed)
@@ -93,7 +131,8 @@ func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
 		return nil, fmt.Errorf("parsing feed: %w", err)
 	}
 
-	if len(articles) > 0 {
+	// Only extract title from articles if we don't have a plugin-enhanced title
+	if len(articles) > 0 && feed.Title == "" {
 		feed.Title = extractFeedTitleFromArticles(articles)
 	}
 
