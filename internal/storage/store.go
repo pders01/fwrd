@@ -158,11 +158,16 @@ func (s *Store) SaveArticles(articles []*Article) error {
 }
 
 func (s *Store) GetArticles(feedID string, limit int) ([]*Article, error) {
+	return s.GetArticlesWithCursor(feedID, limit, "")
+}
+
+// GetArticlesWithCursor provides cursor-based pagination for efficient large dataset traversal.
+// cursor should be the article ID of the last article from the previous page, or empty for the first page.
+func (s *Store) GetArticlesWithCursor(feedID string, limit int, cursor string) ([]*Article, error) {
 	if s == nil || s.db == nil {
 		return []*Article{}, nil
 	}
 	var articles []*Article
-	usedDateIndex := false
 
 	err := s.db.View(func(tx *bolt.Tx) error {
 		ab := tx.Bucket(articlesBucket)
@@ -171,77 +176,210 @@ func (s *Store) GetArticles(feedID string, limit int) ([]*Article, error) {
 		}
 
 		if feedID != "" {
-			// Specific feed: collect article IDs from feed index, then sort by date
-			idxRoot := tx.Bucket(articlesByFeedBucket)
-			if idxRoot == nil {
-				return nil
-			}
-			fb := idxRoot.Bucket([]byte(feedID))
-			if fb == nil {
-				return nil
-			}
-
-			// Collect all article IDs for this feed
-			c := fb.Cursor()
-			for k, _ := c.First(); k != nil; k, _ = c.Next() {
-				v := ab.Get(k)
-				if v == nil {
-					continue
-				}
-				var article Article
-				if err := json.Unmarshal(v, &article); err != nil {
-					continue
-				}
-				articles = append(articles, &article)
-			}
-			// Will sort after transaction
-			return nil
+			// Optimized feed-specific query using date index
+			return s.getArticlesForFeedOptimized(tx, ab, feedID, limit, cursor, &articles)
 		}
 
 		// No feed specified: use date index for efficient sorted retrieval
-		dateIdx := tx.Bucket(articlesByDateBucket)
-		if dateIdx == nil {
-			// Fallback to old behavior if index doesn't exist
-			return ab.ForEach(func(_ []byte, v []byte) error {
-				var article Article
-				if err := json.Unmarshal(v, &article); err != nil {
-					return nil
-				}
-				articles = append(articles, &article)
-				return nil
-			})
-		}
-
-		// Use date index cursor to iterate in date order (newest first)
-		usedDateIndex = true
-		c := dateIdx.Cursor()
-		count := 0
-		for k, articleID := c.First(); k != nil && (limit <= 0 || count < limit); k, articleID = c.Next() {
-			v := ab.Get(articleID)
-			if v == nil {
-				continue
-			}
-			var article Article
-			if err := json.Unmarshal(v, &article); err != nil {
-				continue
-			}
-			articles = append(articles, &article)
-			count++
-		}
-		return nil
+		return s.getArticlesGlobalOptimized(tx, ab, limit, cursor, &articles)
 	})
 
-	// Sort if we didn't use the date index
-	if !usedDateIndex {
-		sort.Slice(articles, func(i, j int) bool {
-			return articles[i].Published.After(articles[j].Published)
-		})
-		if limit > 0 && len(articles) > limit {
-			articles = articles[:limit]
+	return articles, err
+}
+
+// getArticlesForFeedOptimized efficiently retrieves articles for a specific feed using the date index
+func (s *Store) getArticlesForFeedOptimized(tx *bolt.Tx, ab *bolt.Bucket, feedID string, limit int, cursor string, articles *[]*Article) error {
+	// First, create a set of article IDs for the target feed for O(1) lookup
+	feedArticleIDs := make(map[string]bool)
+	
+	idxRoot := tx.Bucket(articlesByFeedBucket)
+	if idxRoot == nil {
+		return nil // No feed index, no articles
+	}
+	
+	fb := idxRoot.Bucket([]byte(feedID))
+	if fb == nil {
+		return nil // Feed not found
+	}
+	
+	// Build lookup set of article IDs for this feed
+	c := fb.Cursor()
+	for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		feedArticleIDs[string(k)] = true
+	}
+	
+	// Now iterate through date index (newest first) and filter by feed
+	dateIdx := tx.Bucket(articlesByDateBucket)
+	if dateIdx == nil {
+		// Fallback: collect all articles for feed and sort manually
+		return s.getArticlesForFeedFallback(tx, ab, feedID, limit, cursor, articles)
+	}
+	
+	dateCursor := dateIdx.Cursor()
+	count := 0
+	
+	// Position cursor after the last seen article if cursor is provided
+	var k, articleID []byte
+	if cursor != "" {
+		// Find the cursor position
+		found := false
+		for k, articleID = dateCursor.First(); k != nil; k, articleID = dateCursor.Next() {
+			if string(articleID) == cursor {
+				found = true
+				break
+			}
+		}
+		if found {
+			// Move to the next item after cursor
+			k, articleID = dateCursor.Next()
+		} else {
+			// Cursor not found, start from beginning
+			k, articleID = dateCursor.First()
+		}
+	} else {
+		// No cursor, start from beginning
+		k, articleID = dateCursor.First()
+	}
+	
+	for ; k != nil && (limit <= 0 || count < limit); k, articleID = dateCursor.Next() {
+		// Check if this article belongs to our target feed
+		if !feedArticleIDs[string(articleID)] {
+			continue
+		}
+		
+		v := ab.Get(articleID)
+		if v == nil {
+			continue
+		}
+		
+		var article Article
+		if err := json.Unmarshal(v, &article); err != nil {
+			continue
+		}
+		
+		*articles = append(*articles, &article)
+		count++
+	}
+	
+	return nil
+}
+
+// getArticlesForFeedFallback handles feed queries when date index is unavailable
+func (s *Store) getArticlesForFeedFallback(tx *bolt.Tx, ab *bolt.Bucket, feedID string, limit int, cursor string, articles *[]*Article) error {
+	idxRoot := tx.Bucket(articlesByFeedBucket)
+	if idxRoot == nil {
+		return nil
+	}
+	
+	fb := idxRoot.Bucket([]byte(feedID))
+	if fb == nil {
+		return nil
+	}
+	
+	// Collect articles for this feed
+	c := fb.Cursor()
+	for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		v := ab.Get(k)
+		if v == nil {
+			continue
+		}
+		
+		var article Article
+		if err := json.Unmarshal(v, &article); err != nil {
+			continue
+		}
+		
+		*articles = append(*articles, &article)
+	}
+	
+	// Sort by date (newest first) 
+	sort.Slice(*articles, func(i, j int) bool {
+		return (*articles)[i].Published.After((*articles)[j].Published)
+	})
+	
+	// Apply cursor-based filtering after sorting
+	if cursor != "" {
+		// Find cursor position and slice from there
+		cursorIndex := -1
+		for i, article := range *articles {
+			if article.ID == cursor {
+				cursorIndex = i
+				break
+			}
+		}
+		if cursorIndex >= 0 && cursorIndex+1 < len(*articles) {
+			*articles = (*articles)[cursorIndex+1:] // Start after cursor
+		} else {
+			*articles = []*Article{} // Cursor not found or no more articles
 		}
 	}
+	
+	// Apply limit after cursor filtering
+	if limit > 0 && len(*articles) > limit {
+		*articles = (*articles)[:limit]
+	}
+	
+	return nil
+}
 
-	return articles, err
+// getArticlesGlobalOptimized efficiently retrieves articles across all feeds using date index
+func (s *Store) getArticlesGlobalOptimized(tx *bolt.Tx, ab *bolt.Bucket, limit int, cursor string, articles *[]*Article) error {
+	dateIdx := tx.Bucket(articlesByDateBucket)
+	if dateIdx == nil {
+		// Fallback to scanning all articles
+		return ab.ForEach(func(_ []byte, v []byte) error {
+			var article Article
+			if err := json.Unmarshal(v, &article); err != nil {
+				return nil // Skip invalid articles
+			}
+			*articles = append(*articles, &article)
+			return nil
+		})
+	}
+
+	// Use date index cursor to iterate in date order (newest first)
+	c := dateIdx.Cursor()
+	count := 0
+	
+	// Position cursor after the last seen article if cursor is provided
+	var k, articleID []byte
+	if cursor != "" {
+		// Find the cursor position
+		found := false
+		for k, articleID = c.First(); k != nil; k, articleID = c.Next() {
+			if string(articleID) == cursor {
+				found = true
+				break
+			}
+		}
+		if found {
+			// Move to the next item after cursor
+			k, articleID = c.Next()
+		} else {
+			// Cursor not found, start from beginning
+			k, articleID = c.First()
+		}
+	} else {
+		// No cursor, start from beginning
+		k, articleID = c.First()
+	}
+	
+	for ; k != nil && (limit <= 0 || count < limit); k, articleID = c.Next() {
+		v := ab.Get(articleID)
+		if v == nil {
+			continue
+		}
+		
+		var article Article
+		if err := json.Unmarshal(v, &article); err != nil {
+			continue
+		}
+		
+		*articles = append(*articles, &article)
+		count++
+	}
+	
+	return nil
 }
 
 func (s *Store) MarkArticleRead(id string, read bool) error {
