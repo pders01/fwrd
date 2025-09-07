@@ -5,7 +5,10 @@ import (
 )
 
 // renderHeader returns a consistently styled header with an optional muted subtitle.
-func renderHeader(title, subtitle string) string {
+// Width is used to guide truncation via helpers.
+func renderHeader(title, subtitle string, width int) string {
+	title = truncateEnd(title, width-2)
+	subtitle = truncateEnd(subtitle, width-2)
 	rows := []string{HeaderStyle.Render(title)}
 	if subtitle != "" {
 		rows = append(rows, lipgloss.NewStyle().Foreground(MutedColor).Render(subtitle))
