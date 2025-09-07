@@ -108,14 +108,27 @@ func buildIndexMapping() mapping.IndexMapping {
 	return im
 }
 
+// Chunked indexing constants to prevent OOM conditions
+const (
+	maxBatchSize       = 100  // Maximum documents per batch
+	maxArticlesPerFeed = 1000 // Maximum articles to process per feed at once
+)
+
 func (b *bleveEngine) reindexAll() error {
 	feeds, err := b.store.GetAllFeeds()
 	if err != nil {
 		return err
 	}
 
+	debuglog.Infof("Starting chunked reindexing for %d feeds", len(feeds))
+
+	// Process feeds in small batches to prevent OOM
 	batch := b.idx.NewBatch()
+	batchCount := 0
+	totalProcessed := 0
+
 	for _, f := range feeds {
+		// Add feed to batch
 		_ = batch.Index(docIDForFeed(f.ID), map[string]any{
 			"type":        "feed",
 			"feed_id":     f.ID,
@@ -123,25 +136,101 @@ func (b *bleveEngine) reindexAll() error {
 			"description": f.Description,
 			"url":         f.URL,
 		})
+		batchCount++
 
-		arts, _ := b.store.GetArticles(f.ID, 0)
+		// Process articles for this feed in chunks
+		if err := b.indexArticlesInChunks(f.ID, &batch, &batchCount); err != nil {
+			debuglog.Errorf("Error indexing articles for feed %s: %v", f.ID, err)
+			continue
+		}
+
+		// Commit batch if it's getting large
+		if batchCount >= maxBatchSize {
+			if err := b.commitBatch(batch); err != nil {
+				return err
+			}
+			totalProcessed += batchCount
+			debuglog.Infof("Processed %d documents so far", totalProcessed)
+			batch = b.idx.NewBatch()
+			batchCount = 0
+		}
+	}
+
+	// Commit any remaining documents in the final batch
+	if batchCount > 0 {
+		if err := b.commitBatch(batch); err != nil {
+			return err
+		}
+		totalProcessed += batchCount
+	}
+
+	debuglog.Infof("Completed chunked reindexing: %d total documents processed", totalProcessed)
+	return nil
+}
+
+// indexArticlesInChunks processes articles for a feed in memory-efficient chunks
+func (b *bleveEngine) indexArticlesInChunks(feedID string, batch **bleve.Batch, batchCount *int) error {
+	// Get articles in smaller chunks to prevent loading all into memory
+	offset := 0
+	for {
+		arts, err := b.store.GetArticles(feedID, maxArticlesPerFeed)
+		if err != nil {
+			return fmt.Errorf("failed to get articles for feed %s: %w", feedID, err)
+		}
+
+		if len(arts) == 0 {
+			break // No more articles
+		}
+
+		// Process this chunk of articles
 		for _, a := range arts {
-			_ = batch.Index(docIDForArticle(a.ID), map[string]any{
+			_ = (*batch).Index(docIDForArticle(a.ID), map[string]any{
 				"type":        "article",
-				"feed_id":     f.ID,
+				"feed_id":     feedID,
 				"article_id":  a.ID,
 				"title":       a.Title,
 				"description": a.Description,
 				"content":     a.Content,
 				"url":         a.URL,
 			})
+			(*batchCount)++
+
+			// Commit batch if it's getting large within article processing
+			if *batchCount >= maxBatchSize {
+				if err := b.commitBatch(*batch); err != nil {
+					return err
+				}
+				debuglog.Infof("Committed batch during article processing: %d documents", *batchCount)
+				*batch = b.idx.NewBatch()
+				*batchCount = 0
+			}
 		}
+
+		// If we got fewer articles than requested, we've reached the end
+		if len(arts) < maxArticlesPerFeed {
+			break
+		}
+
+		offset += len(arts)
 	}
-	err = b.idx.Batch(batch)
+
+	return nil
+}
+
+// commitBatch safely commits a batch with error handling and logging
+func (b *bleveEngine) commitBatch(batch *bleve.Batch) error {
+	if batch.Size() == 0 {
+		return nil
+	}
+
+	err := b.idx.Batch(batch)
 	if err != nil {
 		debuglog.Errorf("bleve batch index error: %v", err)
+		return fmt.Errorf("failed to commit batch: %w", err)
 	}
-	return err
+
+	debuglog.Infof("Successfully committed batch with %d documents", batch.Size())
+	return nil
 }
 
 func (b *bleveEngine) Search(query string, limit int) ([]*Result, error) {
@@ -263,7 +352,7 @@ func (b *bleveEngine) SearchInArticle(article *storage.Article, query string) ([
 	return []*Result{}, nil
 }
 
-// OnDataUpdated indexes the provided feed and its articles.
+// OnDataUpdated indexes the provided feed and its articles using memory-efficient chunking.
 func (b *bleveEngine) OnDataUpdated(feed *storage.Feed, articles []*storage.Article) {
 	var batch *bleve.Batch
 	if b.pending != nil {
@@ -271,6 +360,10 @@ func (b *bleveEngine) OnDataUpdated(feed *storage.Feed, articles []*storage.Arti
 	} else {
 		batch = b.idx.NewBatch()
 	}
+
+	batchCount := batch.Size()
+
+	// Index the feed if provided
 	if feed != nil {
 		_ = batch.Index(docIDForFeed(feed.ID), map[string]any{
 			"type":        "feed",
@@ -279,8 +372,15 @@ func (b *bleveEngine) OnDataUpdated(feed *storage.Feed, articles []*storage.Arti
 			"description": feed.Description,
 			"url":         feed.URL,
 		})
+		batchCount++
 	}
-	for _, a := range articles {
+
+	// Process articles in chunks to prevent OOM for large article collections
+	if len(articles) > maxBatchSize {
+		debuglog.Infof("Processing %d articles in chunks to prevent OOM", len(articles))
+	}
+
+	for i, a := range articles {
 		_ = batch.Index(docIDForArticle(a.ID), map[string]any{
 			"type":        "article",
 			"feed_id":     a.FeedID,
@@ -290,9 +390,26 @@ func (b *bleveEngine) OnDataUpdated(feed *storage.Feed, articles []*storage.Arti
 			"content":     a.Content,
 			"url":         a.URL,
 		})
+		batchCount++
+
+		// If not using batch mode and batch is getting large, commit it
+		if b.pending == nil && batchCount >= maxBatchSize {
+			if err := b.commitBatch(batch); err != nil {
+				debuglog.Errorf("Error committing chunked batch in OnDataUpdated: %v", err)
+			}
+			// Start a new batch for remaining articles
+			if i < len(articles)-1 {
+				batch = b.idx.NewBatch()
+				batchCount = 0
+			}
+		}
 	}
-	if b.pending == nil {
-		_ = b.idx.Batch(batch)
+
+	// Commit the final batch if not using batch mode
+	if b.pending == nil && batchCount > 0 {
+		if err := b.commitBatch(batch); err != nil {
+			debuglog.Errorf("Error committing final batch in OnDataUpdated: %v", err)
+		}
 	}
 }
 
