@@ -21,6 +21,67 @@ This document tracks remaining improvement opportunities and optional enhancemen
 
 ---
 
+## ✅ Recent Additions
+
+### **Universal Plugin System for Host-Specific Handling** ✅ **COMPLETED**
+
+A flexible, universal plugin architecture has been implemented to handle host-specific URL processing and feed enhancement:
+
+**Features:**
+- **Plugin Interface**: Extensible system for adding host-specific handlers
+- **Priority-based Registry**: Multiple plugins can handle the same URL with configurable priority
+- **User Plugin Directory**: Custom plugins can be added in `internal/plugins/user/` (gitignored)
+- **Reddit Example**: Simple Reddit plugin implementation provided as example
+- **Graceful Fallbacks**: System works even when plugins fail or are unavailable
+- **Comprehensive Testing**: Full test coverage with proper mocking (no external API calls)
+
+**Example Plugin Capabilities (Reddit):**
+- ✅ Subreddit URL handling: `/r/golang` → `/r/golang.rss`
+- ✅ Automatic title enhancement: `reddit.com/r/golang` → `Reddit - r/golang`
+- ✅ Simple URL transformation without network calls
+- ✅ Clean metadata extraction (subreddit name)
+- ✅ Straightforward implementation demonstrating plugin interface
+
+**Technical Implementation:**
+- Core system located in `internal/plugins/` package
+- User plugins directory (`internal/plugins/user/`) excluded from git
+- Plugin registry automatically initialized in feed manager
+- 30-second timeout for plugin operations
+- No breaking changes to existing functionality
+
+**Creating New Plugins:**
+Users can create custom plugins in `internal/plugins/user/` directory (see README.md there for examples):
+
+```go
+// Example: internal/plugins/user/reddit_plugin.go
+package user
+
+type RedditPlugin struct{}
+
+func (p *RedditPlugin) Name() string { return "reddit" }
+func (p *RedditPlugin) Priority() int { return 50 }
+
+func (p *RedditPlugin) CanHandle(url string) bool {
+    return strings.Contains(url, "://www.reddit.com/r/")
+}
+
+func (p *RedditPlugin) EnhanceFeed(ctx context.Context, url string, client *http.Client) (*FeedInfo, error) {
+    // Convert reddit.com/r/subreddit to reddit.com/r/subreddit.rss
+    rssURL := url + ".rss"
+    return &FeedInfo{
+        OriginalURL: url,
+        FeedURL:     rssURL,
+        Title:       "Reddit - " + extractSubreddit(url),
+        Description: "Reddit subreddit feed",
+        Metadata:    map[string]string{"plugin": "reddit"},
+    }, nil
+}
+
+// Register via application initialization (not committed to repo)
+```
+
+---
+
 ## Optional Future Enhancements
 
 ### **Testing Coverage Expansion**

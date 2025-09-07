@@ -61,3 +61,4 @@ fwrd
 
 # GoReleaser output directory (do not commit release artifacts)
 dist/
+
