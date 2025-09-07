@@ -194,7 +194,7 @@ func (a *App) getRenderer() (*glamour.TermRenderer, error) {
 		wordWrapWidth = 40 // minimum for readability
 	}
 	if a.width < 50 {
-		wordWrapWidth = a.width - 4
+		wordWrapWidth = getContentWidth(a.width)
 		if wordWrapWidth < 20 {
 			wordWrapWidth = 20
 		}
@@ -421,7 +421,7 @@ func (a *App) View() string {
 			if st == "" {
 				st = a.currentFeed.URL
 			}
-			subtitle = truncateEnd(st, a.width-10)
+			subtitle = truncateForSubtitle(st, a.width)
 		}
 		header := renderHeader("› articles", subtitle, a.width)
 		content = lipgloss.JoinVertical(lipgloss.Top, header, a.articleList.View())
@@ -476,44 +476,31 @@ func (a *App) View() string {
 
 		modalWidth := (a.width * 4) / 5
 		if modalWidth < 20 {
-			modalWidth = a.width - 4
+			modalWidth = getModalWidth(a.width)
 			if modalWidth < 15 {
 				modalWidth = a.width
 			}
 		}
 
-		feedName = truncateEnd(feedName, modalWidth-4)
+		feedName = truncateForModal(feedName, modalWidth)
 
 		header := renderHeader("› delete feed", "This action cannot be undone", a.width)
 		body := lipgloss.JoinVertical(
 			lipgloss.Center,
 			header,
 			"",
-			ModalTextStyle.
-				Width(modalWidth).
-				Align(lipgloss.Center).
-				Render("Delete this feed?"),
+			renderModalQuestion("Delete this feed?", modalWidth),
 			"",
-			ModalHighlightStyle.
-				Width(modalWidth).
-				Align(lipgloss.Center).
-				Render(feedName),
+			renderModalHighlight(feedName, modalWidth),
 			"",
-			EmptyStyle.
-				Width(modalWidth).
-				Align(lipgloss.Center).
-				Render(renderMuted("This removes all articles.")),
+			renderModalInfo(renderMuted("This removes all articles."), modalWidth),
 			"",
 			"",
 			renderHelp("Enter: confirm • Esc: cancel"),
 		)
 		content = renderCentered(a.width, a.height-3, body)
 	case ViewSearch:
-		searchInputWidth := a.width - 8 // Account for border, padding, and margins
-		if searchInputWidth < 10 {
-			searchInputWidth = a.width - 4
-		}
-		a.searchInput.Width = searchInputWidth
+		a.searchInput.Width = getInputWidth(a.width)
 
 		// Build header + subtitle with engine/context
 		subtitle := "global"
@@ -526,11 +513,11 @@ func (a *App) View() string {
 			subtitle += " • basic"
 		}
 		// Truncate subtitle to fit
-		subtitle = truncateEnd(subtitle, a.width-10)
+		subtitle = truncateForSubtitle(subtitle, a.width)
 		header := renderHeader("› search", subtitle, a.width)
 
 		// Framed input
-		framedInput := renderInputFrame(a.searchInput.View(), a.searchInput.Focused(), searchInputWidth)
+		framedInput := renderInputFrame(a.searchInput.View(), a.searchInput.Focused(), a.searchInput.Width)
 
 		helpText := ""
 		switch {
@@ -558,7 +545,7 @@ func (a *App) View() string {
 	}
 
 	customStatus := a.getCustomStatusBar()
-	separatorWidth := a.width - 2
+	separatorWidth := getSeparatorWidth(a.width)
 	if separatorWidth < 0 {
 		separatorWidth = 0
 	}
