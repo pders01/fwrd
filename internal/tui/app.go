@@ -283,12 +283,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case articleRenderedMsg:
-		if a.view == ViewReader {
-			a.viewport.SetContent(msg.content)
-			a.viewport.GotoTop()
-			a.loadingArticle = false // Article has finished loading
-			a.stopSpinner()
-		}
+		// Always clear loading state — the render finished, regardless of
+		// whether the user has since navigated away. Setting viewport content
+		// when not in ViewReader is harmless (it's just buffered for next entry).
+		a.viewport.SetContent(msg.content)
+		a.viewport.GotoTop()
+		a.loadingArticle = false
+		a.stopSpinner()
 
 	case feedAddedMsg:
 		if msg.err != nil {

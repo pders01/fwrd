@@ -446,6 +446,10 @@ func (kh *KeyHandler) navigateBack() (tea.Model, tea.Cmd) {
 		return kh.app, nil
 
 	case ViewReader:
+		// Clear any in-flight loading state so a delayed articleRenderedMsg
+		// arriving after navigation doesn't leave the spinner running.
+		kh.app.loadingArticle = false
+		kh.app.stopSpinner()
 		if kh.app.cameFromSearch {
 			kh.app.view = ViewSearch
 			kh.app.cameFromSearch = false
