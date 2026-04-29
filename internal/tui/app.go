@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/debuglog"
@@ -21,6 +23,7 @@ import (
 	"github.com/pders01/fwrd/internal/media"
 	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/storage"
+	"golang.org/x/term"
 )
 
 type App struct {
@@ -55,8 +58,9 @@ type App struct {
 	height           int
 	err              error
 	glamourRenderer  *glamour.TermRenderer
-	rendererWidth    int  // Track the width used for the renderer
-	loadingArticle   bool // Track if we're loading an article
+	rendererWidth    int    // Track the width used for the renderer
+	glamourStyle     string // Pre-resolved style ("dark"/"light") to avoid OSC probe at render time
+	loadingArticle   bool   // Track if we're loading an article
 
 	// Debounced search state
 	searchSeq            int
@@ -135,6 +139,7 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 		cameFromSearch:       false,                // Initialize navigation flag
 		searchResults:        []searchResultItem{}, // Initialize empty search results
 		searchDebounceMillis: 200,
+		glamourStyle:         resolveGlamourStyle(),
 	}
 
 	// Prefer Bleve-backed engine if available (build with -tags=bleve)
@@ -202,7 +207,7 @@ func (a *App) getRenderer() (*glamour.TermRenderer, error) {
 
 	if a.glamourRenderer == nil || abs(a.rendererWidth-wordWrapWidth) > RendererWidthTolerance {
 		r, err := glamour.NewTermRenderer(
-			glamour.WithAutoStyle(),
+			glamour.WithStandardStyle(a.glamourStyle),
 			glamour.WithWordWrap(wordWrapWidth),
 		)
 		if err != nil {
@@ -213,6 +218,35 @@ func (a *App) getRenderer() (*glamour.TermRenderer, error) {
 	}
 
 	return a.glamourRenderer, nil
+}
+
+// resolveGlamourStyle picks the renderer style without doing an OSC 11 probe.
+// The probe (termenv.HasDarkBackground) blocks for up to 5s on terminals that
+// don't reply, which is the entirety of the perceived "loading" delay on the
+// first article open. Resolution order:
+//  1. GLAMOUR_STYLE — explicit override.
+//  2. COLORFGBG — set by many terminals (rxvt-derived, konsole, some xterm
+//     configs); the last semicolon-separated field is the background color.
+//     0–6 and 8 are dark, others are light.
+//  3. Default to dark, which is what termenv falls back to after timeout.
+func resolveGlamourStyle() string {
+	if s := os.Getenv("GLAMOUR_STYLE"); s != "" {
+		return s
+	}
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		return styles.NoTTYStyle
+	}
+	if fgbg := os.Getenv("COLORFGBG"); strings.Contains(fgbg, ";") {
+		parts := strings.Split(fgbg, ";")
+		if bg, err := strconv.Atoi(parts[len(parts)-1]); err == nil {
+			// xterm/rxvt convention: 0–6 and 8 are dark backgrounds.
+			if bg < 7 || bg == 8 {
+				return styles.DarkStyle
+			}
+			return styles.LightStyle
+		}
+	}
+	return styles.DarkStyle
 }
 
 func abs(n int) int {
