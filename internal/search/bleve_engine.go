@@ -45,22 +45,36 @@ func NewBleveEngine(store *storage.Store, indexPath string) (Searcher, error) {
 		return nil, fmt.Errorf("failed to create index directory: %w", dirErr)
 	}
 
-	// Try open first
+	// Try open first; only reindex from scratch if we had to create a new index
+	// or the existing one is empty. Incremental updates during feed refresh
+	// (via UpdateListener / BatchIndexer) keep the index in sync afterwards.
+	freshIndex := false
 	idx, err = bleve.Open(indexPath)
 	if err != nil {
-		// Create a new index with simple mapping
 		idxMapping := buildIndexMapping()
 		idx, err = bleve.New(indexPath, idxMapping)
 		if err != nil {
 			return nil, err
 		}
+		freshIndex = true
 	}
 
 	be := &bleveEngine{store: store, idx: idx}
-	// Initial load
-	if err := be.reindexAll(); err != nil {
-		debuglog.Errorf("reindexAll failed: %v", err)
-		return nil, err
+
+	needsReindex := freshIndex
+	if !needsReindex {
+		if n, cErr := idx.DocCount(); cErr == nil && n == 0 {
+			needsReindex = true
+		}
+	}
+
+	if needsReindex {
+		if err := be.reindexAll(); err != nil {
+			debuglog.Errorf("reindexAll failed: %v", err)
+			return nil, err
+		}
+	} else {
+		debuglog.Infof("bleve index opened (skipping reindex)")
 	}
 	debuglog.Infof("bleve index ready at %s", indexPath)
 	return be, nil
