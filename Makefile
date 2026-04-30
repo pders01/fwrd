@@ -81,9 +81,10 @@ clean:
 	@echo "Clean complete"
 
 ## install: Install fwrd to GOPATH/bin
-install: build
+install:
 	@echo "Installing $(BINARY_NAME) to GOPATH/bin..."
-	@go install $(MAIN_PATH)
+	@go build -o $(shell go env GOBIN)/$(BINARY_NAME) $(MAIN_PATH) 2>/dev/null || \
+		go build -o $(shell go env GOPATH)/bin/$(BINARY_NAME) $(MAIN_PATH)
 	@echo "Installation complete"
 
 ## deps: Download and tidy dependencies
