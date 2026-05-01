@@ -1,7 +1,6 @@
 package feed
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -16,6 +15,12 @@ import (
 	"github.com/pders01/fwrd/internal/storage"
 	"github.com/pders01/fwrd/internal/validation"
 )
+
+// maxFeedBodySize caps how many bytes the parser will consume from a
+// remote response. Real-world feeds are typically well under 10 MB; the
+// cap exists to block hostile or accidentally-huge responses from
+// driving us OOM.
+const maxFeedBodySize int64 = 50 * 1024 * 1024 // 50 MiB
 
 // Manager orchestrates feed fetch/parse/store. All fields are either
 // immutable after construction or independently goroutine-safe (bbolt for
@@ -143,12 +148,7 @@ func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading response: %w", err)
-	}
-
-	articles, err := m.parser.Parse(bytes.NewReader(body), feed.ID)
+	articles, err := m.parser.Parse(io.LimitReader(resp.Body, maxFeedBodySize), feed.ID)
 	if err != nil {
 		return nil, fmt.Errorf("parsing feed: %w", err)
 	}
@@ -205,12 +205,7 @@ func (m *Manager) refreshFeedByID(feedID string, notify bool) (*storage.Feed, []
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return feed, nil, fmt.Errorf("reading response: %w", err)
-	}
-
-	articles, err := m.parser.Parse(bytes.NewReader(body), feedID)
+	articles, err := m.parser.Parse(io.LimitReader(resp.Body, maxFeedBodySize), feedID)
 	if err != nil {
 		return feed, nil, fmt.Errorf("parsing feed: %w", err)
 	}
