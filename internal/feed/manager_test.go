@@ -97,7 +97,7 @@ func (r *recordingListener) OnDataUpdated(f *storage.Feed, articles []*storage.A
 func (r *recordingListener) BeginBatch()  { r.mu.Lock(); r.begins++; r.mu.Unlock() }
 func (r *recordingListener) CommitBatch() { r.mu.Lock(); r.commits++; r.mu.Unlock() }
 
-func (r *recordingListener) snapshot() (updates int, articles, begins, commits int) {
+func (r *recordingListener) snapshot() (updates, articles, begins, commits int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.updates), r.articles, r.begins, r.commits
@@ -484,7 +484,7 @@ func TestRefreshAllFeedsWithMockServer(t *testing.T) {
 	manager := NewManager(store, cfg)
 
 	// Create multiple feeds that need refreshing
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		feed := &storage.Feed{
 			ID:          fmt.Sprintf("feed-%d", i),
 			URL:         server.URL,
@@ -639,7 +639,7 @@ func TestManagerConcurrentOperations(t *testing.T) {
 	// Test concurrent AddFeed calls with different URLs to avoid conflicts
 	done := make(chan bool, 3)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		go func(id int) {
 			feedContent := fmt.Sprintf(`<?xml version="1.0"?>
 <rss version="2.0">
@@ -670,7 +670,7 @@ func TestManagerConcurrentOperations(t *testing.T) {
 	}
 
 	// Wait for all goroutines to complete
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		<-done
 	}
 

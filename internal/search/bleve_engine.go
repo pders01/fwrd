@@ -134,7 +134,7 @@ func (b *bleveEngine) reindexAll() error {
 		return err
 	}
 
-	logger := debuglog.WithFields(map[string]interface{}{
+	logger := debuglog.WithFields(map[string]any{
 		"component": "search",
 		"operation": "reindexAll",
 		"feedCount": len(feeds),
@@ -306,8 +306,7 @@ func (b *bleveEngine) Search(query string, limit int) ([]*Result, error) {
 	out := make([]*Result, 0, len(res.Hits))
 	for _, h := range res.Hits {
 		r := &Result{Score: h.Score}
-		if strings.HasPrefix(h.ID, "feed:") {
-			id := strings.TrimPrefix(h.ID, "feed:")
+		if id, ok := strings.CutPrefix(h.ID, "feed:"); ok {
 			f := &storage.Feed{ID: id}
 			if t, ok := h.Fields["title"].(string); ok {
 				f.Title = t
@@ -320,8 +319,7 @@ func (b *bleveEngine) Search(query string, limit int) ([]*Result, error) {
 			}
 			r.Feed = f
 			r.IsArticle = false
-		} else if strings.HasPrefix(h.ID, "article:") {
-			id := strings.TrimPrefix(h.ID, "article:")
+		} else if id, ok := strings.CutPrefix(h.ID, "article:"); ok {
 			a := &storage.Article{ID: id}
 			if t, ok := h.Fields["title"].(string); ok {
 				a.Title = t

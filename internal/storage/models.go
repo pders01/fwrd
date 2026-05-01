@@ -28,4 +28,3 @@ type Article struct {
 	Starred     bool      `json:"starred"`
 	MediaURLs   []string  `json:"media_urls"`
 }
-

@@ -246,13 +246,13 @@ func Save(config *Config, path string) error {
 	v := viper.New()
 
 	// Convert durations to strings for TOML readability
-	dbCfg := map[string]interface{}{
+	dbCfg := map[string]any{
 		"path":         config.Database.Path,
 		"timeout":      config.Database.Timeout.String(),
 		"search_index": config.Database.SearchIndex,
 	}
 
-	feedCfg := map[string]interface{}{
+	feedCfg := map[string]any{
 		"http_timeout":        config.Feed.HTTPTimeout.String(),
 		"refresh_interval":    config.Feed.RefreshInterval.String(),
 		"default_retry_after": config.Feed.DefaultRetryAfter.String(),

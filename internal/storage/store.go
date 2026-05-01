@@ -55,7 +55,7 @@ func makeDateIndexKey(published time.Time, articleID string) []byte {
 //
 // Returns (nil, nil) when Seek runs off the end. If cursor is empty or the
 // referenced article has been deleted, returns the first entry.
-func seekDateCursor(ab *bolt.Bucket, dateCursor *bolt.Cursor, cursor string) ([]byte, []byte) {
+func seekDateCursor(ab *bolt.Bucket, dateCursor *bolt.Cursor, cursor string) (key, articleID []byte) {
 	if cursor == "" {
 		return dateCursor.First()
 	}
@@ -67,16 +67,16 @@ func seekDateCursor(ab *bolt.Bucket, dateCursor *bolt.Cursor, cursor string) ([]
 	if err := json.Unmarshal(raw, &art); err != nil {
 		return dateCursor.First()
 	}
-	key := makeDateIndexKey(art.Published, art.ID)
-	k, articleID := dateCursor.Seek(key)
-	if k == nil {
+	want := makeDateIndexKey(art.Published, art.ID)
+	key, articleID = dateCursor.Seek(want)
+	if key == nil {
 		return nil, nil
 	}
 	// Seek lands on the cursor entry itself when present; advance past it.
-	if bytes.Equal(k, key) {
-		k, articleID = dateCursor.Next()
+	if bytes.Equal(key, want) {
+		key, articleID = dateCursor.Next()
 	}
-	return k, articleID
+	return key, articleID
 }
 
 func NewStore(dbPath string) (*Store, error) {

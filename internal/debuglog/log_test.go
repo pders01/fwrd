@@ -156,7 +156,7 @@ func TestFieldLogger(t *testing.T) {
 	defer Close()
 
 	// Test field logger
-	logger := WithFields(map[string]interface{}{
+	logger := WithFields(map[string]any{
 		"component": "test",
 		"action":    "testing",
 		"count":     42,
