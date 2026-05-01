@@ -36,6 +36,11 @@ type UIConfig struct {
 	Colors  UIColors      `mapstructure:"colors"`
 	Article ArticleConfig `mapstructure:"article"`
 	Icons   string        `mapstructure:"icons"`
+	// Theme controls the glamour render style. Accepted values:
+	//   "auto"  — detect from terminal/OS (default)
+	//   "light" — force light style
+	//   "dark"  — force dark style
+	Theme string `mapstructure:"theme"`
 }
 
 type UIColors struct {
@@ -122,6 +127,7 @@ func defaultConfig() *Config {
 				WordWrapMinWidth:     40,
 			},
 			Icons: "nerd",
+			Theme: "auto",
 		},
 		Media: MediaConfig{
 			Darwin: MediaPlayers{
