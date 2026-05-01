@@ -11,11 +11,11 @@ import (
 	lua "github.com/yuin/gopher-lua"
 )
 
-// LuaPlugin adapts a Lua script to the plugins.Plugin interface. Each
+// Plugin adapts a Lua script to the plugins.Plugin interface. Each
 // plugin owns a single *lua.LState; concurrent EnhanceFeed calls
 // serialise through a mutex because gopher-lua states are not
 // goroutine-safe.
-type LuaPlugin struct {
+type Plugin struct {
 	name     string
 	priority int
 	path     string
@@ -25,24 +25,24 @@ type LuaPlugin struct {
 	table *lua.LTable
 }
 
-// Compile-time check that LuaPlugin satisfies plugins.Plugin.
-var _ plugins.Plugin = (*LuaPlugin)(nil)
+// Compile-time check that Plugin satisfies plugins.Plugin.
+var _ plugins.Plugin = (*Plugin)(nil)
 
 // Name returns the plugin name declared in the script's returned table.
-func (p *LuaPlugin) Name() string { return p.name }
+func (p *Plugin) Name() string { return p.name }
 
 // Priority returns the plugin priority declared in the script's returned table.
-func (p *LuaPlugin) Priority() int { return p.priority }
+func (p *Plugin) Priority() int { return p.priority }
 
 // Path returns the absolute filesystem path of the .lua file backing
 // this plugin. CLI inspection commands use it to show users where a
 // loaded plugin came from.
-func (p *LuaPlugin) Path() string { return p.path }
+func (p *Plugin) Path() string { return p.path }
 
 // CanHandle invokes the plugin's can_handle(url) and returns the boolean
 // result. Errors and non-boolean returns are treated as false so a buggy
 // plugin cannot poison URL routing for the rest of the registry.
-func (p *LuaPlugin) CanHandle(url string) bool {
+func (p *Plugin) CanHandle(url string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.state == nil {
@@ -65,7 +65,7 @@ func (p *LuaPlugin) CanHandle(url string) bool {
 // EnhanceFeed invokes the plugin's enhance(url) under the supplied
 // context. The HTTP client argument is unused: the host-side Lua HTTP
 // binding is wired at sandbox construction time.
-func (p *LuaPlugin) EnhanceFeed(ctx context.Context, url string, _ *http.Client) (*plugins.FeedInfo, error) {
+func (p *Plugin) EnhanceFeed(ctx context.Context, url string, _ *http.Client) (*plugins.FeedInfo, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -118,7 +118,7 @@ func (p *LuaPlugin) EnhanceFeed(ctx context.Context, url string, _ *http.Client)
 
 // Close releases the underlying Lua state. After Close the plugin must
 // not be used again.
-func (p *LuaPlugin) Close() {
+func (p *Plugin) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.state != nil {

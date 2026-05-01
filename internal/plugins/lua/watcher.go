@@ -96,7 +96,7 @@ func (w *Watcher) handleUpsert(path string) {
 
 func (w *Watcher) handleRemove(path string) {
 	for _, p := range w.reg.ListPlugins() {
-		lp, ok := p.(*LuaPlugin)
+		lp, ok := p.(*Plugin)
 		if !ok || lp.Path() != path {
 			continue
 		}

@@ -38,6 +38,13 @@ issues:
       linters:
         - dupl
         - errcheck
+    # gopher-lua's canonical name for *lua.LState is `L`; this plugin
+    # package follows that convention so binding code reads like
+    # gopher-lua's own examples.
+    - path: internal/plugins/lua/
+      linters:
+        - gocritic
+      text: "captLocal"
 
 run:
   timeout: 5m
