@@ -333,6 +333,7 @@ func (a *App) performSearchWithContext(query, context string) tea.Cmd {
 				feed:      sr.Feed,
 				article:   sr.Article,
 				isArticle: sr.IsArticle,
+				icons:     a.icons,
 			})
 		}
 

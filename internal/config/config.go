@@ -35,6 +35,7 @@ type FeedConfig struct {
 type UIConfig struct {
 	Colors  UIColors      `mapstructure:"colors"`
 	Article ArticleConfig `mapstructure:"article"`
+	Icons   string        `mapstructure:"icons"`
 }
 
 type UIColors struct {
@@ -120,6 +121,7 @@ func defaultConfig() *Config {
 				WordWrapMaxWidth:     120,
 				WordWrapMinWidth:     40,
 			},
+			Icons: "nerd",
 		},
 		Media: MediaConfig{
 			Darwin: MediaPlayers{
