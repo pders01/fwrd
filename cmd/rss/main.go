@@ -341,11 +341,13 @@ func refreshFeeds(_ *cobra.Command, _ []string) {
 		}
 
 		fmt.Println("Refreshing all feeds...")
-		if err := manager.RefreshAllFeeds(); err != nil {
+		summary, err := manager.RefreshAllFeeds()
+		if err != nil {
 			return fmt.Errorf("failed to refresh feeds: %w", err)
 		}
 
-		fmt.Println("Successfully refreshed all feeds.")
+		fmt.Printf("Refreshed %d feed(s), added %d article(s).\n",
+			summary.UpdatedFeeds, summary.AddedArticles)
 		return nil
 	}); err != nil {
 		log.Fatalf("Error: %v", err)
