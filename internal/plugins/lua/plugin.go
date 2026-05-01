@@ -34,6 +34,11 @@ func (p *LuaPlugin) Name() string { return p.name }
 // Priority returns the plugin priority declared in the script's returned table.
 func (p *LuaPlugin) Priority() int { return p.priority }
 
+// Path returns the absolute filesystem path of the .lua file backing
+// this plugin. CLI inspection commands use it to show users where a
+// loaded plugin came from.
+func (p *LuaPlugin) Path() string { return p.path }
+
 // CanHandle invokes the plugin's can_handle(url) and returns the boolean
 // result. Errors and non-boolean returns are treated as false so a buggy
 // plugin cannot poison URL routing for the rest of the registry.
