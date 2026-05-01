@@ -243,6 +243,63 @@ func TestRefreshFeedWithMockServer(t *testing.T) {
 	assert.True(t, updatedFeed.LastFetched.After(feed.LastFetched))
 }
 
+// TestRefreshAllFeeds_RunsInParallel proves the worker pool actually
+// parallelises HTTP fetches. The mock server delays each response by
+// perRequest, so wall-clock time scales linearly with serialisation:
+// 5 feeds × 200ms serial = ~1s, parallel = ~200ms. Prior to dropping
+// the per-method mutex, this test would run in ~1s.
+func TestRefreshAllFeeds_RunsInParallel(t *testing.T) {
+	const numFeeds = 5
+	const perRequest = 200 * time.Millisecond
+
+	feedContent := `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Slow Feed</title>
+<item><title>Item</title><link>http://example.com/x</link><guid>x</guid></item>
+</channel></rss>`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(perRequest)
+		w.Header().Set("Content-Type", "application/rss+xml")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, feedContent)
+	}))
+	defer server.Close()
+
+	cfg := config.TestConfig()
+	cfg.Feed.RefreshInterval = 1 * time.Millisecond
+	cfg.Feed.HTTPTimeout = 5 * time.Second
+
+	store, err := storage.NewStore(":memory:")
+	require.NoError(t, err)
+	defer store.Close()
+
+	manager := NewManager(store, cfg)
+
+	for i := range numFeeds {
+		feed := &storage.Feed{
+			ID:          fmt.Sprintf("feed-%d", i),
+			URL:         server.URL,
+			Title:       fmt.Sprintf("Feed %d", i),
+			LastFetched: time.Now().Add(-2 * time.Hour),
+		}
+		require.NoError(t, store.SaveFeed(feed))
+	}
+
+	start := time.Now()
+	_ = manager.RefreshAllFeeds()
+	elapsed := time.Since(start)
+
+	// Parallel ceiling: 5 fetches × 200ms / 5 workers = ~200ms, plus
+	// scheduling/parse/save slack. Allow generous 600ms — anything
+	// over that means we are partly serialised.
+	maxParallel := 600 * time.Millisecond
+	serialFloor := time.Duration(numFeeds) * perRequest
+	if elapsed >= maxParallel {
+		t.Fatalf("RefreshAllFeeds took %v, expected < %v (serial would be ~%v)",
+			elapsed, maxParallel, serialFloor)
+	}
+}
+
 func TestRefreshAllFeedsWithMockServer(t *testing.T) {
 	feedContent := `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
