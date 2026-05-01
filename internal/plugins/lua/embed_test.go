@@ -39,6 +39,33 @@ func TestEnsureDefaultsSeedsOnce(t *testing.T) {
 	}
 }
 
+func TestWriteIfAbsentSkipsExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "x.lua")
+	if err := os.WriteFile(dest, []byte("-- original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeIfAbsent(dest, []byte("-- replacement")); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(dest)
+	if string(got) != "-- original" {
+		t.Errorf("writeIfAbsent overwrote existing file: %q", got)
+	}
+}
+
+func TestWriteIfAbsentCreatesMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "x.lua")
+	if err := writeIfAbsent(dest, []byte("-- new")); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(dest)
+	if string(got) != "-- new" {
+		t.Errorf("writeIfAbsent did not create file: %q", got)
+	}
+}
+
 func TestRedditBuiltinEnhances(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "plugins")
 	if err := EnsureDefaults(tmp); err != nil {
