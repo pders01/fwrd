@@ -2,6 +2,7 @@ package search
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -224,12 +225,31 @@ func TestTruncate(t *testing.T) {
 }
 
 func TestCalculateRecencyBoost(t *testing.T) {
-	// Test the recency boost function
-	boost := calculateRecencyBoost("2024-01-01")
-	assert.Equal(t, 0.05, boost)
+	now := time.Now()
 
-	boost = calculateRecencyBoost(nil)
-	assert.Equal(t, 0.05, boost)
+	tests := []struct {
+		name      string
+		published time.Time
+		want      float64
+		delta     float64
+	}{
+		{name: "just published", published: now, want: 0.10, delta: 0.001},
+		{name: "half-window", published: now.Add(-recencyWindow / 2), want: 0.05, delta: 0.001},
+		{name: "at window edge", published: now.Add(-recencyWindow), want: 0.0},
+		{name: "older than window", published: now.Add(-2 * recencyWindow), want: 0.0},
+		{name: "future timestamp", published: now.Add(1 * time.Hour), want: 0.0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := calculateRecencyBoost(tt.published)
+			if tt.delta > 0 {
+				assert.InDelta(t, tt.want, got, tt.delta)
+			} else {
+				assert.Equal(t, tt.want, got)
+			}
+		})
+	}
 }
 
 func TestScoreField(t *testing.T) {
