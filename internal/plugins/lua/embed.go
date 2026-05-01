@@ -47,9 +47,28 @@ func EnsureDefaults(dir string) error {
 			return fmt.Errorf("reading embedded %s: %w", e.Name(), err)
 		}
 		dest := filepath.Join(dir, e.Name())
-		if err := os.WriteFile(dest, data, 0o644); err != nil {
+		if err := writeIfAbsent(dest, data); err != nil {
 			return fmt.Errorf("writing %s: %w", dest, err)
 		}
 	}
 	return nil
+}
+
+// writeIfAbsent atomically creates dest with data and 0o644 perms,
+// failing silently if a file already exists at the path. The O_EXCL
+// flag prevents a TOCTOU race when two fwrd processes both observe an
+// empty plugin dir at startup and both try to seed the same file.
+func writeIfAbsent(dest string, data []byte) error {
+	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil
+		}
+		return err
+	}
+	if _, werr := f.Write(data); werr != nil {
+		_ = f.Close()
+		return werr
+	}
+	return f.Close()
 }
