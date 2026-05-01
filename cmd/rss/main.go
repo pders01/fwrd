@@ -254,6 +254,7 @@ func runTUI(_ *cobra.Command, _ []string) {
 
 	if err := withStoreAndConfig(func(store *storage.Store, cfg *config.Config) error {
 		app := tui.NewApp(store, cfg)
+		defer app.Close()
 
 		// Pass force refresh option to TUI
 		if forceRefresh {

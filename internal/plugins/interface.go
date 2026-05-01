@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -37,8 +38,12 @@ type Plugin interface {
 	Priority() int
 }
 
-// Registry manages all registered plugins
+// Registry manages all registered plugins. All exported methods are
+// safe to call from multiple goroutines; the mutex covers both
+// registration mutations (Register, Replace, Unregister) and the
+// read-side iteration FindPlugin and ListPlugins perform.
 type Registry struct {
+	mu      sync.RWMutex
 	plugins []Plugin
 	client  *http.Client
 }
@@ -55,12 +60,48 @@ func NewRegistry(timeout time.Duration) *Registry {
 
 // Register adds a plugin to the registry
 func (r *Registry) Register(plugin Plugin) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.plugins = append(r.plugins, plugin)
+}
+
+// Replace swaps the plugin with the same name as p and returns the
+// previous instance, or appends p if no plugin with that name was
+// registered. Callers should release any resources owned by the
+// returned plugin.
+func (r *Registry) Replace(p Plugin) Plugin {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, existing := range r.plugins {
+		if existing.Name() == p.Name() {
+			r.plugins[i] = p
+			return existing
+		}
+	}
+	r.plugins = append(r.plugins, p)
+	return nil
+}
+
+// Unregister removes the plugin with the given name and returns it,
+// or returns nil when no plugin matched.
+func (r *Registry) Unregister(name string) Plugin {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, p := range r.plugins {
+		if p.Name() == name {
+			removed := p
+			r.plugins = append(r.plugins[:i], r.plugins[i+1:]...)
+			return removed
+		}
+	}
+	return nil
 }
 
 // FindPlugin returns the best plugin for handling a given URL
 // Returns the plugin with highest priority that can handle the URL
 func (r *Registry) FindPlugin(url string) Plugin {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	var bestPlugin Plugin
 	highestPriority := -1
 
@@ -93,5 +134,7 @@ func (r *Registry) EnhanceFeed(ctx context.Context, url string) (*FeedInfo, erro
 
 // ListPlugins returns all registered plugins
 func (r *Registry) ListPlugins() []Plugin {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return append([]Plugin(nil), r.plugins...)
 }
