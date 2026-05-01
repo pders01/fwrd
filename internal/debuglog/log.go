@@ -161,11 +161,11 @@ func Errorf(format string, args ...any) {
 
 // WithFields creates a logger with structured fields (basic key-value support)
 type FieldLogger struct {
-	fields map[string]interface{}
+	fields map[string]any
 }
 
 // WithFields returns a new logger with the specified fields
-func WithFields(fields map[string]interface{}) *FieldLogger {
+func WithFields(fields map[string]any) *FieldLogger {
 	return &FieldLogger{fields: fields}
 }
 

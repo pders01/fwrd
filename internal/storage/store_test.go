@@ -284,7 +284,7 @@ func TestStore_GetArticles_Limit(t *testing.T) {
 	defer cleanup()
 
 	articles := make([]*Article, 20)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		articles[i] = &Article{
 			ID:        fmt.Sprintf("article%d", i),
 			FeedID:    "feed1",
@@ -445,7 +445,7 @@ func BenchmarkStore_CursorPagination_DeepPage(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		if _, err := store.GetArticlesWithCursor("feed1", 50, cursor); err != nil {
 			b.Fatal(err)
 		}
@@ -464,8 +464,8 @@ func TestNewStore_MemoryPath_IsolatedAndCleaned(t *testing.T) {
 		t.Fatal(err)
 	}
 	scratch := t.TempDir()
-	if err := os.Chdir(scratch); err != nil {
-		t.Fatal(err)
+	if chErr := os.Chdir(scratch); chErr != nil {
+		t.Fatal(chErr)
 	}
 	t.Cleanup(func() { _ = os.Chdir(cwd) })
 
@@ -486,13 +486,13 @@ func TestNewStore_MemoryPath_IsolatedAndCleaned(t *testing.T) {
 	}
 
 	// No literal ":memory:" file should appear in CWD.
-	if _, err := os.Stat(filepath.Join(scratch, MemoryPath)); !os.IsNotExist(err) {
-		t.Fatalf("expected no literal %q file in CWD, stat err: %v", MemoryPath, err)
+	if _, statErr := os.Stat(filepath.Join(scratch, MemoryPath)); !os.IsNotExist(statErr) {
+		t.Fatalf("expected no literal %q file in CWD, stat err: %v", MemoryPath, statErr)
 	}
 
 	// Isolation: a feed saved in store a must not be visible from b.
-	if err := a.SaveFeed(&Feed{ID: "iso", URL: "x"}); err != nil {
-		t.Fatal(err)
+	if saveErr := a.SaveFeed(&Feed{ID: "iso", URL: "x"}); saveErr != nil {
+		t.Fatal(saveErr)
 	}
 	feeds, err := b.GetAllFeeds()
 	if err != nil {
@@ -504,8 +504,8 @@ func TestNewStore_MemoryPath_IsolatedAndCleaned(t *testing.T) {
 
 	// Close cleans up the backing file.
 	pathA := a.tempPath
-	if err := a.Close(); err != nil {
-		t.Fatal(err)
+	if closeErr := a.Close(); closeErr != nil {
+		t.Fatal(closeErr)
 	}
 	if _, err := os.Stat(pathA); !os.IsNotExist(err) {
 		t.Fatalf("temp file %q persisted after Close (err=%v)", pathA, err)

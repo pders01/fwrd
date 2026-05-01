@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-integration clean run install-caddy lint coverage help release release-snapshot
+.PHONY: build test test-unit test-integration clean run install-caddy lint modernize coverage help release release-snapshot
 
 # Variables
 BINARY_NAME=fwrd
@@ -65,6 +65,17 @@ lint:
 	fi
 	@echo "Running gofmt..."
 	@gofmt -l -s .
+
+## modernize: Apply Go-idiom upgrades (any, min/max, range-over-int, etc.) via gopls.
+##            Requires gopls on PATH; install with: go install golang.org/x/tools/gopls@latest
+modernize:
+	@echo "Running modernize via gopls..."
+	@if ! command -v gopls > /dev/null; then \
+		echo "gopls not installed. Install with: go install golang.org/x/tools/gopls@latest"; \
+		exit 1; \
+	fi
+	@gopls codeaction -kind=source.fixAll -exec ./... 2>&1 | tee /tmp/fwrd-modernize.log; \
+		echo "Done. Review with: git diff"
 
 ## fmt: Format Go code
 fmt:
