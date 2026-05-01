@@ -34,6 +34,7 @@ type App struct {
 	launcher         *media.Launcher
 	searchEngine     search.Searcher
 	searchEngineType string // "bleve" or "basic" - for UI display
+	icons            IconSet
 	keyHandler       *KeyHandler
 	feedList         list.Model
 	articleList      list.Model
@@ -140,6 +141,7 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 		searchResults:        []searchResultItem{}, // Initialize empty search results
 		searchDebounceMillis: 200,
 		glamourStyle:         resolveGlamourStyle(),
+		icons:                NewIconSet(cfg.UI.Icons),
 	}
 
 	// Prefer Bleve-backed engine if available (build with -tags=bleve)
@@ -592,7 +594,7 @@ func (a *App) View() string {
 func (a *App) getCustomStatusBar() string {
 	// Highest priority: any error
 	if a.err != nil {
-		errorMsg := ErrorMessageStyle.Render(fmt.Sprintf("✗ %v", a.err))
+		errorMsg := ErrorMessageStyle.Render(fmt.Sprintf("%s %v", a.icons.Error, a.err))
 
 		return StatusBarStyleWithPadding().
 			Width(a.width).
@@ -684,13 +686,17 @@ func (a *App) statusStyle(kind StatusKind) lipgloss.Style {
 
 // getSearchEngineStatus returns a formatted string showing the search engine type and status.
 func (a *App) getSearchEngineStatus() string {
+	prefix := ""
+	if a.icons.Search != "" {
+		prefix = a.icons.Search + " "
+	}
 	switch a.searchEngineType {
 	case "bleve":
-		return StatusSuccessStyle.Render("🔍 bleve")
+		return StatusSuccessStyle.Render(prefix + "bleve")
 	case "basic":
-		return StatusWarnStyle.Render("🔍 basic")
+		return StatusWarnStyle.Render(prefix + "basic")
 	default:
-		return StatusInfoStyle.Render("🔍 unknown")
+		return StatusInfoStyle.Render(prefix + "unknown")
 	}
 }
 
@@ -736,18 +742,22 @@ type searchResultItem struct {
 	feed      *storage.Feed
 	article   *storage.Article
 	isArticle bool
+	icons     IconSet
 }
 
 func (i searchResultItem) Title() string {
 	if i.isArticle {
-		prefix := "📄 "
 		if i.article.Read {
-			return ReadItemStyle.Render(prefix + i.article.Title)
+			return ReadItemStyle.Render(withIcon(i.icons.Article, i.article.Title))
 		}
-		return UnreadItemStyle.Render(prefix + i.article.Title)
+		marker := i.icons.Article
+		if marker == "" {
+			marker = i.icons.Unread
+		}
+		return UnreadItemStyle.Render(withIcon(marker, i.article.Title))
 	}
 
-	return FeedTitleStyle.Render("📁 " + i.feed.Title)
+	return FeedTitleStyle.Render(withIcon(i.icons.Feed, i.feed.Title))
 }
 
 func (i searchResultItem) Description() string {
@@ -793,19 +803,20 @@ type mediaItem struct {
 	mediaType media.Type
 	index     int
 	total     int
+	icons     IconSet
 }
 
 func (i mediaItem) Title() string {
 	var typeStr string
 	switch i.mediaType {
 	case media.TypeVideo:
-		typeStr = "🎬 Video"
+		typeStr = withIcon(i.icons.Video, "Video")
 	case media.TypeImage:
-		typeStr = "🖼️  Image"
+		typeStr = withIcon(i.icons.Image, "Image")
 	case media.TypeAudio:
-		typeStr = "🎵 Audio"
+		typeStr = withIcon(i.icons.Audio, "Audio")
 	case media.TypePDF:
-		typeStr = "📄 PDF"
+		typeStr = withIcon(i.icons.PDF, "PDF")
 	default:
 		typeStr = "Unknown"
 	}
