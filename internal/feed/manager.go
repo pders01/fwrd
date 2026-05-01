@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +61,25 @@ func (m *Manager) SetForceRefresh(force bool) {
 	if m.fetcher != nil {
 		m.fetcher.SetIgnoreCache(force)
 	}
+}
+
+// PluginRegistry returns the registry plugins are registered against.
+// Callers wire scriptable plugin loaders against this registry at
+// startup. The returned pointer is the manager's own registry; mutating
+// it after AddFeed has begun running is not safe.
+func (m *Manager) PluginRegistry() *plugins.Registry {
+	return m.pluginRegistry
+}
+
+// PluginHTTPClient returns the HTTP client plugins should use for
+// outbound requests. Sharing the fetcher's client keeps the User-Agent,
+// timeout, and TLS settings consistent between core feed fetches and
+// plugin-driven enhancement calls.
+func (m *Manager) PluginHTTPClient() *http.Client {
+	if m.fetcher == nil {
+		return nil
+	}
+	return m.fetcher.client
 }
 
 // SetPermissiveValidation enables permissive URL validation for development/testing
