@@ -55,6 +55,7 @@ fwrd
 # Test artifacts created by bbolt when test uses ":memory:" paths
 **/:memory:
 **/:memory:.bleve/
+coverage.out
 
 # Bleve index directories should never be committed
 *.bleve/
