@@ -103,3 +103,46 @@ func TestBleveEngineIndexesFeedLargerThanChunkSize(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, total, len(res), "expected all articles indexed, got %d", len(res))
 }
+
+// TestBleveEngineOnFeedDeleted_RemovesAllArticles asserts that
+// OnFeedDeleted clears every indexed article belonging to the feed,
+// including counts above one bleve search page (pageSize=1000).
+// The earlier `from += size` pagination skipped docs that shifted
+// down after the first batch was deleted.
+func TestBleveEngineOnFeedDeleted_RemovesAllArticles(t *testing.T) {
+	dir := t.TempDir()
+	store, err := storage.NewStore(filepath.Join(dir, "del.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	feed := &storage.Feed{ID: "victim", Title: "Victim", URL: "https://example.com/v"}
+	require.NoError(t, store.SaveFeed(feed))
+
+	const total = 1100 // 1 full page + 100 — broken pagination would have leaked the tail
+	arts := make([]*storage.Article, total)
+	base := time.Now().Add(-time.Duration(total) * time.Minute)
+	for i := range total {
+		arts[i] = &storage.Article{
+			ID:        fmt.Sprintf("v%05d", i),
+			FeedID:    feed.ID,
+			Title:     fmt.Sprintf("victimsentinel %05d", i),
+			Published: base.Add(time.Duration(i) * time.Minute),
+		}
+	}
+	require.NoError(t, store.SaveArticles(arts))
+
+	eng, err := NewBleveEngine(store, filepath.Join(dir, "idx.bleve"))
+	require.NoError(t, err)
+
+	pre, err := eng.Search("victimsentinel", total)
+	require.NoError(t, err)
+	require.Equal(t, total, len(pre), "indexer did not seed full set")
+
+	dl, ok := eng.(interface{ OnFeedDeleted(string) })
+	require.True(t, ok, "engine must implement OnFeedDeleted")
+	dl.OnFeedDeleted(feed.ID)
+
+	post, err := eng.Search("victimsentinel", total)
+	require.NoError(t, err)
+	require.Equal(t, 0, len(post), "expected zero hits after deletion, got %d", len(post))
+}
