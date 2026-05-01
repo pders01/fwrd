@@ -71,12 +71,12 @@ Implements the scriptable plugin runtime on top of gopher-lua:
   (`string`/`table`/`math`); strips `io`/`os`/`package`/`debug` and
   metatable-mutation primitives; exposes host bindings (`http.get`,
   `json.parse`/`encode`, `regex.match`, `log.info`/`warn`)
-- **LuaPlugin**: adapts a sandboxed `*lua.LState` to the
+- **Plugin**: adapts a sandboxed `*lua.LState` to the
   `plugins.Plugin` interface. Each plugin owns its own state and
   serialises calls through a mutex because gopher-lua states are not
   goroutine-safe
 - **Loader**: scans `~/.config/fwrd/plugins/`, validates each script's
-  returned table, and registers a `LuaPlugin` per file. A 256 KiB
+  returned table, and registers a `Plugin` per file. A 256 KiB
   script-size cap is enforced before the VM runs
 - **Embed/EnsureDefaults**: ships `reddit.lua` and `youtube.lua` via
   `//go:embed` and seeds them into the plugin directory on first run

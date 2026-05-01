@@ -94,17 +94,17 @@ func (c *captureLogger) Warnf(format string, args ...any) {
 }
 
 func TestLogBindings(t *testing.T) {
-	cap := &captureLogger{}
-	L := NewSandboxedState(Bindings{Logger: cap})
+	cl := &captureLogger{}
+	L := NewSandboxedState(Bindings{Logger: cl})
 	defer L.Close()
 
 	if err := L.DoString(`log.info("hello") log.warn("oops")`); err != nil {
 		t.Fatal(err)
 	}
-	if len(cap.infos) != 1 || !strings.Contains(cap.infos[0], "hello") {
-		t.Errorf("info: %v", cap.infos)
+	if len(cl.infos) != 1 || !strings.Contains(cl.infos[0], "hello") {
+		t.Errorf("info: %v", cl.infos)
 	}
-	if len(cap.warnings) != 1 || !strings.Contains(cap.warnings[0], "oops") {
-		t.Errorf("warn: %v", cap.warnings)
+	if len(cl.warnings) != 1 || !strings.Contains(cl.warnings[0], "oops") {
+		t.Errorf("warn: %v", cl.warnings)
 	}
 }

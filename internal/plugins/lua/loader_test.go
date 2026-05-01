@@ -52,7 +52,7 @@ func TestLoadDirMixesValidAndInvalid(t *testing.T) {
 	for _, r := range results {
 		if r.Err == nil && r.Plugin != nil {
 			ok++
-			defer r.Plugin.Close()
+			t.Cleanup(r.Plugin.Close)
 		} else {
 			fail++
 		}

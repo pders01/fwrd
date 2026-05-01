@@ -23,7 +23,7 @@ const MaxScriptSize int64 = 256 * 1024
 // found.
 type LoadResult struct {
 	Path   string
-	Plugin *LuaPlugin
+	Plugin *Plugin
 	Err    error
 }
 
@@ -59,9 +59,9 @@ func LoadDir(dir string, b Bindings) ([]LoadResult, error) {
 	return results, nil
 }
 
-// LoadFile loads a single Lua plugin file. The returned LuaPlugin owns
-// a sandboxed *lua.LState that lives until LuaPlugin.Close is called.
-func LoadFile(path string, b Bindings) (*LuaPlugin, error) {
+// LoadFile loads a single Lua plugin file. The returned Plugin owns
+// a sandboxed *lua.LState that lives until Plugin.Close is called.
+func LoadFile(path string, b Bindings) (*Plugin, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("opening plugin: %w", err)
@@ -122,7 +122,7 @@ func LoadFile(path string, b Bindings) (*LuaPlugin, error) {
 		priority = int(n)
 	}
 
-	return &LuaPlugin{
+	return &Plugin{
 		name:     name,
 		priority: priority,
 		path:     path,
