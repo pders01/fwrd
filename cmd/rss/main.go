@@ -13,10 +13,32 @@ import (
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/feed"
+	pluginlua "github.com/pders01/fwrd/internal/plugins/lua"
 	"github.com/pders01/fwrd/internal/storage"
 	"github.com/pders01/fwrd/internal/tui"
 	"github.com/pders01/fwrd/internal/validation"
 )
+
+// stdLogger adapts standard log.Printf to plugins/lua's Logger so the
+// CLI surfaces plugin load issues on stderr.
+type stdLogger struct{}
+
+func (stdLogger) Infof(format string, args ...any) { log.Printf("INFO  "+format, args...) }
+func (stdLogger) Warnf(format string, args ...any) { log.Printf("WARN  "+format, args...) }
+
+// loadLuaPlugins registers user-authored Lua plugins onto m's registry.
+// Failures are logged and ignored — a malformed plugin must not break
+// CLI commands that don't depend on it.
+func loadLuaPlugins(m *feed.Manager) {
+	dir := pluginlua.DefaultPluginDir()
+	bindings := pluginlua.Bindings{
+		HTTPClient: m.PluginHTTPClient(),
+		Logger:     stdLogger{},
+	}
+	if _, err := pluginlua.LoadAndRegister(m.PluginRegistry(), dir, bindings); err != nil {
+		log.Printf("WARN  loading lua plugins from %s: %v", dir, err)
+	}
+}
 
 // Version is the version of the application, set at build time
 var Version = "dev"
@@ -275,6 +297,7 @@ func addFeed(_ *cobra.Command, args []string) {
 
 	if err := withStoreAndConfig(func(store *storage.Store, cfg *config.Config) error {
 		manager := feed.NewManager(store, cfg)
+		loadLuaPlugins(manager)
 
 		fmt.Printf("Adding feed: %s\n", url)
 		feed, err := manager.AddFeed(url)
@@ -333,6 +356,7 @@ func deleteFeed(_ *cobra.Command, args []string) {
 func refreshFeeds(_ *cobra.Command, _ []string) {
 	if err := withStoreAndConfig(func(store *storage.Store, cfg *config.Config) error {
 		manager := feed.NewManager(store, cfg)
+		loadLuaPlugins(manager)
 
 		// Set force refresh if requested
 		if forceRefresh {

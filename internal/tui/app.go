@@ -21,10 +21,19 @@ import (
 	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/media"
+	pluginlua "github.com/pders01/fwrd/internal/plugins/lua"
 	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/storage"
 	"golang.org/x/term"
 )
+
+// debugLogger adapts the package-level debuglog API to plugins/lua's
+// printf-style Logger interface so plugin load failures and log.info /
+// log.warn calls funnel through fwrd's existing log file.
+type debugLogger struct{}
+
+func (debugLogger) Infof(format string, args ...any) { debuglog.Infof(format, args...) }
+func (debugLogger) Warnf(format string, args ...any) { debuglog.Warnf(format, args...) }
 
 type App struct {
 	config           *config.Config
@@ -181,6 +190,17 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 	}
 	if bs, ok := app.searchEngine.(feed.BatchScope); ok {
 		app.manager.RegisterBatchScope(bs)
+	}
+
+	pluginDir := pluginlua.DefaultPluginDir()
+	bindings := pluginlua.Bindings{
+		HTTPClient: app.manager.PluginHTTPClient(),
+		Logger:     debugLogger{},
+	}
+	if n, err := pluginlua.LoadAndRegister(app.manager.PluginRegistry(), pluginDir, bindings); err != nil {
+		debuglog.Errorf("loading lua plugins from %s: %v", pluginDir, err)
+	} else if n > 0 {
+		debuglog.Infof("loaded %d lua plugin(s) from %s", n, pluginDir)
 	}
 
 	app.keyHandler = NewKeyHandler(app, cfg)
