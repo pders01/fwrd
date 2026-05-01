@@ -188,20 +188,18 @@ func (b *bleveEngine) reindexAll() error {
 }
 
 // indexArticlesInChunks processes articles for a feed in memory-efficient chunks
+// using cursor pagination so feeds larger than maxArticlesPerFeed terminate.
 func (b *bleveEngine) indexArticlesInChunks(feedID string, batch **bleve.Batch, batchCount *int) error {
-	// Get articles in smaller chunks to prevent loading all into memory
-	offset := 0
+	cursor := ""
 	for {
-		arts, err := b.store.GetArticles(feedID, maxArticlesPerFeed)
+		arts, err := b.store.GetArticlesWithCursor(feedID, maxArticlesPerFeed, cursor)
 		if err != nil {
 			return fmt.Errorf("failed to get articles for feed %s: %w", feedID, err)
 		}
-
 		if len(arts) == 0 {
-			break // No more articles
+			break
 		}
 
-		// Process this chunk of articles
 		for _, a := range arts {
 			_ = (*batch).Index(docIDForArticle(a.ID), map[string]any{
 				"type":        "article",
@@ -214,7 +212,6 @@ func (b *bleveEngine) indexArticlesInChunks(feedID string, batch **bleve.Batch, 
 			})
 			(*batchCount)++
 
-			// Commit batch if it's getting large within article processing
 			if *batchCount >= maxBatchSize {
 				if err := b.commitBatch(*batch); err != nil {
 					return err
@@ -225,12 +222,10 @@ func (b *bleveEngine) indexArticlesInChunks(feedID string, batch **bleve.Batch, 
 			}
 		}
 
-		// If we got fewer articles than requested, we've reached the end
 		if len(arts) < maxArticlesPerFeed {
 			break
 		}
-
-		offset += len(arts)
+		cursor = arts[len(arts)-1].ID
 	}
 
 	return nil
