@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -86,6 +89,12 @@ type App struct {
 	spinnerActive bool
 	spinnerLabel  string
 	spinnerKind   StatusKind
+
+	// Lua plugin hot-reload watcher; nil when no plugin dir is
+	// available. shutdownOnce guards against double-Close.
+	pluginWatcherCancel context.CancelFunc
+	pluginWatcherWG     sync.WaitGroup
+	shutdownOnce        sync.Once
 }
 
 func NewApp(store *storage.Store, cfg *config.Config) *App {
@@ -206,6 +215,22 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 		debuglog.Infof("loaded %d lua plugin(s) from %s", n, pluginDir)
 	}
 
+	if pluginDir != "" {
+		if watcher, err := pluginlua.NewWatcher(app.manager.PluginRegistry(), pluginDir, bindings); err != nil {
+			debuglog.Warnf("plugin hot-reload disabled: %v", err)
+		} else {
+			ctx, cancel := context.WithCancel(context.Background())
+			app.pluginWatcherCancel = cancel
+			app.pluginWatcherWG.Add(1)
+			go func() {
+				defer app.pluginWatcherWG.Done()
+				if rerr := watcher.Run(ctx); rerr != nil && !errors.Is(rerr, context.Canceled) {
+					debuglog.Warnf("plugin watcher exited: %v", rerr)
+				}
+			}()
+		}
+	}
+
 	app.keyHandler = NewKeyHandler(app, cfg)
 
 	// Initialize status spinner (subtle)
@@ -222,6 +247,18 @@ func (a *App) SetForceRefresh(force bool) {
 	if a.manager != nil {
 		a.manager.SetForceRefresh(force)
 	}
+}
+
+// Close releases App-owned resources that outlive the Bubble Tea
+// program loop — currently the plugin hot-reload watcher. Safe to call
+// multiple times.
+func (a *App) Close() {
+	a.shutdownOnce.Do(func() {
+		if a.pluginWatcherCancel != nil {
+			a.pluginWatcherCancel()
+		}
+		a.pluginWatcherWG.Wait()
+	})
 }
 
 func (a *App) getRenderer() (*glamour.TermRenderer, error) {

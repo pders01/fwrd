@@ -45,6 +45,9 @@ func (p *LuaPlugin) Path() string { return p.path }
 func (p *LuaPlugin) CanHandle(url string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.state == nil {
+		return false
+	}
 	fn := p.state.GetField(p.table, "can_handle")
 	if _, ok := fn.(*lua.LFunction); !ok {
 		return false
@@ -66,6 +69,9 @@ func (p *LuaPlugin) EnhanceFeed(ctx context.Context, url string, _ *http.Client)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if p.state == nil {
+		return nil, errors.New("plugin closed")
+	}
 	p.state.SetContext(ctx)
 	defer p.state.RemoveContext()
 
