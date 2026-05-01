@@ -29,11 +29,3 @@ type Article struct {
 	MediaURLs   []string  `json:"media_urls"`
 }
 
-type FetchMetadata struct {
-	FeedID       string    `json:"feed_id"`
-	ETag         string    `json:"etag"`
-	LastModified string    `json:"last_modified"`
-	LastFetched  time.Time `json:"last_fetched"`
-	NextFetch    time.Time `json:"next_fetch"`
-	RetryAfter   int       `json:"retry_after"`
-}
