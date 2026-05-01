@@ -436,52 +436,55 @@ func (s *Store) MarkArticleRead(id string, read bool) error {
 
 func (s *Store) DeleteFeed(id string) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
-		// Remove feed record
 		feedBucket := tx.Bucket(feedsBucket)
 		if err := feedBucket.Delete([]byte(id)); err != nil {
 			return err
 		}
 
-		// Remove its articles using the index
 		ab := tx.Bucket(articlesBucket)
 		dateIdx := tx.Bucket(articlesByDateBucket)
 		idxRoot := tx.Bucket(articlesByFeedBucket)
+		if idxRoot == nil {
+			return nil
+		}
 
-		var articleIDs [][]byte // Collect article IDs for date index cleanup
+		fb := idxRoot.Bucket([]byte(id))
+		if fb == nil {
+			return nil
+		}
 
-		if idxRoot != nil {
-			fb := idxRoot.Bucket([]byte(id))
-			if fb != nil {
-				c := fb.Cursor()
-				for k, _ := c.First(); k != nil; k, _ = c.Next() {
-					articleIDs = append(articleIDs, append([]byte(nil), k...)) // Copy the key
-					if ab != nil {
-						_ = ab.Delete(k)
+		// Walk the per-feed sub-bucket once; for each article ID, look
+		// up its full record before deleting so we can reconstruct the
+		// composite date-index key and remove that entry by Seek/Delete
+		// instead of a linear scan.
+		c := fb.Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			articleID := append([]byte(nil), k...) // Cursor keys are tx-scoped; copy.
+			if ab != nil && dateIdx != nil {
+				if data := ab.Get(articleID); data != nil {
+					var art Article
+					if err := json.Unmarshal(data, &art); err == nil {
+						dateKey := makeDateIndexKey(art.Published, art.ID)
+						if err := dateIdx.Delete(dateKey); err != nil {
+							return fmt.Errorf("deleting date-index entry: %w", err)
+						}
 					}
 				}
-				// Delete the sub-bucket for this feed
-				if err := idxRoot.DeleteBucket([]byte(id)); err != nil {
-					// If bucket deletion fails, continue to avoid partial state
-					_ = err
+			}
+			if ab != nil {
+				if err := ab.Delete(articleID); err != nil {
+					return fmt.Errorf("deleting article %s: %w", articleID, err)
 				}
 			}
 		}
 
-		// Clean up date index entries for deleted articles
-		if dateIdx != nil {
-			for _, articleID := range articleIDs {
-				// We need to find and remove entries from date index
-				// Since we don't have the exact date key, we need to scan for entries with this article ID
-				c := dateIdx.Cursor()
-				for k, v := c.First(); k != nil; k, v = c.Next() {
-					if bytes.Equal(v, articleID) {
-						_ = dateIdx.Delete(k)
-						break // Each article should only have one entry
-					}
-				}
-			}
+		// Drop the per-feed sub-bucket. Propagating the error here is
+		// load-bearing: the surrounding tx will roll back every prior
+		// delete, so the post-failure state is the original feed +
+		// articles + indexes, not a half-deleted carcass.
+		if err := idxRoot.DeleteBucket([]byte(id)); err != nil {
+			return fmt.Errorf("deleting per-feed index bucket: %w", err)
 		}
-
 		return nil
 	})
 }
