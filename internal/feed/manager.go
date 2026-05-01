@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -27,6 +28,9 @@ type Manager struct {
 	config         *config.Config
 	urlValidator   *validation.FeedURLValidator
 	pluginRegistry *plugins.Registry
+
+	dataListeners []DataListener
+	batchScopes   []BatchScope
 }
 
 func NewManager(store *storage.Store, cfg *config.Config) *Manager {
@@ -35,9 +39,6 @@ func NewManager(store *storage.Store, cfg *config.Config) *Manager {
 
 	// Initialize plugin registry with HTTP timeout from config
 	pluginRegistry := plugins.NewRegistry(cfg.Feed.HTTPTimeout)
-
-	// Note: Default plugins should be registered by the application initialization
-	// Users can add custom plugins in the internal/plugins/user/ directory
 
 	return &Manager{
 		store:          store,
@@ -65,61 +66,81 @@ func (m *Manager) SetPermissiveValidation(permissive bool) {
 	}
 }
 
+// RegisterDataListener subscribes l to post-write notifications. Listeners
+// must be registered before any goroutines start using the manager;
+// registration is not safe to interleave with concurrent operations.
+func (m *Manager) RegisterDataListener(l DataListener) {
+	if l != nil {
+		m.dataListeners = append(m.dataListeners, l)
+	}
+}
+
+// RegisterBatchScope subscribes s to RefreshAllFeeds bracketing.
+func (m *Manager) RegisterBatchScope(s BatchScope) {
+	if s != nil {
+		m.batchScopes = append(m.batchScopes, s)
+	}
+}
+
+func (m *Manager) notifyDataUpdated(feed *storage.Feed, articles []*storage.Article) {
+	for _, l := range m.dataListeners {
+		l.OnDataUpdated(feed, articles)
+	}
+}
+
+func (m *Manager) beginBatchScopes() {
+	for _, s := range m.batchScopes {
+		s.BeginBatch()
+	}
+}
+
+func (m *Manager) commitBatchScopes() {
+	for _, s := range m.batchScopes {
+		s.CommitBatch()
+	}
+}
+
+// AddFeed validates the URL, optionally enhances it via plugins, fetches
+// and parses the feed, persists the result, and notifies registered
+// DataListeners. The returned feed and saved articles are also handed to
+// listeners.
 func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
-	// Validate and normalize the URL using comprehensive security checks
 	normalizedURL, err := m.urlValidator.ValidateAndNormalize(url)
 	if err != nil {
 		return nil, fmt.Errorf("invalid feed URL: %w", err)
 	}
 
-	// Try to enhance the feed information using plugins
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	feedInfo, err := m.pluginRegistry.EnhanceFeed(ctx, normalizedURL)
 	if err != nil {
-		// Plugin enhancement failed, continue with original URL
 		feedInfo = &plugins.FeedInfo{
 			OriginalURL: normalizedURL,
 			FeedURL:     normalizedURL,
-			Title:       "",
-			Description: "",
-			Metadata:    make(map[string]string),
+			Metadata:    map[string]string{},
 		}
 	}
 
-	// Use the enhanced feed URL for fetching
 	actualFeedURL := feedInfo.FeedURL
 	if actualFeedURL == "" {
 		actualFeedURL = normalizedURL
 	}
 
-	feedID := generateFeedID(actualFeedURL)
-
 	feed := &storage.Feed{
-		ID:        feedID,
+		ID:        generateFeedID(actualFeedURL),
 		URL:       actualFeedURL,
+		Title:     feedInfo.Title,
 		UpdatedAt: time.Now(),
-	}
-
-	// Set enhanced title if available
-	if feedInfo.Title != "" {
-		feed.Title = feedInfo.Title
 	}
 
 	resp, updated, err := m.fetcher.Fetch(feed)
 	if err != nil {
 		return nil, fmt.Errorf("fetching feed: %w", err)
 	}
-
-	if !updated && resp == nil {
+	if !updated || resp == nil {
 		return nil, fmt.Errorf("feed not modified")
 	}
-
-	if resp == nil {
-		return nil, fmt.Errorf("no response received")
-	}
-
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
@@ -127,13 +148,12 @@ func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
 		return nil, fmt.Errorf("reading response: %w", err)
 	}
 
-	articles, err := m.parser.Parse(strings.NewReader(string(body)), feedID)
+	articles, err := m.parser.Parse(bytes.NewReader(body), feed.ID)
 	if err != nil {
 		return nil, fmt.Errorf("parsing feed: %w", err)
 	}
 
-	// Only extract title from articles if we don't have a plugin-enhanced title
-	if len(articles) > 0 && feed.Title == "" {
+	if feed.Title == "" && len(articles) > 0 {
 		feed.Title = extractFeedTitleFromArticles(articles)
 	}
 
@@ -142,109 +162,140 @@ func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
 	if err := m.store.SaveFeed(feed); err != nil {
 		return nil, fmt.Errorf("saving feed: %w", err)
 	}
-
 	if err := m.store.SaveArticles(articles); err != nil {
 		return nil, fmt.Errorf("saving articles: %w", err)
 	}
 
+	m.notifyDataUpdated(feed, articles)
 	return feed, nil
 }
 
+// RefreshFeed re-fetches a single feed and notifies listeners on success.
 func (m *Manager) RefreshFeed(feedID string) error {
+	_, _, err := m.refreshFeedByID(feedID, true)
+	return err
+}
+
+// refreshFeedByID does the work of RefreshFeed and returns the feed +
+// freshly-saved articles so RefreshAllFeeds can dispatch listener
+// notifications from a single goroutine. When notify is true,
+// notifyDataUpdated runs inline; the multi-feed path passes false and
+// notifies later from the result-collection loop.
+func (m *Manager) refreshFeedByID(feedID string, notify bool) (*storage.Feed, []*storage.Article, error) {
 	feed, err := m.store.GetFeed(feedID)
 	if err != nil {
-		return fmt.Errorf("getting feed: %w", err)
+		return nil, nil, fmt.Errorf("getting feed: %w", err)
 	}
 
 	if time.Since(feed.LastFetched) < m.config.Feed.RefreshInterval {
-		return nil
+		return feed, nil, nil
 	}
 
 	resp, updated, err := m.fetcher.Fetch(feed)
 	if err != nil {
-		return fmt.Errorf("fetching feed: %w", err)
+		return feed, nil, fmt.Errorf("fetching feed: %w", err)
 	}
 
 	if !updated || resp == nil {
 		feed.LastFetched = time.Now()
 		if saveErr := m.store.SaveFeed(feed); saveErr != nil {
-			return fmt.Errorf("saving feed metadata: %w", saveErr)
+			return feed, nil, fmt.Errorf("saving feed metadata: %w", saveErr)
 		}
-		return nil
+		return feed, nil, nil
 	}
-
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("reading response: %w", err)
+		return feed, nil, fmt.Errorf("reading response: %w", err)
 	}
 
-	articles, err := m.parser.Parse(strings.NewReader(string(body)), feedID)
+	articles, err := m.parser.Parse(bytes.NewReader(body), feedID)
 	if err != nil {
-		return fmt.Errorf("parsing feed: %w", err)
+		return feed, nil, fmt.Errorf("parsing feed: %w", err)
 	}
 
 	m.fetcher.UpdateFeedMetadata(feed, resp)
 	feed.UpdatedAt = time.Now()
 
 	if err := m.store.SaveFeed(feed); err != nil {
-		return fmt.Errorf("saving feed: %w", err)
+		return feed, nil, fmt.Errorf("saving feed: %w", err)
 	}
-
 	if err := m.store.SaveArticles(articles); err != nil {
-		return fmt.Errorf("saving articles: %w", err)
+		return feed, nil, fmt.Errorf("saving articles: %w", err)
 	}
 
-	return nil
+	if notify {
+		m.notifyDataUpdated(feed, articles)
+	}
+	return feed, articles, nil
 }
 
-func (m *Manager) RefreshAllFeeds() error {
+// RefreshAllFeeds refreshes every persisted feed in parallel and returns
+// a summary the caller can render. Listener notifications and batch
+// scope brackets fire from a single goroutine after all worker
+// goroutines complete, so listener implementations need not be safe
+// for concurrent invocation.
+func (m *Manager) RefreshAllFeeds() (RefreshSummary, error) {
 	feeds, err := m.store.GetAllFeeds()
 	if err != nil {
-		return fmt.Errorf("getting feeds: %w", err)
+		return RefreshSummary{}, fmt.Errorf("getting feeds: %w", err)
 	}
-
 	if len(feeds) == 0 {
-		return nil
+		return RefreshSummary{}, nil
 	}
 
-	// Use worker pool pattern to limit concurrent operations
-	const maxConcurrentRefresh = 5
-	feedChan := make(chan *storage.Feed, len(feeds))
-	errChan := make(chan error, len(feeds))
+	type result struct {
+		feed     *storage.Feed
+		articles []*storage.Article
+		err      error
+	}
 
-	// Start workers
+	const maxConcurrent = 5
+	feedChan := make(chan *storage.Feed, len(feeds))
+	resultChan := make(chan result, len(feeds))
+
 	var wg sync.WaitGroup
-	for i := 0; i < maxConcurrentRefresh && i < len(feeds); i++ {
+	workers := maxConcurrent
+	if len(feeds) < workers {
+		workers = len(feeds)
+	}
+	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for feed := range feedChan {
-				if refreshErr := m.RefreshFeed(feed.ID); refreshErr != nil {
-					errChan <- refreshErr
-				}
+			for f := range feedChan {
+				feed, articles, err := m.refreshFeedByID(f.ID, false)
+				resultChan <- result{feed: feed, articles: articles, err: err}
 			}
 		}()
 	}
-
-	// Send feeds to workers
-	for _, feed := range feeds {
-		feedChan <- feed
+	for _, f := range feeds {
+		feedChan <- f
 	}
 	close(feedChan)
-
-	// Wait for all workers to complete
 	wg.Wait()
-	close(errChan)
+	close(resultChan)
 
-	// Collect any errors
-	var errs []error
-	for err := range errChan {
-		errs = append(errs, err)
+	m.beginBatchScopes()
+	defer m.commitBatchScopes()
+
+	var summary RefreshSummary
+	for r := range resultChan {
+		if r.err != nil {
+			summary.Errors = append(summary.Errors, r.err)
+			continue
+		}
+		if r.articles == nil {
+			// Refresh skipped (rate-limited or 304) — no listener event.
+			continue
+		}
+		summary.UpdatedFeeds++
+		summary.AddedArticles += len(r.articles)
+		m.notifyDataUpdated(r.feed, r.articles)
 	}
 
-	return errors.Join(errs...)
+	return summary, errors.Join(summary.Errors...)
 }
 
 func generateFeedID(url string) string {
