@@ -438,34 +438,38 @@ func (b *bleveEngine) DocCount() (int, error) {
 	return int(res.Total), nil
 }
 
-// OnFeedDeleted removes all docs for the feed. This simple approach deletes the feed doc only.
-// Removing all articles would require iterating; for brevity this only deletes the feed doc.
+// OnFeedDeleted removes the feed document and every article document
+// belonging to feedID from the bleve index.
+//
+// Each iteration always queries from offset 0: the index shrinks as
+// docs are deleted, so what was at position size on the previous call
+// is now at position 0. The maxIterations guard caps the loop in the
+// event a Delete silently fails and the same hits keep reappearing.
 func (b *bleveEngine) OnFeedDeleted(feedID string) {
-	// Delete the feed document
 	_ = b.idx.Delete(docIDForFeed(feedID))
 
-	// Delete all article documents for this feed in batches
-	// Query: term query on feed_id
 	tq := bleve.NewTermQuery(feedID)
 	tq.SetField("feed_id")
 
-	from := 0
-	size := 1000
-	for {
-		req := bleve.NewSearchRequestOptions(tq, size, from, false)
+	const (
+		pageSize      = 1000
+		maxIterations = 1024 // up to ~1M article docs per feed
+	)
+	for range maxIterations {
+		req := bleve.NewSearchRequestOptions(tq, pageSize, 0, false)
 		req.Fields = []string{}
 		res, err := b.idx.Search(req)
 		if err != nil || res == nil || len(res.Hits) == 0 {
-			break
+			return
 		}
 		for _, h := range res.Hits {
 			_ = b.idx.Delete(h.ID)
 		}
-		if len(res.Hits) < size {
-			break
+		if len(res.Hits) < pageSize {
+			return
 		}
-		from += size
 	}
+	debuglog.Warnf("OnFeedDeleted hit maxIterations for feed %s; some docs may remain", feedID)
 }
 
 // Batch index support
