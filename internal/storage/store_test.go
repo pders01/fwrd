@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	bolt "go.etcd.io/bbolt"
 )
 
 func setupTestStore(t *testing.T) (store *Store, cleanup func()) {
@@ -509,4 +511,66 @@ func TestNewStore_MemoryPath_IsolatedAndCleaned(t *testing.T) {
 		t.Fatalf("temp file %q persisted after Close (err=%v)", pathA, err)
 	}
 	_ = b.Close()
+}
+
+// TestStore_DeleteFeed_RemovesIndexAndDateEntries asserts that
+// DeleteFeed leaves no stale state behind: the per-feed sub-bucket is
+// gone and the date index contains no entries pointing at the deleted
+// articles. The previous implementation swallowed the DeleteBucket
+// error, which could leave a phantom sub-bucket and corrupt cursor
+// pagination for subsequent queries.
+func TestStore_DeleteFeed_RemovesIndexAndDateEntries(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	if err := store.SaveFeed(&Feed{ID: "f1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveFeed(&Feed{ID: "f2"}); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	articles := []*Article{
+		{ID: "a1", FeedID: "f1", Published: now},
+		{ID: "a2", FeedID: "f1", Published: now.Add(1 * time.Minute)},
+		{ID: "b1", FeedID: "f2", Published: now.Add(2 * time.Minute)},
+	}
+	if err := store.SaveArticles(articles); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.DeleteFeed("f1"); err != nil {
+		t.Fatalf("DeleteFeed: %v", err)
+	}
+
+	err := store.db.View(func(tx *bolt.Tx) error {
+		if idxRoot := tx.Bucket(articlesByFeedBucket); idxRoot != nil {
+			if sub := idxRoot.Bucket([]byte("f1")); sub != nil {
+				t.Error("per-feed sub-bucket for f1 still exists")
+			}
+		}
+		if dateIdx := tx.Bucket(articlesByDateBucket); dateIdx != nil {
+			c := dateIdx.Cursor()
+			for k, v := c.First(); k != nil; k, v = c.Next() {
+				switch string(v) {
+				case "a1", "a2":
+					t.Errorf("date index still references deleted article %s", v)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// f2's article should still be reachable.
+	got, err := store.GetArticles("f2", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "b1" {
+		t.Errorf("f2 article missing or wrong: %+v", got)
+	}
 }
