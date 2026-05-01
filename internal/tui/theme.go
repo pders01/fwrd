@@ -28,7 +28,7 @@ const (
 //     b. Non-TTY → NoTTYStyle (renders without ANSI).
 //     c. COLORFGBG env var, when set by the terminal.
 //     d. macOS only: read AppleInterfaceStyle from defaults; the key
-//        exists only when Dark Appearance is active.
+//     exists only when Dark Appearance is active.
 //     e. Default to dark (matches termenv's post-timeout fallback).
 //
 // We deliberately avoid OSC 11 background-color probes here because

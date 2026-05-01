@@ -31,8 +31,8 @@ func watchSystemTheme(ctx context.Context, wg *sync.WaitGroup, notify func()) er
 	prefsDir := filepath.Join(home, "Library", "Preferences")
 	target := filepath.Join(prefsDir, ".GlobalPreferences.plist")
 
-	if _, err := os.Stat(target); err != nil {
-		return fmt.Errorf("stat %s: %w", target, err)
+	if _, statErr := os.Stat(target); statErr != nil {
+		return fmt.Errorf("stat %s: %w", target, statErr)
 	}
 
 	watcher, err := fsnotify.NewWatcher()

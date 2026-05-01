@@ -57,10 +57,10 @@ func TestHTMLToMarkdown_ConvertsBasicHTML(t *testing.T) {
 
 func TestHTMLToMarkdown_StripsDangerousMarkup(t *testing.T) {
 	cases := []struct {
-		name      string
-		in        string
-		mustNot   []string
-		mustKeep  []string // optional substrings that should survive
+		name     string
+		in       string
+		mustNot  []string
+		mustKeep []string // optional substrings that should survive
 	}{
 		{
 			name:    "script tag and body",
@@ -68,9 +68,9 @@ func TestHTMLToMarkdown_StripsDangerousMarkup(t *testing.T) {
 			mustNot: []string{"alert", "<script", "script>"},
 		},
 		{
-			name:    "inline event handler",
-			in:      `<a href="https://example.com" onclick="steal()">click</a>`,
-			mustNot: []string{"onclick", "steal"},
+			name:     "inline event handler",
+			in:       `<a href="https://example.com" onclick="steal()">click</a>`,
+			mustNot:  []string{"onclick", "steal"},
 			mustKeep: []string{"https://example.com"},
 		},
 		{
@@ -84,9 +84,9 @@ func TestHTMLToMarkdown_StripsDangerousMarkup(t *testing.T) {
 			mustNot: []string{"<iframe", "evil.example.com"},
 		},
 		{
-			name:    "style block",
-			in:      `<style>body{display:none}</style><p>visible</p>`,
-			mustNot: []string{"display:none", "<style"},
+			name:     "style block",
+			in:       `<style>body{display:none}</style><p>visible</p>`,
+			mustNot:  []string{"display:none", "<style"},
 			mustKeep: []string{"visible"},
 		},
 		{
