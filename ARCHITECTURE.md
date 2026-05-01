@@ -58,6 +58,31 @@ Implements the sophisticated terminal user interface:
 - **Components**: Shared UI component library to reduce code duplication
 - **Search UX**: Debounced input (~200ms), brief status flashes (500ms), in‑article search with global fallback
 
+### internal/plugins
+Defines the `Plugin` interface, `FeedInfo` result type, and a thread-safe
+`Registry`. The registry is consulted by `feed.Manager.AddFeed` to enhance
+a URL before fetch — for example, turning a subreddit listing URL into
+its `.rss` endpoint. `Registry.Replace` and `Registry.Unregister`
+support runtime plugin churn (see `internal/plugins/lua` below).
+
+### internal/plugins/lua
+Implements the scriptable plugin runtime on top of gopher-lua:
+- **Sandbox**: opens a whitelisted subset of the Lua stdlib
+  (`string`/`table`/`math`); strips `io`/`os`/`package`/`debug` and
+  metatable-mutation primitives; exposes host bindings (`http.get`,
+  `json.parse`/`encode`, `regex.match`, `log.info`/`warn`)
+- **LuaPlugin**: adapts a sandboxed `*lua.LState` to the
+  `plugins.Plugin` interface. Each plugin owns its own state and
+  serialises calls through a mutex because gopher-lua states are not
+  goroutine-safe
+- **Loader**: scans `~/.config/fwrd/plugins/`, validates each script's
+  returned table, and registers a `LuaPlugin` per file. A 256 KiB
+  script-size cap is enforced before the VM runs
+- **Embed/EnsureDefaults**: ships `reddit.lua` and `youtube.lua` via
+  `//go:embed` and seeds them into the plugin directory on first run
+- **Watcher**: uses fsnotify to hot-reload edits, unregister deletes,
+  and keep a previously-working plugin in place when a save is bad
+
 ### internal/validation
 Provides comprehensive security validation:
 - **URL Validation**: Secure feed URL validation with protocol checks, domain validation, and malicious URL detection
