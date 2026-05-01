@@ -29,8 +29,7 @@ import (
 type App struct {
 	config           *config.Config
 	store            *storage.Store
-	fetcher          *feed.Fetcher
-	parser           *feed.Parser
+	manager          *feed.Manager
 	launcher         *media.Launcher
 	searchEngine     search.Searcher
 	searchEngineType string // "bleve" or "basic" - for UI display
@@ -123,8 +122,7 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 	app := &App{
 		config:   cfg,
 		store:    store,
-		fetcher:  feed.NewFetcher(cfg),
-		parser:   feed.NewParser(),
+		manager:  feed.NewManager(store, cfg),
 		launcher: media.NewLauncher(cfg),
 		// searchEngine set below (Bleve if available, otherwise fallback)
 		feedList:             feedList,
@@ -174,6 +172,16 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 		app.searchEngineType = "basic"
 	}
 
+	// Wire the search engine into the manager so it receives index updates
+	// after every successful add/refresh without the TUI re-implementing the
+	// dispatch.
+	if dl, ok := app.searchEngine.(feed.DataListener); ok {
+		app.manager.RegisterDataListener(dl)
+	}
+	if bs, ok := app.searchEngine.(feed.BatchScope); ok {
+		app.manager.RegisterBatchScope(bs)
+	}
+
 	app.keyHandler = NewKeyHandler(app, cfg)
 
 	// Initialize status spinner (subtle)
@@ -187,8 +195,8 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 
 // SetForceRefresh configures the fetcher to ignore ETag/Last-Modified headers
 func (a *App) SetForceRefresh(force bool) {
-	if a.fetcher != nil {
-		a.fetcher.SetIgnoreCache(force)
+	if a.manager != nil {
+		a.manager.SetForceRefresh(force)
 	}
 }
 

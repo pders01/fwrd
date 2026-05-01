@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,7 +45,7 @@ func TestRefreshAllFeeds(t *testing.T) {
 		manager := NewManager(store, cfg)
 
 		// This will try to refresh all feeds (which should be none in fresh DB)
-		err = manager.RefreshAllFeeds()
+		_, err = manager.RefreshAllFeeds()
 		assert.NoError(t, err)
 	})
 }
@@ -73,6 +74,115 @@ func TestAddFeed(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, feed)
 	})
+}
+
+// recordingListener captures dispatched OnDataUpdated and Begin/Commit
+// events so listener-wiring tests can assert on the call sequence.
+type recordingListener struct {
+	mu       sync.Mutex
+	updates  []string // feed.ID per OnDataUpdated call
+	articles int      // total articles seen
+	begins   int
+	commits  int
+}
+
+func (r *recordingListener) OnDataUpdated(f *storage.Feed, articles []*storage.Article) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.updates = append(r.updates, f.ID)
+	r.articles += len(articles)
+}
+
+func (r *recordingListener) BeginBatch()  { r.mu.Lock(); r.begins++; r.mu.Unlock() }
+func (r *recordingListener) CommitBatch() { r.mu.Lock(); r.commits++; r.mu.Unlock() }
+
+func (r *recordingListener) snapshot() (updates int, articles, begins, commits int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.updates), r.articles, r.begins, r.commits
+}
+
+// TestRefreshAllFeeds_NotifiesListeners asserts that registered
+// DataListener and BatchScope implementations are invoked exactly once
+// per successful feed refresh, with Begin/Commit bracketing the batch.
+func TestRefreshAllFeeds_NotifiesListeners(t *testing.T) {
+	const numFeeds = 3
+	feedContent := `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>F</title>
+<item><title>i</title><link>http://example.com/x</link><guid>x</guid></item>
+</channel></rss>`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, feedContent)
+	}))
+	defer server.Close()
+
+	cfg := config.TestConfig()
+	cfg.Feed.RefreshInterval = 1 * time.Millisecond
+
+	store, err := storage.NewStore(t.TempDir() + "/store.db")
+	require.NoError(t, err)
+	defer store.Close()
+
+	manager := NewManager(store, cfg)
+	rec := &recordingListener{}
+	manager.RegisterDataListener(rec)
+	manager.RegisterBatchScope(rec)
+
+	for i := range numFeeds {
+		f := &storage.Feed{
+			ID:          fmt.Sprintf("feed-%d", i),
+			URL:         server.URL,
+			LastFetched: time.Now().Add(-2 * time.Hour),
+		}
+		require.NoError(t, store.SaveFeed(f))
+	}
+
+	summary, err := manager.RefreshAllFeeds()
+	require.NoError(t, err)
+
+	updates, articles, begins, commits := rec.snapshot()
+	assert.Equal(t, numFeeds, summary.UpdatedFeeds)
+	assert.Equal(t, numFeeds, updates, "one OnDataUpdated per refreshed feed")
+	assert.Equal(t, summary.AddedArticles, articles)
+	assert.Equal(t, 1, begins)
+	assert.Equal(t, 1, commits)
+}
+
+// TestAddFeed_NotifiesListeners covers the single-feed path.
+func TestAddFeed_NotifiesListeners(t *testing.T) {
+	feedContent := `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>F</title>
+<item><title>i</title><link>http://example.com/x</link><guid>x</guid></item>
+</channel></rss>`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, feedContent)
+	}))
+	defer server.Close()
+
+	cfg := config.TestConfig()
+
+	store, err := storage.NewStore(":memory:")
+	require.NoError(t, err)
+	defer store.Close()
+
+	manager := NewManager(store, cfg)
+	manager.SetPermissiveValidation(true) // allow http://127.0.0.1:port
+	rec := &recordingListener{}
+	manager.RegisterDataListener(rec)
+
+	feed, err := manager.AddFeed(server.URL)
+	require.NoError(t, err)
+	require.NotNil(t, feed)
+
+	updates, articles, _, _ := rec.snapshot()
+	assert.Equal(t, 1, updates)
+	assert.Equal(t, 1, articles)
 }
 
 func TestSetForceRefresh(t *testing.T) {
@@ -286,7 +396,7 @@ func TestRefreshAllFeeds_RunsInParallel(t *testing.T) {
 	}
 
 	start := time.Now()
-	_ = manager.RefreshAllFeeds()
+	_, _ = manager.RefreshAllFeeds()
 	elapsed := time.Since(start)
 
 	// Parallel ceiling: 5 fetches × 200ms / 5 workers = ~200ms, plus
@@ -344,7 +454,7 @@ func TestRefreshAllFeedsWithMockServer(t *testing.T) {
 
 	// Test refreshing all feeds - we expect errors since this creates duplicate entries
 	// but we're testing that the concurrent processing works
-	_ = manager.RefreshAllFeeds()
+	_, _ = manager.RefreshAllFeeds()
 	// Don't assert no error since concurrent operations may cause conflicts
 
 	// Verify feeds exist (may be more than 3 due to duplicates from concurrent processing)

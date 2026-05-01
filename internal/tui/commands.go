@@ -1,9 +1,7 @@
 package tui
 
 import (
-	"crypto/sha256"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
@@ -114,53 +112,14 @@ func (a *App) addFeed(url string) tea.Cmd {
 			url = "https://" + url
 		}
 
-		feedID := fmt.Sprintf("%x", sha256.Sum256([]byte(url)))
-
-		newFeed := &storage.Feed{
-			ID:  feedID,
-			URL: url,
-		}
-
-		resp, updated, err := a.fetcher.Fetch(newFeed)
+		newFeed, err := a.manager.AddFeed(url)
 		if err != nil {
-			return feedAddedMsg{err: wrapErr("fetch feed", err)}
+			return feedAddedMsg{err: wrapErr("add feed", err)}
 		}
 
-		if !updated || resp == nil {
-			return feedAddedMsg{err: fmt.Errorf("feed not modified")}
-		}
-
-		defer resp.Body.Close()
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return feedAddedMsg{err: wrapErr("read feed response", err)}
-		}
-
-		articles, err := a.parser.Parse(strings.NewReader(string(body)), feedID)
-		if err != nil {
-			return feedAddedMsg{err: wrapErr("parse feed", err)}
-		}
-
-		if len(articles) > 0 && articles[0].Title != "" {
-			newFeed.Title = extractFeedTitle(articles)
-		}
-
-		a.fetcher.UpdateFeedMetadata(newFeed, resp)
-
-		if err := retryOperation(func() error { return a.store.SaveFeed(newFeed) }); err != nil {
-			return feedAddedMsg{err: wrapErr("save feed", err)}
-		}
-
-		if err := retryOperation(func() error { return a.store.SaveArticles(articles) }); err != nil {
-			return feedAddedMsg{err: wrapErr("save articles", err)}
-		}
-
-		// Notify search engine to index the new feed and articles
-		if ul, ok := a.searchEngine.(search.UpdateListener); ok {
-			ul.OnDataUpdated(newFeed, articles)
-		}
-
+		// Pull article count from the store; the manager has already
+		// persisted them and notified search-index listeners.
+		articles, _ := a.store.GetArticles(newFeed.ID, 0)
 		return feedAddedMsg{err: nil, added: len(articles), title: newFeed.Title}
 	}
 }
@@ -189,65 +148,8 @@ func (a *App) renameFeed(newTitle string) tea.Cmd {
 
 func (a *App) refreshFeeds() tea.Cmd {
 	return func() tea.Msg {
-		feeds, err := a.store.GetAllFeeds()
-		if err != nil {
-			return errorMsg{err: err}
-		}
+		summary, _ := a.manager.RefreshAllFeeds()
 
-		updatedFeeds := 0
-		addedArticles := 0
-		fetchErrors := 0
-
-		// If the search engine supports batch updates, begin a batch
-		if bi, ok := a.searchEngine.(search.BatchIndexer); ok {
-			bi.BeginBatch()
-			defer bi.CommitBatch()
-		}
-		for _, feed := range feeds {
-			resp, updated, fetchErr := a.fetcher.Fetch(feed)
-			if fetchErr != nil || !updated || resp == nil {
-				if fetchErr != nil {
-					fetchErrors++
-				}
-				continue
-			}
-
-			func() {
-				defer resp.Body.Close()
-
-				body, readErr := io.ReadAll(resp.Body)
-				if readErr != nil {
-					fetchErrors++
-					return
-				}
-
-				articles, parseErr := a.parser.Parse(strings.NewReader(string(body)), feed.ID)
-				if parseErr != nil {
-					fetchErrors++
-					return
-				}
-
-				a.fetcher.UpdateFeedMetadata(feed, resp)
-				if saveErr := retryOperation(func() error { return a.store.SaveFeed(feed) }); saveErr != nil {
-					fetchErrors++
-					return
-				}
-				if saveErr := retryOperation(func() error { return a.store.SaveArticles(articles) }); saveErr != nil {
-					fetchErrors++
-					return
-				}
-
-				// Notify search engine about updated feed and articles
-				if ul, ok := a.searchEngine.(search.UpdateListener); ok {
-					ul.OnDataUpdated(feed, articles)
-				}
-
-				updatedFeeds++
-				addedArticles += len(articles)
-			}()
-		}
-
-		// Try to fetch doc count from search engine (if available)
 		docCount := -1
 		if ds, ok := a.searchEngine.(search.DebugStatser); ok {
 			if n, err := ds.DocCount(); err == nil {
@@ -255,9 +157,12 @@ func (a *App) refreshFeeds() tea.Cmd {
 			}
 		}
 
-		// Reload feeds and return a summary message
-		_ = a.loadFeeds()()
-		return refreshDoneMsg{updatedFeeds: updatedFeeds, addedArticles: addedArticles, errors: fetchErrors, docCount: docCount}
+		return refreshDoneMsg{
+			updatedFeeds:  summary.UpdatedFeeds,
+			addedArticles: summary.AddedArticles,
+			errors:        len(summary.Errors),
+			docCount:      docCount,
+		}
 	}
 }
 
@@ -362,12 +267,3 @@ func retryOperation(operation func() error) error {
 	return lastErr
 }
 
-func extractFeedTitle(articles []*storage.Article) string {
-	if len(articles) > 0 {
-		parts := strings.SplitN(articles[0].URL, "/", 4)
-		if len(parts) >= 3 {
-			return parts[2]
-		}
-	}
-	return "Unknown Feed"
-}
