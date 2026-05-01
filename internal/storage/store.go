@@ -39,6 +39,38 @@ func makeDateIndexKey(published time.Time, articleID string) []byte {
 	return key
 }
 
+// seekDateCursor positions a date-index cursor just past the entry identified
+// by the given article ID. The cursor is encoded as the article ID so callers
+// can pass back any article from a previous page; we look up the article's
+// Published timestamp once to reconstruct the composite index key, then use
+// bbolt's B+tree Seek (O(log n)) instead of a linear scan from First().
+//
+// Returns (nil, nil) when Seek runs off the end. If cursor is empty or the
+// referenced article has been deleted, returns the first entry.
+func seekDateCursor(ab *bolt.Bucket, dateCursor *bolt.Cursor, cursor string) ([]byte, []byte) {
+	if cursor == "" {
+		return dateCursor.First()
+	}
+	raw := ab.Get([]byte(cursor))
+	if raw == nil {
+		return dateCursor.First()
+	}
+	var art Article
+	if err := json.Unmarshal(raw, &art); err != nil {
+		return dateCursor.First()
+	}
+	key := makeDateIndexKey(art.Published, art.ID)
+	k, articleID := dateCursor.Seek(key)
+	if k == nil {
+		return nil, nil
+	}
+	// Seek lands on the cursor entry itself when present; advance past it.
+	if bytes.Equal(k, key) {
+		k, articleID = dateCursor.Next()
+	}
+	return k, articleID
+}
+
 func NewStore(dbPath string) (*Store, error) {
 	db, err := bolt.Open(dbPath, 0o600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
@@ -218,28 +250,7 @@ func (s *Store) getArticlesForFeedOptimized(tx *bolt.Tx, ab *bolt.Bucket, feedID
 	dateCursor := dateIdx.Cursor()
 	count := 0
 
-	// Position cursor after the last seen article if cursor is provided
-	var k, articleID []byte
-	if cursor != "" {
-		// Find the cursor position
-		found := false
-		for k, articleID = dateCursor.First(); k != nil; k, articleID = dateCursor.Next() {
-			if string(articleID) == cursor {
-				found = true
-				break
-			}
-		}
-		if found {
-			// Move to the next item after cursor
-			k, articleID = dateCursor.Next()
-		} else {
-			// Cursor not found, start from beginning
-			k, articleID = dateCursor.First()
-		}
-	} else {
-		// No cursor, start from beginning
-		k, articleID = dateCursor.First()
-	}
+	k, articleID := seekDateCursor(ab, dateCursor, cursor)
 
 	for ; k != nil && (limit <= 0 || count < limit); k, articleID = dateCursor.Next() {
 		// Check if this article belongs to our target feed
@@ -341,28 +352,7 @@ func (s *Store) getArticlesGlobalOptimized(tx *bolt.Tx, ab *bolt.Bucket, limit i
 	c := dateIdx.Cursor()
 	count := 0
 
-	// Position cursor after the last seen article if cursor is provided
-	var k, articleID []byte
-	if cursor != "" {
-		// Find the cursor position
-		found := false
-		for k, articleID = c.First(); k != nil; k, articleID = c.Next() {
-			if string(articleID) == cursor {
-				found = true
-				break
-			}
-		}
-		if found {
-			// Move to the next item after cursor
-			k, articleID = c.Next()
-		} else {
-			// Cursor not found, start from beginning
-			k, articleID = c.First()
-		}
-	} else {
-		// No cursor, start from beginning
-		k, articleID = c.First()
-	}
+	k, articleID := seekDateCursor(ab, c, cursor)
 
 	for ; k != nil && (limit <= 0 || count < limit); k, articleID = c.Next() {
 		v := ab.Get(articleID)
