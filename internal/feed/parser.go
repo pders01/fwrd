@@ -77,18 +77,21 @@ func extractMediaURLs(item *gofeed.Item) []string {
 	return uniqueStrings(urls)
 }
 
+var (
+	imgSrcRegex   = regexp.MustCompile(`<img[^>]+src=["']([^"']+)["']`)
+	videoSrcRegex = regexp.MustCompile(`<video[^>]+src=["']([^"']+)["']`)
+)
+
 func findMediaInHTML(html string) []string {
 	var urls []string
 
-	imgRegex := regexp.MustCompile(`<img[^>]+src=["']([^"']+)["']`)
-	for _, match := range imgRegex.FindAllStringSubmatch(html, -1) {
+	for _, match := range imgSrcRegex.FindAllStringSubmatch(html, -1) {
 		if len(match) > 1 {
 			urls = append(urls, match[1])
 		}
 	}
 
-	videoRegex := regexp.MustCompile(`<video[^>]+src=["']([^"']+)["']`)
-	for _, match := range videoRegex.FindAllStringSubmatch(html, -1) {
+	for _, match := range videoSrcRegex.FindAllStringSubmatch(html, -1) {
 		if len(match) > 1 {
 			urls = append(urls, match[1])
 		}
