@@ -85,10 +85,10 @@ func (a *App) renderArticle(article *storage.Article) tea.Cmd {
 		// Apply content size limits with appropriate maximums
 		if article.Content != "" {
 			safeContent := sanitizeAndLimitContent(article.Content, maxContentSize)
-			content.WriteString(safeContent)
+			content.WriteString(htmlToMarkdown(safeContent))
 		} else {
 			safeDescription := sanitizeAndLimitContent(article.Description, maxDescriptionSize)
-			content.WriteString(safeDescription)
+			content.WriteString(htmlToMarkdown(safeDescription))
 		}
 
 		if rerr != nil {
