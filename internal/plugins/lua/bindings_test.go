@@ -11,8 +11,6 @@ import (
 	gluapkg "github.com/yuin/gopher-lua"
 )
 
-var fmtSprintf = fmt.Sprintf
-
 func TestRegexMatch(t *testing.T) {
 	L := NewSandboxedState(Bindings{})
 	defer L.Close()
@@ -87,12 +85,12 @@ type captureLogger struct {
 func (c *captureLogger) Infof(format string, args ...any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.infos = append(c.infos, fmtSprintf(format, args...))
+	c.infos = append(c.infos, fmt.Sprintf(format, args...))
 }
 func (c *captureLogger) Warnf(format string, args ...any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.warnings = append(c.warnings, fmtSprintf(format, args...))
+	c.warnings = append(c.warnings, fmt.Sprintf(format, args...))
 }
 
 func TestLogBindings(t *testing.T) {
