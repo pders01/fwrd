@@ -1,0 +1,103 @@
+package lua
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestEnsureDefaultsSeedsOnce(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "plugins")
+
+	if err := EnsureDefaults(dir); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+
+	for _, name := range []string{"reddit.lua", "youtube.lua"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("expected %s seeded: %v", name, err)
+		}
+	}
+
+	// Second run: dir exists, must not overwrite.
+	marker := filepath.Join(dir, "reddit.lua")
+	if err := os.WriteFile(marker, []byte("-- user edit"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureDefaults(dir); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	got, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "-- user edit" {
+		t.Errorf("EnsureDefaults overwrote user-edited file: %q", got)
+	}
+}
+
+func TestRedditBuiltinEnhances(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "plugins")
+	if err := EnsureDefaults(tmp); err != nil {
+		t.Fatal(err)
+	}
+
+	plugin, err := LoadFile(filepath.Join(tmp, "reddit.lua"), Bindings{})
+	if err != nil {
+		t.Fatalf("load reddit.lua: %v", err)
+	}
+	defer plugin.Close()
+
+	if !plugin.CanHandle("https://www.reddit.com/r/golang/") {
+		t.Fatal("reddit plugin should handle reddit.com/r/...")
+	}
+	if plugin.CanHandle("https://example.com") {
+		t.Fatal("reddit plugin should not handle non-reddit URLs")
+	}
+
+	info, err := plugin.EnhanceFeed(context.Background(), "https://www.reddit.com/r/golang/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.FeedURL != "https://www.reddit.com/r/golang.rss" {
+		t.Errorf("feed url: %q", info.FeedURL)
+	}
+	if !strings.Contains(info.Title, "r/golang") {
+		t.Errorf("title: %q", info.Title)
+	}
+	if info.Metadata["subreddit"] != "golang" {
+		t.Errorf("metadata: %v", info.Metadata)
+	}
+}
+
+func TestYouTubeBuiltinDirectChannelID(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "plugins")
+	if err := EnsureDefaults(tmp); err != nil {
+		t.Fatal(err)
+	}
+
+	plugin, err := LoadFile(filepath.Join(tmp, "youtube.lua"), Bindings{})
+	if err != nil {
+		t.Fatalf("load youtube.lua: %v", err)
+	}
+	defer plugin.Close()
+
+	const url = "https://www.youtube.com/channel/UCabcdef123456"
+	if !plugin.CanHandle(url) {
+		t.Fatal("youtube plugin should handle channel URL")
+	}
+
+	info, err := plugin.EnhanceFeed(context.Background(), url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(info.FeedURL, "channel_id=UCabcdef123456") {
+		t.Errorf("feed url: %q", info.FeedURL)
+	}
+	if info.Metadata["channel_id"] != "UCabcdef123456" {
+		t.Errorf("metadata: %v", info.Metadata)
+	}
+}

@@ -193,6 +193,9 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 	}
 
 	pluginDir := pluginlua.DefaultPluginDir()
+	if err := pluginlua.EnsureDefaults(pluginDir); err != nil {
+		debuglog.Errorf("seeding default lua plugins in %s: %v", pluginDir, err)
+	}
 	bindings := pluginlua.Bindings{
 		HTTPClient: app.manager.PluginHTTPClient(),
 		Logger:     debugLogger{},
