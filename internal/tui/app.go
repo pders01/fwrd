@@ -148,10 +148,10 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 	if idxPath == "" {
 		// Fallback: derive from DB path
 		dbPath := cfg.Database.Path
-		switch {
-		case dbPath == "":
+		switch dbPath {
+		case "":
 			idxPath = "fwrd.bleve"
-		case dbPath == storage.MemoryPath:
+		case storage.MemoryPath:
 			// Tests pass storage.MemoryPath; allocate a unique bleve
 			// index path so parallel test binaries don't collide.
 			idxPath = filepath.Join(os.TempDir(), fmt.Sprintf("fwrd-index-%d.bleve", time.Now().UnixNano()))
@@ -202,18 +202,15 @@ func (a *App) SetForceRefresh(force bool) {
 }
 
 func (a *App) getRenderer() (*glamour.TermRenderer, error) {
-	wordWrapWidth := (a.width * 9) / 10
-	if wordWrapWidth > MaxReadableWidth {
-		wordWrapWidth = MaxReadableWidth // maximum for readability
-	}
-	if wordWrapWidth < MinReadableWidth {
-		wordWrapWidth = MinReadableWidth // minimum for readability
-	}
+	wordWrapWidth := max(
+		// maximum for readability
+		min((a.width*9)/10,
+
+			MaxReadableWidth),
+		// minimum for readability
+		MinReadableWidth)
 	if a.width < NarrowScreenThreshold {
-		wordWrapWidth = getContentWidth(a.width)
-		if wordWrapWidth < MinNarrowWidth {
-			wordWrapWidth = MinNarrowWidth
-		}
+		wordWrapWidth = max(getContentWidth(a.width), MinNarrowWidth)
 	}
 
 	if a.glamourRenderer == nil || abs(a.rendererWidth-wordWrapWidth) > RendererWidthTolerance {
@@ -291,10 +288,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.feedList.SetSize(msg.Width, msg.Height-5)
 		a.articleList.SetSize(msg.Width, msg.Height-5)
 		// Search view layout requires 10 lines for UI chrome
-		searchListHeight := msg.Height - 10
-		if searchListHeight < 5 {
-			searchListHeight = 5 // Minimum height
-		}
+		searchListHeight := max(msg.Height-10,
+			// Minimum height
+			5)
 		a.searchList.SetSize(msg.Width, searchListHeight)
 		a.mediaList.SetSize(msg.Width, msg.Height-3)
 		a.viewport.Width = msg.Width
@@ -591,10 +587,7 @@ func (a *App) View() string {
 	}
 
 	customStatus := a.getCustomStatusBar()
-	separatorWidth := getSeparatorWidth(a.width)
-	if separatorWidth < 0 {
-		separatorWidth = 0
-	}
+	separatorWidth := max(getSeparatorWidth(a.width), 0)
 	separator := SeparatorStyle.Render("─" + strings.Repeat("─", separatorWidth))
 
 	return lipgloss.JoinVertical(lipgloss.Top, content, separator, customStatus)
@@ -750,23 +743,31 @@ func (i articleItem) FilterValue() string { return i.article.Title }
 type searchResultItem struct {
 	feed      *storage.Feed
 	article   *storage.Article
+	icons     *IconSet
 	isArticle bool
-	icons     IconSet
 }
 
 func (i searchResultItem) Title() string {
+	icons := i.iconSet()
 	if i.isArticle {
 		if i.article.Read {
-			return ReadItemStyle.Render(withIcon(i.icons.Article, i.article.Title))
+			return ReadItemStyle.Render(withIcon(icons.Article, i.article.Title))
 		}
-		marker := i.icons.Article
+		marker := icons.Article
 		if marker == "" {
-			marker = i.icons.Unread
+			marker = icons.Unread
 		}
 		return UnreadItemStyle.Render(withIcon(marker, i.article.Title))
 	}
 
-	return FeedTitleStyle.Render(withIcon(i.icons.Feed, i.feed.Title))
+	return FeedTitleStyle.Render(withIcon(icons.Feed, i.feed.Title))
+}
+
+func (i searchResultItem) iconSet() IconSet {
+	if i.icons != nil {
+		return *i.icons
+	}
+	return unicodeIcons
 }
 
 func (i searchResultItem) Description() string {
@@ -809,23 +810,27 @@ func (i searchResultItem) FilterValue() string {
 
 type mediaItem struct {
 	url       string
+	icons     *IconSet
 	mediaType media.Type
 	index     int
 	total     int
-	icons     IconSet
 }
 
 func (i mediaItem) Title() string {
+	icons := unicodeIcons
+	if i.icons != nil {
+		icons = *i.icons
+	}
 	var typeStr string
 	switch i.mediaType {
 	case media.TypeVideo:
-		typeStr = withIcon(i.icons.Video, "Video")
+		typeStr = withIcon(icons.Video, "Video")
 	case media.TypeImage:
-		typeStr = withIcon(i.icons.Image, "Image")
+		typeStr = withIcon(icons.Image, "Image")
 	case media.TypeAudio:
-		typeStr = withIcon(i.icons.Audio, "Audio")
+		typeStr = withIcon(icons.Audio, "Audio")
 	case media.TypePDF:
-		typeStr = withIcon(i.icons.PDF, "PDF")
+		typeStr = withIcon(icons.PDF, "PDF")
 	default:
 		typeStr = "Unknown"
 	}
