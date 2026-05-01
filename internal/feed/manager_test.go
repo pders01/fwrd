@@ -122,7 +122,7 @@ func TestRefreshAllFeeds_NotifiesListeners(t *testing.T) {
 	cfg := config.TestConfig()
 	cfg.Feed.RefreshInterval = 1 * time.Millisecond
 
-	store, err := storage.NewStore(t.TempDir() + "/store.db")
+	store, err := storage.NewStore(":memory:")
 	require.NoError(t, err)
 	defer store.Close()
 

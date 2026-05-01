@@ -449,3 +449,64 @@ func BenchmarkStore_CursorPagination_DeepPage(b *testing.B) {
 		}
 	}
 }
+
+// TestNewStore_MemoryPath_IsolatedAndCleaned verifies the MemoryPath
+// sentinel: each call gets its own backing file (no cross-store
+// leakage) and the temp file is removed when Close runs. Prior to the
+// fix, NewStore(":memory:") opened a literal ":memory:" file in the
+// working directory and shared state across every caller.
+func TestNewStore_MemoryPath_IsolatedAndCleaned(t *testing.T) {
+	// Run from a clean CWD so we can detect leaks.
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	scratch := t.TempDir()
+	if err := os.Chdir(scratch); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	a, err := NewStore(MemoryPath)
+	if err != nil {
+		t.Fatalf("NewStore(MemoryPath): %v", err)
+	}
+	b, err := NewStore(MemoryPath)
+	if err != nil {
+		t.Fatalf("NewStore(MemoryPath) second: %v", err)
+	}
+
+	if a.tempPath == "" || b.tempPath == "" {
+		t.Fatal("expected both stores to have a tempPath set")
+	}
+	if a.tempPath == b.tempPath {
+		t.Fatalf("two MemoryPath stores share a path: %s", a.tempPath)
+	}
+
+	// No literal ":memory:" file should appear in CWD.
+	if _, err := os.Stat(filepath.Join(scratch, MemoryPath)); !os.IsNotExist(err) {
+		t.Fatalf("expected no literal %q file in CWD, stat err: %v", MemoryPath, err)
+	}
+
+	// Isolation: a feed saved in store a must not be visible from b.
+	if err := a.SaveFeed(&Feed{ID: "iso", URL: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	feeds, err := b.GetAllFeeds()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(feeds) != 0 {
+		t.Fatalf("store b sees %d feed(s) from store a — not isolated", len(feeds))
+	}
+
+	// Close cleans up the backing file.
+	pathA := a.tempPath
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(pathA); !os.IsNotExist(err) {
+		t.Fatalf("temp file %q persisted after Close (err=%v)", pathA, err)
+	}
+	_ = b.Close()
+}
