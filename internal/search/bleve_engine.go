@@ -392,7 +392,7 @@ func (b *bleveEngine) OnDataUpdated(feed *storage.Feed, articles []*storage.Arti
 		debuglog.Infof("Processing %d articles in chunks to prevent OOM", len(articles))
 	}
 
-	for i, a := range articles {
+	for _, a := range articles {
 		_ = batch.Index(docIDForArticle(a.ID), map[string]any{
 			"type":        "article",
 			"feed_id":     a.FeedID,
@@ -404,16 +404,17 @@ func (b *bleveEngine) OnDataUpdated(feed *storage.Feed, articles []*storage.Arti
 		})
 		batchCount++
 
-		// If not using batch mode and batch is getting large, commit it
+		// If not using batch mode and batch is getting large, commit it.
+		// Always reset to a fresh batch after commit so the post-loop
+		// final-flush path (below) is the single source of truth for
+		// flushing leftovers — never a re-commit of an already-flushed
+		// batch.
 		if b.pending == nil && batchCount >= maxBatchSize {
 			if err := b.commitBatch(batch); err != nil {
 				debuglog.Errorf("Error committing chunked batch in OnDataUpdated: %v", err)
 			}
-			// Start a new batch for remaining articles
-			if i < len(articles)-1 {
-				batch = b.idx.NewBatch()
-				batchCount = 0
-			}
+			batch = b.idx.NewBatch()
+			batchCount = 0
 		}
 	}
 
@@ -479,7 +480,9 @@ var _ interface {
 func (b *bleveEngine) BeginBatch() { b.pending = b.idx.NewBatch() }
 func (b *bleveEngine) CommitBatch() {
 	if b.pending != nil {
-		_ = b.idx.Batch(b.pending)
+		if err := b.idx.Batch(b.pending); err != nil {
+			debuglog.Errorf("Error committing batch in CommitBatch: %v", err)
+		}
 		b.pending = nil
 	}
 }
