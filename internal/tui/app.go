@@ -344,7 +344,6 @@ func (a *App) getRenderer() (*glamour.TermRenderer, error) {
 	return a.glamourRenderer, nil
 }
 
-
 func abs(n int) int {
 	if n < 0 {
 		return -n
