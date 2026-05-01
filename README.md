@@ -11,6 +11,7 @@ A fast, terminal-based RSS feed aggregator with full-text search capabilities, b
 - **Security-focused**: URL validation, path sanitization, content size limits
 - **Media integration**: Detects media types and opens in appropriate applications
 - **Local storage**: BoltDB-backed offline reading with optimized indexing
+- **Lua scriptable plugins**: Drop a `.lua` file into `~/.config/fwrd/plugins/` to add a feed-URL handler — no recompile, hot-reload included
 - **Debug logging**: Structured logging system with configurable levels
 - **Cross-platform**: Builds for Linux, macOS, Windows (amd64, arm64, arm)
 
@@ -67,6 +68,9 @@ Download the appropriate binary for your platform from the [latest release](http
 ./fwrd feed refresh
 ./fwrd feed delete <feed-id>
 
+# Plugin inspection
+./fwrd plugins list
+
 # Get help for any command
 ./fwrd --help
 ./fwrd feed --help
@@ -94,6 +98,68 @@ Note: The modifier key defaults to `ctrl` and can be changed in config.
 Status Bar
 
 - The bottom status bar provides brief messages and a subtle spinner during long‑running actions like feed refresh or article loading.
+
+## Plugins
+
+fwrd ships with a Lua scriptable plugin runtime. Plugins enhance feed
+URLs at add-time — for example, turning `https://reddit.com/r/golang`
+into the canonical RSS endpoint, or resolving a YouTube `@handle` to
+the channel's feed.
+
+### Where plugins live
+
+```
+~/.config/fwrd/plugins/
+  reddit.lua      # shipped default
+  youtube.lua     # shipped default
+  yourplugin.lua  # add your own
+```
+
+The directory is seeded with the bundled defaults on first run. fwrd
+hot-reloads the directory: editing a `.lua` file picks up changes
+without a restart, and deleting a file unregisters the plugin.
+
+### Plugin shape
+
+Each script returns a table with four required fields:
+
+```lua
+return {
+  name = "example",
+  priority = 50,                          -- higher wins when multiple plugins match
+  can_handle = function(url)
+    return string.find(url, "://example.com/", 1, true) ~= nil
+  end,
+  enhance = function(url)
+    return {
+      feed_url    = url .. "/rss",
+      title       = "Example",
+      description = "...",
+      metadata    = { kind = "blog" },    -- optional, string-keyed string values
+    }
+  end,
+}
+```
+
+### Sandbox surface
+
+Scripts run on a sandboxed gopher-lua runtime:
+
+- Allowed stdlib: `string.*`, `math.*`, `table.*`
+- Removed: `io`, `os`, `package`, `debug`, `load*`, `dofile`,
+  `loadfile`, `require`, `setmetatable`, `getmetatable`, `print`
+- Host bindings:
+  - `http.get(url[, {headers={...}}])` returns `(result, err)` where
+    `result` is `{status, body, headers}`
+  - `json.parse(s)` / `json.encode(v)` return `(value, err)`
+  - `regex.match(pattern, subject)` returns the first capture group
+    (or whole match) using Go RE2 syntax
+  - `log.info(msg)` / `log.warn(msg)` route to fwrd's debug log
+
+A 256 KiB script-size cap and a 30-second per-call timeout (matching
+`AddFeed`) prevent runaway scripts. Plugin HTTP requests share the
+fetcher's User-Agent and timeout so plugin-driven traffic looks like
+fwrd to upstreams.
 
 ## Architecture
 
