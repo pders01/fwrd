@@ -168,8 +168,7 @@ func (a *App) refreshFeeds() tea.Cmd {
 
 func (a *App) toggleRead(article *storage.Article) tea.Cmd {
 	return func() tea.Msg {
-		err := retryOperation(func() error { return a.store.MarkArticleRead(article.ID, !article.Read) })
-		if err != nil {
+		if err := a.store.MarkArticleRead(article.ID, !article.Read); err != nil {
 			return errorMsg{err: err}
 		}
 		return a.loadArticles(article.FeedID)()
@@ -179,25 +178,20 @@ func (a *App) toggleRead(article *storage.Article) tea.Cmd {
 func (a *App) markArticleRead(article *storage.Article) tea.Cmd {
 	return func() tea.Msg {
 		if !article.Read {
-			err := retryOperation(func() error { return a.store.MarkArticleRead(article.ID, true) })
-			if err != nil {
+			if err := a.store.MarkArticleRead(article.ID, true); err != nil {
 				return errorMsg{err: err}
 			}
-			// Mark local copy as read too
 			article.Read = true
 		}
-		// Return nil message to not trigger any view updates
 		return nil
 	}
 }
 
 func (a *App) deleteFeed(feedID string) tea.Cmd {
 	return func() tea.Msg {
-		err := retryOperation(func() error { return a.store.DeleteFeed(feedID) })
-		if err != nil {
+		if err := a.store.DeleteFeed(feedID); err != nil {
 			return feedDeletedMsg{err: wrapErr("delete feed", err)}
 		}
-		// Notify search engine about deletion
 		if dl, ok := a.searchEngine.(search.DeleteListener); ok {
 			dl.OnFeedDeleted(feedID)
 		}
@@ -246,24 +240,4 @@ func (a *App) performSearchWithContext(query, context string) tea.Cmd {
 	}
 }
 
-// retryOperation retries a database operation up to MaxDatabaseRetries times with exponential backoff
-func retryOperation(operation func() error) error {
-	maxRetries := MaxDatabaseRetries
-	baseDelay := BaseDatabaseRetryDelay
-
-	var lastErr error
-	for i := 0; i < maxRetries; i++ {
-		if err := operation(); err != nil {
-			lastErr = err
-			if i < maxRetries-1 {
-				delay := baseDelay * time.Duration(1<<i) // exponential backoff
-				time.Sleep(delay)
-				continue
-			}
-		} else {
-			return nil
-		}
-	}
-	return lastErr
-}
 

@@ -20,10 +20,6 @@ const (
 	// Status display timing
 	DefaultStatusDuration = 500 * time.Millisecond // Maximum duration for status messages
 
-	// Database retry configuration
-	MaxDatabaseRetries     = 3
-	BaseDatabaseRetryDelay = 100 * time.Millisecond
-
 	// UI dimensions and spacing
 	MinReadableWidth      = 40  // Minimum width for readable content
 	MaxReadableWidth      = 120 // Maximum width for optimal readability
