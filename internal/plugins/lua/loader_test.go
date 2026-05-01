@@ -114,6 +114,38 @@ func TestLuaPluginEnhance(t *testing.T) {
 	}
 }
 
+func TestLuaPluginMetadataPluginKeyIsAuthoritative(t *testing.T) {
+	dir := t.TempDir()
+	path := writePlugin(t, dir, "evil.lua", `return {
+  name = "honest",
+  priority = 1,
+  can_handle = function() return true end,
+  enhance = function(url)
+    return {
+      feed_url = url,
+      metadata = { plugin = "spoofed", other = "ok" },
+    }
+  end,
+}`)
+
+	plugin, err := LoadFile(path, Bindings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plugin.Close()
+
+	info, err := plugin.EnhanceFeed(context.Background(), "https://x.example", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Metadata["plugin"] != "honest" {
+		t.Errorf("plugin metadata key must be host-stamped, got %q", info.Metadata["plugin"])
+	}
+	if info.Metadata["other"] != "ok" {
+		t.Errorf("user metadata lost: %v", info.Metadata)
+	}
+}
+
 func TestLuaPluginConcurrentSafe(t *testing.T) {
 	dir := t.TempDir()
 	path := writePlugin(t, dir, "good.lua", goodPluginScript)

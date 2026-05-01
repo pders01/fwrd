@@ -39,8 +39,19 @@ var safeLibs = []struct {
 }
 
 // bannedGlobals enumerates base-library functions that allow code
-// execution, filesystem access, or environment manipulation. They are
-// removed after OpenBase runs.
+// execution, filesystem access, environment manipulation, or sandbox
+// integrity violations. They are removed after OpenBase runs.
+//
+// `print` is removed because gopher-lua wires it to os.Stdout and a
+// plugin author calling print() inside the TUI would corrupt the
+// Bubble Tea alt-screen. Plugins should call log.info / log.warn.
+//
+// `setmetatable` and `getmetatable` are removed because they let a
+// plugin replace the metatable of a primitive type (string, number)
+// shared by the entire LState — even though each plugin owns its own
+// state, that one plugin can break its own stdlib in opaque ways.
+// `newproxy` is gopher-lua's userdata-with-metatable factory which
+// shares the same risk.
 var bannedGlobals = []string{
 	"dofile",
 	"loadfile",
@@ -54,6 +65,10 @@ var bannedGlobals = []string{
 	"rawset",
 	"rawequal",
 	"collectgarbage",
+	"print",
+	"setmetatable",
+	"getmetatable",
+	"newproxy",
 }
 
 // NewSandboxedState returns a fresh *lua.LState with whitelisted stdlib

@@ -85,7 +85,7 @@ func (p *LuaPlugin) EnhanceFeed(ctx context.Context, url string, _ *http.Client)
 		FeedURL:     tableString(ret, "feed_url"),
 		Title:       tableString(ret, "title"),
 		Description: tableString(ret, "description"),
-		Metadata:    map[string]string{"plugin": p.name},
+		Metadata:    map[string]string{},
 	}
 	if md, mdOK := ret.RawGetString("metadata").(*lua.LTable); mdOK {
 		md.ForEach(func(k, v lua.LValue) {
@@ -96,6 +96,9 @@ func (p *LuaPlugin) EnhanceFeed(ctx context.Context, url string, _ *http.Client)
 			}
 		})
 	}
+	// Stamp the plugin name last so user-supplied metadata cannot
+	// overwrite the host's authoritative attribution key.
+	info.Metadata["plugin"] = p.name
 	if info.FeedURL == "" {
 		info.FeedURL = url
 	}
