@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/pders01/fwrd/internal/storage"
@@ -175,12 +176,10 @@ func (e *Engine) searchArticle(feed *storage.Feed, article *storage.Article, ter
 		totalScore += contentScore
 	}
 
-	// Boost recent articles slightly
+	// Boost recent articles slightly so freshness can break ties between
+	// otherwise equal matches without letting age dominate ranking.
 	if !article.Published.IsZero() {
-		// Simple recency boost (max 10% bonus for articles from last week)
-		// This prevents old articles from dominating just due to length
-		recencyBoost := calculateRecencyBoost(article.Published)
-		totalScore *= (1.0 + recencyBoost)
+		totalScore *= 1.0 + calculateRecencyBoost(article.Published)
 	}
 
 	if totalScore > 0 {
@@ -317,9 +316,18 @@ func truncate(text string, maxLen int) string {
 	return text[:maxLen-1] + "…"
 }
 
-// calculateRecencyBoost gives slight preference to newer articles
-func calculateRecencyBoost(_ interface{}) float64 {
-	// Simple implementation - could be enhanced with actual time comparison
-	// For now, return minimal boost to avoid complexity
-	return 0.05 // 5% boost for any dated article
+// recencyWindow caps how old an article can be and still receive any
+// recency boost; older articles get 0.
+const recencyWindow = 7 * 24 * time.Hour
+
+// calculateRecencyBoost returns a multiplicative boost in [0, 0.10]:
+// an article published right now gets +10%; the boost decays linearly
+// to 0 at recencyWindow and stays 0 beyond. Future timestamps (clock
+// skew on the publisher's side) are treated as 0.
+func calculateRecencyBoost(published time.Time) float64 {
+	age := time.Since(published)
+	if age < 0 || age >= recencyWindow {
+		return 0
+	}
+	return 0.10 * (1.0 - float64(age)/float64(recencyWindow))
 }
