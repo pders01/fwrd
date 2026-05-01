@@ -53,19 +53,23 @@ func makeDateIndexKey(published time.Time, articleID string) []byte {
 // Published timestamp once to reconstruct the composite index key, then use
 // bbolt's B+tree Seek (O(log n)) instead of a linear scan from First().
 //
-// Returns (nil, nil) when Seek runs off the end. If cursor is empty or the
-// referenced article has been deleted, returns the first entry.
+// Returns (nil, nil) when the cursor article has been deleted or when Seek
+// runs off the end. The deletion case is treated as "no more results" so a
+// concurrent DeleteFeed cannot silently restart pagination at page 1 for
+// callers that hold a stale cursor.
+//
+// Pass cursor == "" to start from the first entry.
 func seekDateCursor(ab *bolt.Bucket, dateCursor *bolt.Cursor, cursor string) (key, articleID []byte) {
 	if cursor == "" {
 		return dateCursor.First()
 	}
 	raw := ab.Get([]byte(cursor))
 	if raw == nil {
-		return dateCursor.First()
+		return nil, nil
 	}
 	var art Article
 	if err := json.Unmarshal(raw, &art); err != nil {
-		return dateCursor.First()
+		return nil, nil
 	}
 	want := makeDateIndexKey(art.Published, art.ID)
 	key, articleID = dateCursor.Seek(want)
@@ -246,8 +250,12 @@ func (s *Store) GetArticlesWithCursor(feedID string, limit int, cursor string) (
 		}
 
 		if feedID != "" {
-			// Optimized feed-specific query using date index
-			return s.getArticlesForFeedOptimized(tx, ab, feedID, limit, cursor, &articles)
+			// Feed-scoped query: iterate the feed's own bucket. The
+			// global date index would force us to scan every article
+			// in the database to filter for one feed; the per-feed
+			// bucket is bounded by len(articles_in_feed) and is
+			// strictly cheaper for typical feed sizes.
+			return s.getArticlesForFeed(tx, ab, feedID, limit, cursor, &articles)
 		}
 
 		// No feed specified: use date index for efficient sorted retrieval
@@ -257,64 +265,10 @@ func (s *Store) GetArticlesWithCursor(feedID string, limit int, cursor string) (
 	return articles, err
 }
 
-// getArticlesForFeedOptimized efficiently retrieves articles for a specific feed using the date index
-func (s *Store) getArticlesForFeedOptimized(tx *bolt.Tx, ab *bolt.Bucket, feedID string, limit int, cursor string, articles *[]*Article) error {
-	// First, create a set of article IDs for the target feed for O(1) lookup
-	feedArticleIDs := make(map[string]bool)
-
-	idxRoot := tx.Bucket(articlesByFeedBucket)
-	if idxRoot == nil {
-		return nil // No feed index, no articles
-	}
-
-	fb := idxRoot.Bucket([]byte(feedID))
-	if fb == nil {
-		return nil // Feed not found
-	}
-
-	// Build lookup set of article IDs for this feed
-	c := fb.Cursor()
-	for k, _ := c.First(); k != nil; k, _ = c.Next() {
-		feedArticleIDs[string(k)] = true
-	}
-
-	// Now iterate through date index (newest first) and filter by feed
-	dateIdx := tx.Bucket(articlesByDateBucket)
-	if dateIdx == nil {
-		// Fallback: collect all articles for feed and sort manually
-		return s.getArticlesForFeedFallback(tx, ab, feedID, limit, cursor, articles)
-	}
-
-	dateCursor := dateIdx.Cursor()
-	count := 0
-
-	k, articleID := seekDateCursor(ab, dateCursor, cursor)
-
-	for ; k != nil && (limit <= 0 || count < limit); k, articleID = dateCursor.Next() {
-		// Check if this article belongs to our target feed
-		if !feedArticleIDs[string(articleID)] {
-			continue
-		}
-
-		v := ab.Get(articleID)
-		if v == nil {
-			continue
-		}
-
-		var article Article
-		if err := json.Unmarshal(v, &article); err != nil {
-			continue
-		}
-
-		*articles = append(*articles, &article)
-		count++
-	}
-
-	return nil
-}
-
-// getArticlesForFeedFallback handles feed queries when date index is unavailable
-func (s *Store) getArticlesForFeedFallback(tx *bolt.Tx, ab *bolt.Bucket, feedID string, limit int, cursor string, articles *[]*Article) error {
+// getArticlesForFeed collects all articles in feedID's per-feed bucket,
+// sorts them by Published descending, then applies cursor + limit. The
+// scan is O(len(feed)) regardless of how many other feeds exist.
+func (s *Store) getArticlesForFeed(tx *bolt.Tx, ab *bolt.Bucket, feedID string, limit int, cursor string, articles *[]*Article) error {
 	idxRoot := tx.Bucket(articlesByFeedBucket)
 	if idxRoot == nil {
 		return nil
