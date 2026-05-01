@@ -51,6 +51,13 @@ func sanitizeAndLimitContent(content string, maxSize int) string {
 }
 
 func (a *App) renderArticle(article *storage.Article) tea.Cmd {
+	// Resolve the renderer on the calling goroutine (Bubble Tea's
+	// main goroutine, since renderArticle runs from Update). The
+	// returned closure runs in a tea.Cmd goroutine and must not touch
+	// App fields concurrently with Update — capturing r and rerr by
+	// value avoids a race against tea.WindowSizeMsg handling.
+	r, rerr := a.getRenderer()
+	store := a.store
 	return func() tea.Msg {
 		var content strings.Builder
 
@@ -84,10 +91,8 @@ func (a *App) renderArticle(article *storage.Article) tea.Cmd {
 			content.WriteString(safeDescription)
 		}
 
-		// Use cached renderer for better performance
-		r, err := a.getRenderer()
-		if err != nil {
-			return articleRenderedMsg{content: "Error initializing renderer: " + err.Error()}
+		if rerr != nil {
+			return articleRenderedMsg{content: "Error initializing renderer: " + rerr.Error()}
 		}
 
 		rendered, err := r.Render(content.String())
@@ -97,7 +102,7 @@ func (a *App) renderArticle(article *storage.Article) tea.Cmd {
 			return articleRenderedMsg{content: fmt.Sprintf("# Error\n\nFailed to render article: %s\n\nPress Escape to go back.", err.Error())}
 		}
 
-		if err := a.store.MarkArticleRead(article.ID, true); err != nil {
+		if err := store.MarkArticleRead(article.ID, true); err != nil {
 			_ = err // Explicitly ignore error
 		}
 
