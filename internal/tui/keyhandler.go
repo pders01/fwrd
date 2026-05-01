@@ -473,8 +473,7 @@ func (kh *KeyHandler) enterSearchMode() (tea.Model, tea.Cmd) {
 	kh.app.searchInput.Focus()
 	kh.app.searchResults = []searchResultItem{}
 	kh.app.searchList.SetItems([]list.Item{})
-	// Debug: show which search engine is active and doc count if available
-	engineName := fmt.Sprintf("%T", kh.app.searchEngine)
+	engineName := kh.app.searchEngineType
 	if ds, ok := kh.app.searchEngine.(search.DebugStatser); ok {
 		if n, err := ds.DocCount(); err == nil {
 			kh.app.setStatus(fmt.Sprintf("Search: %s • idx: %d", engineName, n), 0)
