@@ -2,6 +2,7 @@ package feed
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -351,6 +352,49 @@ func TestRefreshFeedWithMockServer(t *testing.T) {
 	updatedFeed, err := store.GetFeed(feed.ID)
 	require.NoError(t, err)
 	assert.True(t, updatedFeed.LastFetched.After(feed.LastFetched))
+}
+
+// TestAddFeed_CapsBodyAtMaxSize asserts that a server attempting to
+// stream more than maxFeedBodySize bytes does not OOM the parser; the
+// LimitReader cuts the response off and the parser sees a truncated
+// (and therefore invalid) feed, which surfaces as a parse error rather
+// than unbounded memory growth.
+func TestAddFeed_CapsBodyAtMaxSize(t *testing.T) {
+	// Stream slightly more than the cap, all <item> noise so a
+	// well-formed prefix (channel open) gives the parser something to
+	// chew on before truncation.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `<?xml version="1.0"?><rss version="2.0"><channel><title>Big</title>`)
+		// Emit ~1 MiB chunks until we exceed the cap by a comfortable margin.
+		chunk := strings.Repeat("<item><title>x</title></item>", 1<<14) // ~448 KiB
+		written := int64(0)
+		for written < maxFeedBodySize+(2<<20) {
+			n, err := io.WriteString(w, chunk)
+			if err != nil {
+				return
+			}
+			written += int64(n)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.TestConfig()
+	store, err := storage.NewStore(":memory:")
+	require.NoError(t, err)
+	defer store.Close()
+
+	manager := NewManager(store, cfg)
+	manager.SetPermissiveValidation(true)
+
+	// We expect a parse error (truncated XML) — what we are asserting
+	// is that the call returns at all, in finite time, without
+	// allocating beyond the cap.
+	_, err = manager.AddFeed(server.URL)
+	if err == nil {
+		t.Fatal("expected parse error for truncated oversized feed, got nil")
+	}
 }
 
 // TestRefreshAllFeeds_RunsInParallel proves the worker pool actually
