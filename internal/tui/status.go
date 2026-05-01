@@ -28,6 +28,21 @@ func MsgResultsCount(n int) string {
 	return fmt.Sprintf("%d results", n)
 }
 
+// MsgThemeApplied describes a glamour style swap. style is the resolved
+// glamour style ("dark" / "light" / NoTTY); pref is the user-facing
+// preference label ("auto" / "light" / "dark").
+func MsgThemeApplied(pref, style string) string {
+	pref = strings.TrimSpace(pref)
+	style = strings.TrimSpace(style)
+	if pref == "" {
+		pref = "auto"
+	}
+	if pref == style || pref == "auto" {
+		return fmt.Sprintf("Theme: %s (%s)", pref, style)
+	}
+	return fmt.Sprintf("Theme: %s", pref)
+}
+
 func MsgRefreshSummary(updatedFeeds, addedArticles, errors, docCount int) string {
 	base := fmt.Sprintf("Refreshed: %d feeds • %d articles", updatedFeeds, addedArticles)
 	if errors > 0 {

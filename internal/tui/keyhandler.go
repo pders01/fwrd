@@ -177,6 +177,10 @@ func (kh *KeyHandler) handleCustomKeys(key string) (tea.Model, tea.Cmd, bool) {
 	case kh.modifierKey + "s":
 		model, cmd := kh.enterSearchMode()
 		return model, cmd, true
+	case kh.modifierKey + "t":
+		kh.app.themePref = nextThemePref(kh.app.themePref)
+		kh.app.signalThemeChange()
+		return kh.app, nil, true
 	}
 
 	// View-specific custom keys

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +17,6 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/debuglog"
@@ -27,7 +25,6 @@ import (
 	pluginlua "github.com/pders01/fwrd/internal/plugins/lua"
 	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/storage"
-	"golang.org/x/term"
 )
 
 // debugLogger adapts the package-level debuglog API to plugins/lua's
@@ -71,8 +68,17 @@ type App struct {
 	err              error
 	glamourRenderer  *glamour.TermRenderer
 	rendererWidth    int    // Track the width used for the renderer
-	glamourStyle     string // Pre-resolved style ("dark"/"light") to avoid OSC probe at render time
+	themePref        string // user preference: "auto" / "light" / "dark"
+	glamourStyle     string // Resolved style passed to glamour ("dark"/"light"/NoTTY)
 	loadingArticle   bool   // Track if we're loading an article
+
+	// Theme change plumbing. themeEvents is signaled (without payload)
+	// whenever an external source — SIGUSR1 or the macOS plist watcher —
+	// asks the app to re-resolve. The reader-loop tea.Cmd installed in
+	// Init waits on this channel and emits themeChangedMsg.
+	themeEvents      chan struct{}
+	themeWatchCancel context.CancelFunc
+	themeWatchWG     sync.WaitGroup
 
 	// Debounced search state
 	searchSeq            int
@@ -156,7 +162,9 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 		cameFromSearch:       false,                // Initialize navigation flag
 		searchResults:        []searchResultItem{}, // Initialize empty search results
 		searchDebounceMillis: 200,
-		glamourStyle:         resolveGlamourStyle(),
+		themePref:            cfg.UI.Theme,
+		glamourStyle:         resolveGlamourStyle(cfg.UI.Theme),
+		themeEvents:          make(chan struct{}, 1),
 		icons:                NewIconSet(cfg.UI.Icons),
 	}
 
@@ -258,8 +266,56 @@ func (a *App) Close() {
 			a.pluginWatcherCancel()
 		}
 		a.pluginWatcherWG.Wait()
+		if a.themeWatchCancel != nil {
+			a.themeWatchCancel()
+		}
+		a.themeWatchWG.Wait()
 	})
 }
+
+// applyResolvedStyle re-resolves the glamour style from the current
+// preference and invalidates the renderer cache so the next render
+// rebuilds with the new style. Returns true when the style actually
+// changed.
+func (a *App) applyResolvedStyle() bool {
+	next := resolveGlamourStyle(a.themePref)
+	if next == a.glamourStyle {
+		return false
+	}
+	a.glamourStyle = next
+	a.glamourRenderer = nil
+	return true
+}
+
+// signalThemeChange wakes the watcher reader without blocking. The
+// channel is buffered to one slot so coalesced bursts (e.g. a flurry
+// of plist writes) collapse into a single re-resolve.
+func (a *App) signalThemeChange() {
+	if a.themeEvents == nil {
+		return
+	}
+	select {
+	case a.themeEvents <- struct{}{}:
+	default:
+	}
+}
+
+// waitThemeChange returns a tea.Cmd that blocks on the next theme
+// event and emits themeChangedMsg. Update re-issues this command after
+// each event so the watcher behaves like a long-lived subscription.
+func (a *App) waitThemeChange() tea.Cmd {
+	return func() tea.Msg {
+		_, ok := <-a.themeEvents
+		if !ok {
+			return nil
+		}
+		return themeChangedMsg{}
+	}
+}
+
+// themeChangedMsg is dispatched by waitThemeChange when an external
+// signal source (SIGUSR1, macOS plist watcher) has fired.
+type themeChangedMsg struct{}
 
 func (a *App) getRenderer() (*glamour.TermRenderer, error) {
 	wordWrapWidth := max(
@@ -288,34 +344,6 @@ func (a *App) getRenderer() (*glamour.TermRenderer, error) {
 	return a.glamourRenderer, nil
 }
 
-// resolveGlamourStyle picks the renderer style without doing an OSC 11 probe.
-// The probe (termenv.HasDarkBackground) blocks for up to 5s on terminals that
-// don't reply, which is the entirety of the perceived "loading" delay on the
-// first article open. Resolution order:
-//  1. GLAMOUR_STYLE — explicit override.
-//  2. COLORFGBG — set by many terminals (rxvt-derived, konsole, some xterm
-//     configs); the last semicolon-separated field is the background color.
-//     0–6 and 8 are dark, others are light.
-//  3. Default to dark, which is what termenv falls back to after timeout.
-func resolveGlamourStyle() string {
-	if s := os.Getenv("GLAMOUR_STYLE"); s != "" {
-		return s
-	}
-	if !term.IsTerminal(int(os.Stdout.Fd())) {
-		return styles.NoTTYStyle
-	}
-	if fgbg := os.Getenv("COLORFGBG"); strings.Contains(fgbg, ";") {
-		parts := strings.Split(fgbg, ";")
-		if bg, err := strconv.Atoi(parts[len(parts)-1]); err == nil {
-			// xterm/rxvt convention: 0–6 and 8 are dark backgrounds.
-			if bg < 7 || bg == 8 {
-				return styles.DarkStyle
-			}
-			return styles.LightStyle
-		}
-	}
-	return styles.DarkStyle
-}
 
 func abs(n int) int {
 	if n < 0 {
@@ -325,10 +353,30 @@ func abs(n int) int {
 }
 
 func (a *App) Init() tea.Cmd {
+	a.startThemeWatchers()
 	return tea.Batch(
 		a.loadFeeds(),
 		tea.EnterAltScreen,
+		a.waitThemeChange(),
 	)
+}
+
+// startThemeWatchers spawns SIGUSR1 and (on macOS) plist-based theme
+// observers. Both write to a.themeEvents. Cancelling the context shuts
+// them down via Close.
+func (a *App) startThemeWatchers() {
+	ctx, cancel := context.WithCancel(context.Background())
+	a.themeWatchCancel = cancel
+
+	a.themeWatchWG.Add(1)
+	go func() {
+		defer a.themeWatchWG.Done()
+		watchThemeSignal(ctx, a.signalThemeChange)
+	}()
+
+	if err := watchSystemTheme(ctx, &a.themeWatchWG, a.signalThemeChange); err != nil {
+		debuglog.Warnf("system theme watcher disabled: %v", err)
+	}
 }
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -467,6 +515,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.loadingArticle = false
 			a.stopSpinner()
 		}
+
+	case themeChangedMsg:
+		// Re-resolve from current preference; on a real change rebuild
+		// the renderer cache and re-render the current article so the
+		// reader updates without user interaction. Always re-arm the
+		// watcher command — it's a long-lived subscription.
+		if a.applyResolvedStyle() {
+			a.setStatusWithKind(MsgThemeApplied(a.themePref, a.glamourStyle), StatusInfo, 2*time.Second)
+			if a.view == ViewReader && a.currentArticle != nil {
+				cmds = append(cmds, a.renderArticle(a.currentArticle))
+			}
+		}
+		cmds = append(cmds, a.waitThemeChange())
 	}
 
 	switch a.view {
