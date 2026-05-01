@@ -151,8 +151,9 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 		switch {
 		case dbPath == "":
 			idxPath = "fwrd.bleve"
-		case dbPath == ":memory:":
-			// Special case for tests: in-memory DB path
+		case dbPath == storage.MemoryPath:
+			// Tests pass storage.MemoryPath; allocate a unique bleve
+			// index path so parallel test binaries don't collide.
 			idxPath = filepath.Join(os.TempDir(), fmt.Sprintf("fwrd-index-%d.bleve", time.Now().UnixNano()))
 		default:
 			base := strings.TrimSuffix(dbPath, filepath.Ext(dbPath))

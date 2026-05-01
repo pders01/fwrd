@@ -5,12 +5,19 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
 )
+
+// MemoryPath is the sentinel database path that requests an isolated,
+// process-local store backed by a unique temp file. bbolt has no real
+// in-memory mode, so the store creates the file in os.TempDir() and
+// deletes it on Close.
+const MemoryPath = ":memory:"
 
 var (
 	feedsBucket    = []byte("feeds")
@@ -23,7 +30,8 @@ var (
 )
 
 type Store struct {
-	db *bolt.DB
+	db       *bolt.DB
+	tempPath string // non-empty when the store owns a temp file (MemoryPath)
 }
 
 // makeDateIndexKey creates a key for the date index that ensures newest-first ordering
@@ -72,8 +80,28 @@ func seekDateCursor(ab *bolt.Bucket, dateCursor *bolt.Cursor, cursor string) ([]
 }
 
 func NewStore(dbPath string) (*Store, error) {
+	tempPath := ""
+	if dbPath == MemoryPath {
+		// bbolt has no in-memory mode; route the sentinel to a unique
+		// temp file so callers passing MemoryPath always get an
+		// isolated store. Without this, every call would open a
+		// literal file named ":memory:" in the working directory and
+		// share state across the process.
+		f, err := os.CreateTemp("", "fwrd-mem-*.db")
+		if err != nil {
+			return nil, fmt.Errorf("creating temp database: %w", err)
+		}
+		tempPath = f.Name()
+		// bbolt opens the file itself; close our handle so it can.
+		_ = f.Close()
+		dbPath = tempPath
+	}
+
 	db, err := bolt.Open(dbPath, 0o600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
+		if tempPath != "" {
+			_ = os.Remove(tempPath)
+		}
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
 
@@ -87,14 +115,24 @@ func NewStore(dbPath string) (*Store, error) {
 	})
 
 	if err != nil {
+		_ = db.Close()
+		if tempPath != "" {
+			_ = os.Remove(tempPath)
+		}
 		return nil, fmt.Errorf("creating buckets: %w", err)
 	}
 
-	return &Store{db: db}, nil
+	return &Store{db: db, tempPath: tempPath}, nil
 }
 
 func (s *Store) Close() error {
-	return s.db.Close()
+	closeErr := s.db.Close()
+	if s.tempPath != "" {
+		if rmErr := os.Remove(s.tempPath); rmErr != nil && !os.IsNotExist(rmErr) && closeErr == nil {
+			closeErr = rmErr
+		}
+	}
+	return closeErr
 }
 
 func (s *Store) SaveFeed(feed *Feed) error {
