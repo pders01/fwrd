@@ -31,6 +31,9 @@ func (stdLogger) Warnf(format string, args ...any) { log.Printf("WARN  "+format,
 // CLI commands that don't depend on it.
 func loadLuaPlugins(m *feed.Manager) {
 	dir := pluginlua.DefaultPluginDir()
+	if err := pluginlua.EnsureDefaults(dir); err != nil {
+		log.Printf("WARN  seeding default lua plugins in %s: %v", dir, err)
+	}
 	bindings := pluginlua.Bindings{
 		HTTPClient: m.PluginHTTPClient(),
 		Logger:     stdLogger{},
