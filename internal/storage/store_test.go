@@ -305,3 +305,147 @@ func TestStore_GetArticles_Limit(t *testing.T) {
 		t.Errorf("expected 5 articles with limit, got %d", len(limitedArticles))
 	}
 }
+
+// TestStore_CursorPagination_TraversesFullSet verifies that cursor-based
+// pagination walks the entire date index without revisits or gaps. The
+// previous implementation used a linear First/Next scan to locate the
+// cursor, which is correct functionally but O(n) per page.
+func TestStore_CursorPagination_TraversesFullSet(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	const total = 50
+	const pageSize = 7
+	base := time.Now().Add(-time.Duration(total) * time.Minute)
+	articles := make([]*Article, total)
+	for i := range total {
+		articles[i] = &Article{
+			ID:        fmt.Sprintf("a%03d", i),
+			FeedID:    "feed1",
+			Title:     fmt.Sprintf("Article %d", i),
+			Published: base.Add(time.Duration(i) * time.Minute),
+		}
+	}
+	if err := store.SaveArticles(articles); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	for _, feedID := range []string{"feed1", ""} {
+		seen := make(map[string]struct{}, total)
+		cursor := ""
+		for {
+			page, err := store.GetArticlesWithCursor(feedID, pageSize, cursor)
+			if err != nil {
+				t.Fatalf("page (feed=%q): %v", feedID, err)
+			}
+			if len(page) == 0 {
+				break
+			}
+			for _, a := range page {
+				if _, dup := seen[a.ID]; dup {
+					t.Fatalf("article %s visited twice (feed=%q)", a.ID, feedID)
+				}
+				seen[a.ID] = struct{}{}
+			}
+			if len(page) < pageSize {
+				break
+			}
+			cursor = page[len(page)-1].ID
+		}
+		if len(seen) != total {
+			t.Errorf("feed=%q: visited %d articles, want %d", feedID, len(seen), total)
+		}
+	}
+}
+
+// TestStore_CursorPagination_OrderingMatchesNewestFirst verifies that
+// successive pages return articles in strictly descending Published order.
+func TestStore_CursorPagination_OrderingMatchesNewestFirst(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	const total = 25
+	base := time.Now().Add(-time.Duration(total) * time.Minute)
+	articles := make([]*Article, total)
+	for i := range total {
+		articles[i] = &Article{
+			ID:        fmt.Sprintf("a%03d", i),
+			FeedID:    "feed1",
+			Published: base.Add(time.Duration(i) * time.Minute),
+		}
+	}
+	if err := store.SaveArticles(articles); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	var prev time.Time
+	cursor := ""
+	first := true
+	for {
+		page, err := store.GetArticlesWithCursor("feed1", 4, cursor)
+		if err != nil {
+			t.Fatalf("page: %v", err)
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, a := range page {
+			if !first && !prev.After(a.Published) && !prev.Equal(a.Published) {
+				t.Errorf("ordering violation: prev=%v current=%v", prev, a.Published)
+			}
+			prev = a.Published
+			first = false
+		}
+		if len(page) < 4 {
+			break
+		}
+		cursor = page[len(page)-1].ID
+	}
+}
+
+// BenchmarkStore_CursorPagination_DeepPage measures the cost of fetching a
+// late page in a large dataset. With the prior linear-scan cursor lookup
+// this scaled with the offset; with B+tree Seek it should be near-constant
+// per page.
+func BenchmarkStore_CursorPagination_DeepPage(b *testing.B) {
+	store, err := NewStore(filepath.Join(b.TempDir(), "bench.db"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer store.Close()
+
+	const total = 5000
+	base := time.Now().Add(-time.Duration(total) * time.Minute)
+	articles := make([]*Article, total)
+	for i := range total {
+		articles[i] = &Article{
+			ID:        fmt.Sprintf("a%05d", i),
+			FeedID:    "feed1",
+			Published: base.Add(time.Duration(i) * time.Minute),
+		}
+	}
+	if err := store.SaveArticles(articles); err != nil {
+		b.Fatal(err)
+	}
+
+	// Walk to a deep cursor once, outside the timed loop.
+	cursor := ""
+	for steps := 0; steps < (total*9)/10; {
+		page, err := store.GetArticlesWithCursor("feed1", 50, cursor)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(page) == 0 {
+			break
+		}
+		cursor = page[len(page)-1].ID
+		steps += len(page)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := store.GetArticlesWithCursor("feed1", 50, cursor); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
