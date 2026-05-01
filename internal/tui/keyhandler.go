@@ -304,7 +304,6 @@ func (kh *KeyHandler) delegateToCharm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				kh.app.currentArticle = i.article
 				kh.app.cameFromSearch = false
 				kh.app.loadingArticle = true // Set loading flag
-				kh.app.setStatus(MsgLoadingArticle, 0)
 				kh.app.view = ViewReader
 				// Mark article as read when opened
 				markReadCmd := kh.app.markArticleRead(i.article)
@@ -405,7 +404,6 @@ func (kh *KeyHandler) selectSearchResult(result searchResultItem) (tea.Model, te
 		kh.app.currentFeed = result.feed
 		kh.app.cameFromSearch = true
 		kh.app.loadingArticle = true // Set loading flag
-		kh.app.setStatus(MsgLoadingArticle, 0)
 		kh.app.view = ViewReader
 		// Mark article as read when opened
 		markReadCmd := kh.app.markArticleRead(result.article)
