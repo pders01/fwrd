@@ -10,18 +10,17 @@ import (
 	"github.com/pders01/fwrd/internal/storage"
 )
 
-type Parser struct {
-	parser *gofeed.Parser
-}
+// Parser wraps gofeed for our domain types. It holds no shared mutable
+// state; gofeed.Parser mutates internal fields during Parse and is not
+// safe for concurrent use, so we allocate one per call.
+type Parser struct{}
 
 func NewParser() *Parser {
-	return &Parser{
-		parser: gofeed.NewParser(),
-	}
+	return &Parser{}
 }
 
 func (p *Parser) Parse(reader io.Reader, feedID string) ([]*storage.Article, error) {
-	feed, err := p.parser.Parse(reader)
+	feed, err := gofeed.NewParser().Parse(reader)
 	if err != nil {
 		return nil, fmt.Errorf("parsing feed: %w", err)
 	}
