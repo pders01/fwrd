@@ -1,9 +1,11 @@
 package search
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -46,4 +48,58 @@ func TestBleveEngineIndexesAndSearches(t *testing.T) {
 	fi, err := os.Stat(idxPath)
 	require.NoError(t, err)
 	require.True(t, fi.IsDir())
+}
+
+// TestBleveEngineIndexesFeedLargerThanChunkSize seeds a feed with more
+// articles than maxArticlesPerFeed to verify cursor-based chunked indexing
+// terminates and indexes the full set. The previous offset-based loop
+// re-fetched the same first chunk forever for feeds at or above the chunk
+// size.
+func TestBleveEngineIndexesFeedLargerThanChunkSize(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "large.db")
+	store, err := storage.NewStore(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+
+	feed := &storage.Feed{ID: "big", Title: "Big Feed", URL: "https://example.com/big"}
+	require.NoError(t, store.SaveFeed(feed))
+
+	const total = maxArticlesPerFeed + 500 // exceeds one chunk
+	base := time.Now().Add(-time.Duration(total) * time.Minute)
+	arts := make([]*storage.Article, total)
+	for i := range total {
+		arts[i] = &storage.Article{
+			ID:        fmt.Sprintf("a%05d", i),
+			FeedID:    feed.ID,
+			Title:     fmt.Sprintf("article %05d unicornsentinel", i),
+			URL:       fmt.Sprintf("https://example.com/big/%d", i),
+			Published: base.Add(time.Duration(i) * time.Minute),
+		}
+	}
+	require.NoError(t, store.SaveArticles(arts))
+
+	idxPath := filepath.Join(dir, "index.bleve")
+
+	// Guard against regression to infinite loop: bound the indexing time.
+	done := make(chan struct{})
+	var eng Searcher
+	go func() {
+		defer close(done)
+		eng, err = NewBleveEngine(store, idxPath)
+	}()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("NewBleveEngine did not return within 30s — chunked indexing likely looping")
+	}
+	require.NoError(t, err)
+	require.NotNil(t, eng)
+
+	// Sentinel hit-count check: every article carries the unique token
+	// "unicornsentinel". A correctly indexed feed returns the requested
+	// limit; the broken loop only ever indexed the first chunk.
+	res, err := eng.Search("unicornsentinel", total)
+	require.NoError(t, err)
+	require.Equal(t, total, len(res), "expected all articles indexed, got %d", len(res))
 }
