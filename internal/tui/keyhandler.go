@@ -523,6 +523,7 @@ func (kh *KeyHandler) openMediaList() (tea.Model, tea.Cmd) {
 			mediaType: mediaType,
 			index:     i,
 			total:     len(kh.app.currentArticle.MediaURLs),
+			icons:     kh.app.icons,
 		}
 	}
 
