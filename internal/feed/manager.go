@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -15,6 +16,10 @@ import (
 	"github.com/pders01/fwrd/internal/validation"
 )
 
+// Manager orchestrates feed fetch/parse/store. All fields are either
+// immutable after construction or independently goroutine-safe (bbolt for
+// the store, net/http for the fetcher's client). Methods are safe to call
+// from multiple goroutines without external synchronisation.
 type Manager struct {
 	store          *storage.Store
 	fetcher        *Fetcher
@@ -22,7 +27,6 @@ type Manager struct {
 	config         *config.Config
 	urlValidator   *validation.FeedURLValidator
 	pluginRegistry *plugins.Registry
-	mu             sync.RWMutex
 }
 
 func NewManager(store *storage.Store, cfg *config.Config) *Manager {
@@ -62,9 +66,6 @@ func (m *Manager) SetPermissiveValidation(permissive bool) {
 }
 
 func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	// Validate and normalize the URL using comprehensive security checks
 	normalizedURL, err := m.urlValidator.ValidateAndNormalize(url)
 	if err != nil {
@@ -150,9 +151,6 @@ func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
 }
 
 func (m *Manager) RefreshFeed(feedID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	feed, err := m.store.GetFeed(feedID)
 	if err != nil {
 		return fmt.Errorf("getting feed: %w", err)
@@ -246,11 +244,7 @@ func (m *Manager) RefreshAllFeeds() error {
 		errs = append(errs, err)
 	}
 
-	if len(errs) > 0 {
-		return fmt.Errorf("refresh errors: %v", errs)
-	}
-
-	return nil
+	return errors.Join(errs...)
 }
 
 func generateFeedID(url string) string {
