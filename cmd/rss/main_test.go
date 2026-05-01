@@ -9,6 +9,38 @@ import (
 	"testing"
 )
 
+func TestPluginsListCommand(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	t.Setenv("HOME", tmp)
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = old })
+
+	outC := make(chan string)
+	go func() {
+		var buf bytes.Buffer
+		io.Copy(&buf, r)
+		outC <- buf.String()
+	}()
+
+	listPlugins(nil, nil)
+	w.Close()
+	out := <-outC
+
+	if !strings.Contains(out, "reddit") {
+		t.Errorf("expected reddit plugin in output, got: %s", out)
+	}
+	if !strings.Contains(out, "youtube") {
+		t.Errorf("expected youtube plugin in output, got: %s", out)
+	}
+	if !strings.Contains(out, filepath.Join(tmp, "fwrd", "plugins")) {
+		t.Errorf("expected plugin dir path in output, got: %s", out)
+	}
+}
+
 func TestVersionCommand(t *testing.T) {
 	// Capture stdout
 	old := os.Stdout

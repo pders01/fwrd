@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -13,6 +14,7 @@ import (
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/feed"
+	"github.com/pders01/fwrd/internal/plugins"
 	pluginlua "github.com/pders01/fwrd/internal/plugins/lua"
 	"github.com/pders01/fwrd/internal/storage"
 	"github.com/pders01/fwrd/internal/tui"
@@ -77,6 +79,7 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(feedCmd)
+	rootCmd.AddCommand(pluginsCmd)
 }
 
 var versionCmd = &cobra.Command{
@@ -140,12 +143,24 @@ var feedRefreshCmd = &cobra.Command{
 	Run:   refreshFeeds,
 }
 
+var pluginsCmd = &cobra.Command{
+	Use:   "plugins",
+	Short: "Inspect installed plugins",
+}
+
+var pluginsListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List loaded Lua plugins",
+	Run:   listPlugins,
+}
+
 func init() {
 	configCmd.AddCommand(configGenCmd)
 	feedCmd.AddCommand(feedListCmd)
 	feedCmd.AddCommand(feedAddCmd)
 	feedCmd.AddCommand(feedDeleteCmd)
 	feedCmd.AddCommand(feedRefreshCmd)
+	pluginsCmd.AddCommand(pluginsListCmd)
 
 	// Add force flag to refresh command
 	feedRefreshCmd.Flags().BoolVar(&forceRefresh, "force", false, "ignore ETag/Last-Modified headers")
@@ -354,6 +369,41 @@ func deleteFeed(_ *cobra.Command, args []string) {
 	}); err != nil {
 		log.Fatalf("Error: %v", err)
 	}
+}
+
+func listPlugins(_ *cobra.Command, _ []string) {
+	cfg, err := loadConfig()
+	if err != nil {
+		log.Fatalf("Error: failed to load config: %v", err)
+	}
+	dir := pluginlua.DefaultPluginDir()
+	if seedErr := pluginlua.EnsureDefaults(dir); seedErr != nil {
+		log.Printf("WARN  seeding default lua plugins in %s: %v", dir, seedErr)
+	}
+
+	reg := plugins.NewRegistry(cfg.Feed.HTTPTimeout)
+	bindings := pluginlua.Bindings{Logger: stdLogger{}}
+	if _, err := pluginlua.LoadAndRegister(reg, dir, bindings); err != nil {
+		log.Fatalf("Error: loading plugins from %s: %v", dir, err)
+	}
+
+	loaded := reg.ListPlugins()
+	fmt.Printf("Plugin directory: %s\n\n", dir)
+	if len(loaded) == 0 {
+		fmt.Println("No plugins loaded. Drop *.lua files into the directory and rerun.")
+		return
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tPRIORITY\tPATH")
+	for _, p := range loaded {
+		path := ""
+		if pp, ok := p.(interface{ Path() string }); ok {
+			path = pp.Path()
+		}
+		fmt.Fprintf(w, "%s\t%d\t%s\n", p.Name(), p.Priority(), path)
+	}
+	_ = w.Flush()
 }
 
 func refreshFeeds(_ *cobra.Command, _ []string) {
