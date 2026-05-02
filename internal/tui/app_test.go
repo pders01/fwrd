@@ -103,7 +103,18 @@ func TestViewStateTransitions(t *testing.T) {
 			},
 		},
 		{
-			name:         "ViewArticles to ViewReader on Enter (ctrl+m is enter)",
+			// KeyCtrlM is canonically reported by bubbletea as KeyEnter
+			// (CR == ctrl+m at the terminal layer). This case asserts
+			// that pressing ctrl+m falls through to the enter handler
+			// and opens the reader — i.e. it does NOT toggle read.
+			// Toggle-read is bound to ctrl+u (see config.Bindings).
+			// If a future change ever adds a literal "ctrl+m" case to
+			// the key handler, this test will keep passing because
+			// bubbletea normalizes the keypress, but the toggle-read
+			// shortcut would once again silently swallow Enter.
+			// Cross-check by editing keyhandler.go and grepping for
+			// `"ctrl+m"` — there should be no match.
+			name:         "ctrl+m (== Enter at terminal layer) opens reader, does not toggle read",
 			initialView:  ViewArticles,
 			msg:          tea.KeyMsg{Type: tea.KeyCtrlM},
 			expectedView: ViewReader,
