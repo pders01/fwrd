@@ -167,14 +167,16 @@ func (kh *KeyHandler) delegateToTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleCustomKeys handles only our custom action keys
 func (kh *KeyHandler) handleCustomKeys(key string) (tea.Model, tea.Cmd, bool) {
+	b := kh.config.Keys.Bindings
+
 	// Global custom keys
 	switch key {
-	case "ctrl+c", "q":
+	case "ctrl+c", b.Quit:
 		return kh.app, tea.Quit, true
 	case "esc":
 		model, cmd := kh.navigateBack()
 		return model, cmd, true
-	case kh.modifierKey + "s":
+	case kh.modifierKey + b.Search:
 		model, cmd := kh.enterSearchMode()
 		return model, cmd, true
 	case kh.modifierKey + "t":
@@ -202,8 +204,9 @@ func (kh *KeyHandler) handleCustomKeys(key string) (tea.Model, tea.Cmd, bool) {
 
 // handleFeedsCustomKeys handles only custom action keys in feeds view
 func (kh *KeyHandler) handleFeedsCustomKeys(key string) (tea.Model, tea.Cmd, bool) {
+	b := kh.config.Keys.Bindings
 	switch key {
-	case kh.modifierKey + "n":
+	case kh.modifierKey + b.NewFeed:
 		kh.app.view = ViewAddFeed
 		kh.app.textInput.Reset()
 		kh.app.textInput.Focus()
@@ -218,7 +221,7 @@ func (kh *KeyHandler) handleFeedsCustomKeys(key string) (tea.Model, tea.Cmd, boo
 				return kh.app, nil, true
 			}
 		}
-	case kh.modifierKey + "x":
+	case kh.modifierKey + b.DeleteFeed:
 		if len(kh.app.feeds) > 0 {
 			if i, ok := kh.app.feedList.SelectedItem().(feedItem); ok {
 				kh.app.feedToDelete = i.feed
@@ -226,7 +229,7 @@ func (kh *KeyHandler) handleFeedsCustomKeys(key string) (tea.Model, tea.Cmd, boo
 				return kh.app, nil, true
 			}
 		}
-	case kh.modifierKey + "r":
+	case kh.modifierKey + b.Refresh:
 		kh.app.setStatus(MsgRefreshing, 0)
 		return kh.app, tea.Batch(kh.app.startSpinner(MsgRefreshing), kh.app.refreshFeeds()), true
 	}
@@ -235,15 +238,16 @@ func (kh *KeyHandler) handleFeedsCustomKeys(key string) (tea.Model, tea.Cmd, boo
 
 // handleArticlesCustomKeys handles only custom action keys in articles view
 func (kh *KeyHandler) handleArticlesCustomKeys(key string) (tea.Model, tea.Cmd, bool) {
+	b := kh.config.Keys.Bindings
 	switch key {
-	case kh.modifierKey + "o":
+	case kh.modifierKey + b.OpenMedia:
 		if i, ok := kh.app.articleList.SelectedItem().(articleItem); ok {
 			if i.article.URL != "" {
 				return kh.app, kh.openURL(i.article.URL), true
 			}
 		}
 		return kh.app, nil, true
-	case kh.modifierKey + kh.config.Keys.Bindings.ToggleRead:
+	case kh.modifierKey + b.ToggleRead:
 		if i, ok := kh.app.articleList.SelectedItem().(articleItem); ok {
 			return kh.app, kh.app.toggleRead(i.article), true
 		}
@@ -253,7 +257,7 @@ func (kh *KeyHandler) handleArticlesCustomKeys(key string) (tea.Model, tea.Cmd, 
 
 // handleReaderCustomKeys handles only custom action keys in reader view
 func (kh *KeyHandler) handleReaderCustomKeys(key string) (tea.Model, tea.Cmd, bool) {
-	if key == kh.modifierKey+"o" {
+	if key == kh.modifierKey+kh.config.Keys.Bindings.OpenMedia {
 		if kh.app.currentArticle != nil {
 			// If there are multiple media URLs, show media list
 			if len(kh.app.currentArticle.MediaURLs) > 1 {
@@ -373,8 +377,8 @@ func (kh *KeyHandler) handleMediaCustomKeys(key string) (tea.Model, tea.Cmd, boo
 			return kh.app, kh.openURL(item.url), true
 		}
 		return kh.app, nil, true
-	case kh.modifierKey + "o":
-		// Also handle ctrl+o to open
+	case kh.modifierKey + kh.config.Keys.Bindings.OpenMedia:
+		// Also handle the configured open key
 		if item, ok := kh.app.mediaList.SelectedItem().(mediaItem); ok {
 			return kh.app, kh.openURL(item.url), true
 		}
@@ -563,27 +567,28 @@ func (kh *KeyHandler) openURL(url string) tea.Cmd {
 
 // GetHelpForCurrentView returns only our custom help text (Charm handles the rest)
 func (kh *KeyHandler) GetHelpForCurrentView() []string {
+	b := kh.config.Keys.Bindings
 	switch kh.app.view {
 	case ViewFeeds:
-		help := []string{kh.modifierKey + "n: new", kh.modifierKey + "r: refresh", kh.modifierKey + "s: search"}
+		help := []string{kh.modifierKey + b.NewFeed + ": new", kh.modifierKey + b.Refresh + ": refresh", kh.modifierKey + b.Search + ": search"}
 		if len(kh.app.feeds) > 0 {
-			help = append(help, kh.modifierKey+"e: rename", kh.modifierKey+"x: delete")
+			help = append(help, kh.modifierKey+"e: rename", kh.modifierKey+b.DeleteFeed+": delete")
 		}
 		return help
 
 	case ViewArticles:
-		return []string{kh.modifierKey + "o: open", kh.modifierKey + kh.config.Keys.Bindings.ToggleRead + ": toggle read", kh.modifierKey + "s: search"}
+		return []string{kh.modifierKey + b.OpenMedia + ": open", kh.modifierKey + b.ToggleRead + ": toggle read", kh.modifierKey + b.Search + ": search"}
 
 	case ViewReader:
-		return []string{kh.modifierKey + "o: open media", kh.modifierKey + "s: search"}
+		return []string{kh.modifierKey + b.OpenMedia + ": open media", kh.modifierKey + b.Search + ": search"}
 
 	case ViewSearch:
 		// Include search engine status in search view
 		searchStatus := kh.app.getSearchEngineStatus()
-		return []string{kh.modifierKey + "s: search", searchStatus}
+		return []string{kh.modifierKey + b.Search + ": search", searchStatus}
 
 	case ViewMedia:
-		return []string{"enter: open", kh.modifierKey + "o: open", "esc: back"}
+		return []string{"enter: open", kh.modifierKey + b.OpenMedia + ": open", "esc: back"}
 
 	case ViewAddFeed:
 		return []string{"enter: add", "esc: cancel"}
