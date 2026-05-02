@@ -135,7 +135,7 @@ func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
 		return nil, fmt.Errorf("invalid feed URL: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), m.config.Feed.HTTPTimeout)
 	defer cancel()
 
 	feedInfo, err := m.pluginRegistry.EnhanceFeed(ctx, normalizedURL)
