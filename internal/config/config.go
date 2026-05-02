@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/pders01/fwrd/internal/validation"
 	"github.com/spf13/viper"
 )
@@ -198,7 +200,12 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	var config Config
-	if err := v.Unmarshal(&config); err != nil {
+	matchNameOpt := func(dc *mapstructure.DecoderConfig) {
+		dc.MatchName = func(mapKey, fieldName string) bool {
+			return strings.EqualFold(strings.ReplaceAll(mapKey, "_", ""), strings.ReplaceAll(fieldName, "_", ""))
+		}
+	}
+	if err := v.Unmarshal(&config, matchNameOpt); err != nil {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
