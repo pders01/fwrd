@@ -425,7 +425,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.articles = msg.articles
 			items := make([]list.Item, len(msg.articles))
 			for i, art := range msg.articles {
-				items[i] = articleItem{article: art}
+				items[i] = articleItem{article: art, maxDescLen: a.config.UI.Article.MaxDescriptionLength}
 			}
 			a.articleList.SetItems(items)
 		}
@@ -831,7 +831,8 @@ func (i feedItem) Description() string { return i.feed.Description }
 func (i feedItem) FilterValue() string { return i.feed.Title }
 
 type articleItem struct {
-	article *storage.Article
+	article    *storage.Article
+	maxDescLen int
 }
 
 func (i articleItem) Title() string {
@@ -843,11 +844,12 @@ func (i articleItem) Title() string {
 
 func (i articleItem) Description() string {
 	desc := i.article.Description
-	maxDescLength := 80
-	if maxDescLength > 40 { // minimum readable length
-		if len(desc) > maxDescLength {
-			desc = desc[:maxDescLength] + "…"
-		}
+	limit := i.maxDescLen
+	if limit <= 0 {
+		limit = defaultMaxDescriptionLength
+	}
+	if len(desc) > limit {
+		desc = desc[:limit] + "…"
 	}
 
 	timeStr := ""

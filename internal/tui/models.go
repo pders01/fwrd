@@ -34,4 +34,8 @@ const (
 
 	// Article pagination
 	DefaultArticleLimit = 50 // Default number of articles to load
+
+	// defaultMaxDescriptionLength is the fallback used when articleItem
+	// has no configured limit (typically only in tests).
+	defaultMaxDescriptionLength = 80
 )
