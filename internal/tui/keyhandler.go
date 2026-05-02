@@ -179,7 +179,7 @@ func (kh *KeyHandler) handleCustomKeys(key string) (tea.Model, tea.Cmd, bool) {
 	case kh.modifierKey + b.Search:
 		model, cmd := kh.enterSearchMode()
 		return model, cmd, true
-	case kh.modifierKey + "t":
+	case kh.modifierKey + b.ThemeToggle:
 		kh.app.themePref = nextThemePref(kh.app.themePref)
 		kh.app.signalThemeChange()
 		return kh.app, nil, true
@@ -211,7 +211,7 @@ func (kh *KeyHandler) handleFeedsCustomKeys(key string) (tea.Model, tea.Cmd, boo
 		kh.app.textInput.Reset()
 		kh.app.textInput.Focus()
 		return kh.app, nil, true
-	case kh.modifierKey + "e":
+	case kh.modifierKey + b.RenameFeed:
 		if len(kh.app.feeds) > 0 {
 			if i, ok := kh.app.feedList.SelectedItem().(feedItem); ok {
 				kh.app.feedToRename = i.feed
@@ -572,7 +572,7 @@ func (kh *KeyHandler) GetHelpForCurrentView() []string {
 	case ViewFeeds:
 		help := []string{kh.modifierKey + b.NewFeed + ": new", kh.modifierKey + b.Refresh + ": refresh", kh.modifierKey + b.Search + ": search"}
 		if len(kh.app.feeds) > 0 {
-			help = append(help, kh.modifierKey+"e: rename", kh.modifierKey+b.DeleteFeed+": delete")
+			help = append(help, kh.modifierKey+b.RenameFeed+": rename", kh.modifierKey+b.DeleteFeed+": delete")
 		}
 		return help
 
