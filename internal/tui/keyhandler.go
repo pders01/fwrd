@@ -243,7 +243,7 @@ func (kh *KeyHandler) handleArticlesCustomKeys(key string) (tea.Model, tea.Cmd, 
 			}
 		}
 		return kh.app, nil, true
-	case kh.modifierKey + "m":
+	case kh.modifierKey + kh.config.Keys.Bindings.ToggleRead:
 		if i, ok := kh.app.articleList.SelectedItem().(articleItem); ok {
 			return kh.app, kh.app.toggleRead(i.article), true
 		}
@@ -572,7 +572,7 @@ func (kh *KeyHandler) GetHelpForCurrentView() []string {
 		return help
 
 	case ViewArticles:
-		return []string{kh.modifierKey + "o: open", kh.modifierKey + "m: toggle read", kh.modifierKey + "s: search"}
+		return []string{kh.modifierKey + "o: open", kh.modifierKey + kh.config.Keys.Bindings.ToggleRead + ": toggle read", kh.modifierKey + "s: search"}
 
 	case ViewReader:
 		return []string{kh.modifierKey + "o: open media", kh.modifierKey + "s: search"}

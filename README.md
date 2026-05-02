@@ -81,7 +81,7 @@ Download the appropriate binary for your platform from the [latest release](http
 Note: The modifier key defaults to `ctrl` and can be changed in config.
 
 - Feeds: `ctrl+n` add • `ctrl+r` refresh • `ctrl+x` delete • `Enter` view articles
-- Articles: `ctrl+m` toggle read • `Enter` read • `esc` back
+- Articles: `ctrl+u` toggle read • `Enter` read • `esc` back
 - Reader: `ctrl+o` open media/links • `esc` back
 - Global: `ctrl+s` search • `q` quit
 
