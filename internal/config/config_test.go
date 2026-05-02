@@ -107,8 +107,8 @@ refresh_interval = "1h"
 default_retry_after = "30m"
 user_agent = "test-agent"
 
-[ui.colors]
-primary = "#FF0000"
+[ui.article]
+max_description_length = 200
 `
 
 	if writeErr := os.WriteFile(configPath, []byte(configContent), 0o644); writeErr != nil {
@@ -136,8 +136,8 @@ primary = "#FF0000"
 	if cfg.Feed.UserAgent != "test-agent" {
 		t.Errorf("Feed.UserAgent = %s, want 'test-agent'", cfg.Feed.UserAgent)
 	}
-	if cfg.UI.Colors.Primary != "#FF0000" {
-		t.Errorf("UI.Colors.Primary = %s, want '#FF0000'", cfg.UI.Colors.Primary)
+	if cfg.UI.Article.MaxDescriptionLength != 200 {
+		t.Errorf("UI.Article.MaxDescriptionLength = %d, want 200", cfg.UI.Article.MaxDescriptionLength)
 	}
 }
 
@@ -160,8 +160,8 @@ func TestSave(t *testing.T) {
 			UserAgent:         "test-save-agent",
 		},
 		UI: UIConfig{
-			Colors: UIColors{
-				Primary: "#00FF00",
+			Article: ArticleConfig{
+				MaxDescriptionLength: 200,
 			},
 		},
 		Media: MediaConfig{
