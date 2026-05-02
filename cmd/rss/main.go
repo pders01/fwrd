@@ -254,6 +254,9 @@ func runTUI(_ *cobra.Command, _ []string) {
 	}
 
 	if err := withStoreAndConfig(func(store *storage.Store, cfg *config.Config) error {
+		for _, w := range config.Warnings(cfg) {
+			fmt.Fprintln(os.Stderr, "Warning:", w)
+		}
 		app := tui.NewApp(store, cfg)
 		defer app.Close()
 
