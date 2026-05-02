@@ -33,7 +33,6 @@ type FeedConfig struct {
 }
 
 type UIConfig struct {
-	Colors  UIColors      `mapstructure:"colors"`
 	Article ArticleConfig `mapstructure:"article"`
 	Icons   string        `mapstructure:"icons"`
 	// Theme controls the glamour render style. Accepted values:
@@ -44,18 +43,6 @@ type UIConfig struct {
 	// SearchDebounceMs is the delay between the last keystroke in the
 	// search input and firing a query against the index.
 	SearchDebounceMs int `mapstructure:"search_debounce_ms"`
-}
-
-type UIColors struct {
-	Primary    string `mapstructure:"primary"`
-	Secondary  string `mapstructure:"secondary"`
-	Accent     string `mapstructure:"accent"`
-	Background string `mapstructure:"background"`
-	Surface    string `mapstructure:"surface"`
-	Text       string `mapstructure:"text"`
-	Muted      string `mapstructure:"muted"`
-	Error      string `mapstructure:"error"`
-	Success    string `mapstructure:"success"`
 }
 
 type ArticleConfig struct {
@@ -117,17 +104,6 @@ func defaultConfig() *Config {
 			UserAgent:         "fwrd/1.0 (https://github.com/pders01/fwrd)",
 		},
 		UI: UIConfig{
-			Colors: UIColors{
-				Primary:    "#FF6B6B",
-				Secondary:  "#4ECDC4",
-				Accent:     "#95E1D3",
-				Background: "#1A1A2E",
-				Surface:    "#16213E",
-				Text:       "#EAEAEA",
-				Muted:      "#94A3B8",
-				Error:      "#F87171",
-				Success:    "#4ADE80",
-			},
 			Article: ArticleConfig{
 				MaxDescriptionLength: 150,
 				WordWrapMaxWidth:     120,
