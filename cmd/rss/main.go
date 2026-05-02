@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -269,9 +270,21 @@ func runTUI(_ *cobra.Command, _ []string) {
 
 		return nil
 	}); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		exitWithError(err)
+	}
+}
+
+// exitWithError prints err to stderr and exits non-zero. For known
+// conditions (e.g. another fwrd holding the bolt lock) it adds a hint
+// instead of the raw wrapped error.
+func exitWithError(err error) {
+	if errors.Is(err, storage.ErrDatabaseLocked) {
+		fmt.Fprintln(os.Stderr, "Error: another fwrd process is already using the database.")
+		fmt.Fprintln(os.Stderr, "Hint: close the other instance, or pass --db to use a different file.")
 		os.Exit(1)
 	}
+	fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	os.Exit(1)
 }
 
 func listFeeds(_ *cobra.Command, _ []string) {
@@ -307,7 +320,7 @@ func listFeeds(_ *cobra.Command, _ []string) {
 		}
 		return nil
 	}); err != nil {
-		log.Fatalf("Error: %v", err)
+		exitWithError(err)
 	}
 }
 
@@ -333,7 +346,7 @@ func addFeed(_ *cobra.Command, args []string) {
 
 		return nil
 	}); err != nil {
-		log.Fatalf("Error: %v", err)
+		exitWithError(err)
 	}
 }
 
@@ -368,7 +381,7 @@ func deleteFeed(_ *cobra.Command, args []string) {
 		fmt.Println("Feed deleted successfully.")
 		return nil
 	}); err != nil {
-		log.Fatalf("Error: %v", err)
+		exitWithError(err)
 	}
 }
 
@@ -428,7 +441,7 @@ func refreshFeeds(_ *cobra.Command, _ []string) {
 			summary.UpdatedFeeds, summary.AddedArticles)
 		return nil
 	}); err != nil {
-		log.Fatalf("Error: %v", err)
+		exitWithError(err)
 	}
 }
 

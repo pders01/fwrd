@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -11,7 +12,13 @@ import (
 	"time"
 
 	bolt "go.etcd.io/bbolt"
+	bolterrors "go.etcd.io/bbolt/errors"
 )
+
+// ErrDatabaseLocked is returned when bbolt cannot acquire the file lock
+// within the configured timeout — almost always because another fwrd
+// process already has the database open.
+var ErrDatabaseLocked = errors.New("database is locked by another fwrd process")
 
 // MemoryPath is the sentinel database path that requests an isolated,
 // process-local store backed by a unique temp file. bbolt has no real
@@ -113,6 +120,9 @@ func NewStoreWithTimeout(dbPath string, timeout time.Duration) (*Store, error) {
 	if err != nil {
 		if tempPath != "" {
 			_ = os.Remove(tempPath)
+		}
+		if errors.Is(err, bolterrors.ErrTimeout) {
+			return nil, fmt.Errorf("%w (waited %s for %s)", ErrDatabaseLocked, timeout, dbPath)
 		}
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
