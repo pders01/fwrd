@@ -81,15 +81,16 @@ type KeyConfig struct {
 }
 
 type KeyBindings struct {
-	Quit       string `mapstructure:"quit"`
-	Search     string `mapstructure:"search"`
-	NewFeed    string `mapstructure:"new_feed"`
-	DeleteFeed string `mapstructure:"delete_feed"`
-	Refresh    string `mapstructure:"refresh"`
-	ToggleRead string `mapstructure:"toggle_read"`
-	OpenMedia  string `mapstructure:"open_media"`
-	Back       string `mapstructure:"back"`
-	Help       string `mapstructure:"help"`
+	Quit        string `mapstructure:"quit"`
+	Search      string `mapstructure:"search"`
+	NewFeed     string `mapstructure:"new_feed"`
+	RenameFeed  string `mapstructure:"rename_feed"`
+	DeleteFeed  string `mapstructure:"delete_feed"`
+	Refresh     string `mapstructure:"refresh"`
+	ToggleRead  string `mapstructure:"toggle_read"`
+	OpenMedia   string `mapstructure:"open_media"`
+	ThemeToggle string `mapstructure:"theme_toggle"`
+	Back        string `mapstructure:"back"`
 }
 
 func defaultConfig() *Config {
@@ -153,15 +154,16 @@ func defaultConfig() *Config {
 		Keys: KeyConfig{
 			Modifier: "ctrl",
 			Bindings: KeyBindings{
-				Quit:       "q",
-				Search:     "s",
-				NewFeed:    "n",
-				DeleteFeed: "x",
-				Refresh:    "r",
-				ToggleRead: "u",
-				OpenMedia:  "o",
-				Back:       "esc",
-				Help:       "?",
+				Quit:        "q",
+				Search:      "s",
+				NewFeed:     "n",
+				RenameFeed:  "e",
+				DeleteFeed:  "x",
+				Refresh:     "r",
+				ToggleRead:  "u",
+				OpenMedia:   "o",
+				ThemeToggle: "t",
+				Back:        "esc",
 			},
 		},
 	}
