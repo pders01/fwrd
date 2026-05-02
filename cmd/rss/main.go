@@ -207,7 +207,7 @@ func getStore(cfg *config.Config) (*storage.Store, error) {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
-	return storage.NewStore(validatedPath)
+	return storage.NewStoreWithTimeout(validatedPath, cfg.Database.Timeout)
 }
 
 // withStore provides consistent resource management for store operations

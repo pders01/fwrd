@@ -83,7 +83,15 @@ func seekDateCursor(ab *bolt.Bucket, dateCursor *bolt.Cursor, cursor string) (ke
 	return key, articleID
 }
 
+// DefaultOpenTimeout is the bolt file-lock acquisition timeout used
+// when callers do not provide their own (NewStore).
+const DefaultOpenTimeout = 1 * time.Second
+
 func NewStore(dbPath string) (*Store, error) {
+	return NewStoreWithTimeout(dbPath, DefaultOpenTimeout)
+}
+
+func NewStoreWithTimeout(dbPath string, timeout time.Duration) (*Store, error) {
 	tempPath := ""
 	if dbPath == MemoryPath {
 		// bbolt has no in-memory mode; route the sentinel to a unique
@@ -101,7 +109,7 @@ func NewStore(dbPath string) (*Store, error) {
 		dbPath = tempPath
 	}
 
-	db, err := bolt.Open(dbPath, 0o600, &bolt.Options{Timeout: 1 * time.Second})
+	db, err := bolt.Open(dbPath, 0o600, &bolt.Options{Timeout: timeout})
 	if err != nil {
 		if tempPath != "" {
 			_ = os.Remove(tempPath)
