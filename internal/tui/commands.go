@@ -23,7 +23,7 @@ func (a *App) loadFeeds() tea.Cmd {
 
 func (a *App) loadArticles(feedID string) tea.Cmd {
 	return func() tea.Msg {
-		articles, err := a.store.GetArticles(feedID, DefaultArticleLimit)
+		articles, err := a.store.GetArticles(feedID, pickPositive(a.config.UI.Article.ListLimit, DefaultArticleLimit))
 		if err != nil {
 			return errorMsg{err: wrapErr("load articles", err)}
 		}
