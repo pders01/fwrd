@@ -155,6 +155,50 @@ func defaultConfig() *Config {
 	}
 }
 
+// normalizeOverrides promotes user-provided no-underscore variants
+// (e.g. "openmedia") to their canonical snake_case path ("open_media") so
+// they override the default at the same key. Without this the user's value
+// and the default coexist as siblings and mapstructure may pick either.
+func normalizeOverrides(v *viper.Viper, prefix string, defaults map[string]any) {
+	for k, val := range defaults {
+		path := k
+		if prefix != "" {
+			path = prefix + "." + k
+		}
+		if sub, ok := val.(map[string]any); ok {
+			normalizeOverrides(v, path, sub)
+			continue
+		}
+		if !strings.Contains(k, "_") {
+			continue
+		}
+		altPath := strings.ReplaceAll(k, "_", "")
+		if prefix != "" {
+			altPath = prefix + "." + altPath
+		}
+		if v.InConfig(altPath) {
+			v.Set(path, v.Get(altPath))
+		}
+	}
+}
+
+// seedDefaults walks a snake_case-keyed map and registers each leaf with
+// viper.SetDefault, so values land in viper's defaults layer rather than the
+// config layer that ReadInConfig replaces.
+func seedDefaults(v *viper.Viper, prefix string, m map[string]any) {
+	for k, val := range m {
+		path := k
+		if prefix != "" {
+			path = prefix + "." + k
+		}
+		if sub, ok := val.(map[string]any); ok {
+			seedDefaults(v, path, sub)
+			continue
+		}
+		v.SetDefault(path, val)
+	}
+}
+
 func getDefaultOpener() string {
 	switch runtime.GOOS {
 	case "darwin":
@@ -172,11 +216,11 @@ func Load(configPath string) (*Config, error) {
 	v := viper.New()
 
 	cfg := defaultConfig()
-	v.SetDefault("database", cfg.Database)
-	v.SetDefault("feed", cfg.Feed)
-	v.SetDefault("ui", cfg.UI)
-	v.SetDefault("media", cfg.Media)
-	v.SetDefault("keys", cfg.Keys)
+	defaultsMap := map[string]any{}
+	if err := mapstructure.Decode(cfg, &defaultsMap); err != nil {
+		return nil, fmt.Errorf("encoding defaults: %w", err)
+	}
+	seedDefaults(v, "", defaultsMap)
 
 	if configPath != "" {
 		v.SetConfigFile(configPath)
@@ -198,6 +242,8 @@ func Load(configPath string) (*Config, error) {
 			return nil, fmt.Errorf("reading config: %w", err)
 		}
 	}
+
+	normalizeOverrides(v, "", defaultsMap)
 
 	var config Config
 	matchNameOpt := func(dc *mapstructure.DecoderConfig) {
