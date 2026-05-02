@@ -254,10 +254,9 @@ func TestArticleStateManagement(t *testing.T) {
 		app.articleList.SetItems([]list.Item{articleItem{article: article}})
 		app.view = ViewArticles
 
-		// Note: ctrl+m is actually Enter key, so it opens the article instead of toggling
-		// The actual toggle read is done with a different mechanism
-		// For now, we'll skip this test as the behavior has changed
-		t.Skip("Toggle read functionality has changed - ctrl+m opens article")
+		_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+		assert.NotNil(t, cmd, "ctrl+u in articles view should return toggleRead command")
+		assert.Equal(t, ViewArticles, app.view, "toggling read must not change view")
 	})
 }
 

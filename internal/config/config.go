@@ -158,7 +158,7 @@ func defaultConfig() *Config {
 				NewFeed:    "n",
 				DeleteFeed: "x",
 				Refresh:    "r",
-				ToggleRead: "m",
+				ToggleRead: "u",
 				OpenMedia:  "o",
 				Back:       "esc",
 				Help:       "?",
