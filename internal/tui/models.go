@@ -39,3 +39,12 @@ const (
 	// has no configured limit (typically only in tests).
 	defaultMaxDescriptionLength = 80
 )
+
+// pickPositive returns v if positive, otherwise fallback. Used for
+// config values that must be > 0 to make sense (limits, debounces).
+func pickPositive(v, fallback int) int {
+	if v > 0 {
+		return v
+	}
+	return fallback
+}

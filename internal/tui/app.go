@@ -161,7 +161,7 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 		previousView:         ViewFeeds,            // Initialize previous view
 		cameFromSearch:       false,                // Initialize navigation flag
 		searchResults:        []searchResultItem{}, // Initialize empty search results
-		searchDebounceMillis: 200,
+		searchDebounceMillis: pickPositive(cfg.UI.SearchDebounceMs, 200),
 		themePref:            cfg.UI.Theme,
 		glamourStyle:         resolveGlamourStyle(cfg.UI.Theme),
 		themeEvents:          make(chan struct{}, 1),

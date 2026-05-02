@@ -41,6 +41,9 @@ type UIConfig struct {
 	//   "light" — force light style
 	//   "dark"  — force dark style
 	Theme string `mapstructure:"theme"`
+	// SearchDebounceMs is the delay between the last keystroke in the
+	// search input and firing a query against the index.
+	SearchDebounceMs int `mapstructure:"search_debounce_ms"`
 }
 
 type UIColors struct {
@@ -59,6 +62,9 @@ type ArticleConfig struct {
 	MaxDescriptionLength int `mapstructure:"max_description_length"`
 	WordWrapMaxWidth     int `mapstructure:"word_wrap_max_width"`
 	WordWrapMinWidth     int `mapstructure:"word_wrap_min_width"`
+	// ListLimit caps how many articles are loaded into the article list
+	// per feed. Set <= 0 to fall back to DefaultArticleLimit.
+	ListLimit int `mapstructure:"list_limit"`
 }
 
 type MediaConfig struct {
@@ -126,9 +132,11 @@ func defaultConfig() *Config {
 				MaxDescriptionLength: 150,
 				WordWrapMaxWidth:     120,
 				WordWrapMinWidth:     40,
+				ListLimit:            50,
 			},
-			Icons: "nerd",
-			Theme: "auto",
+			Icons:            "nerd",
+			Theme:            "auto",
+			SearchDebounceMs: 200,
 		},
 		Media: MediaConfig{
 			Darwin: MediaPlayers{
