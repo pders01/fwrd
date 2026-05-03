@@ -334,8 +334,9 @@ func (kh *KeyHandler) delegateToCharm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					kh.app.searchInput.Focus()
 					return kh.app, nil
 				}
-			case "/", "i":
-				// Quick shortcuts to refocus search input
+			case "/":
+				// Refocus search input. The searchList has filtering
+				// disabled so "/" does not collide with Charm's filter.
 				kh.app.searchInput.Focus()
 				return kh.app, nil
 			}
@@ -451,6 +452,10 @@ func (kh *KeyHandler) navigateBack() (tea.Model, tea.Cmd) {
 		return kh.app, nil
 
 	case ViewArticles:
+		// Drop any active list filter so the next entry into ViewArticles
+		// (or back-navigation overlays) does not show stale Charm filter
+		// state from a previous browse.
+		kh.app.articleList.ResetFilter()
 		kh.app.view = ViewFeeds
 		return kh.app, nil
 
