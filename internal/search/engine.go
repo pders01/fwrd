@@ -54,7 +54,7 @@ func (e *Engine) Search(query string, limit int) ([]*Result, error) {
 			results = append(results, result)
 		}
 
-		articles, err := e.store.GetArticles(feed.ID, 200)
+		articles, err := e.store.GetArticles(feed.ID, basicSearchArticleScanLimit)
 		if err != nil {
 			continue
 		}
@@ -315,6 +315,12 @@ func truncate(text string, maxLen int) string {
 	}
 	return text[:maxLen-1] + "…"
 }
+
+// basicSearchArticleScanLimit caps how many articles per feed the
+// brute-force engine examines for a single Search call. Without this
+// the search latency scales with the largest feed; the bleve engine is
+// preferred when this matters.
+const basicSearchArticleScanLimit = 200
 
 // recencyWindow caps how old an article can be and still receive any
 // recency boost; older articles get 0.

@@ -128,6 +128,31 @@ const (
 	maxArticlesPerFeed = 1000 // Maximum articles to process per feed at once
 )
 
+// Doc-ID prefixes used to encode the entity type into a single bleve
+// document namespace. docIDForFeed/docIDForArticle build IDs with these
+// prefixes; Search decodes hits with the same constants so a future
+// rename can't make the encode and decode paths drift.
+const (
+	docPrefixFeed    = "feed:"
+	docPrefixArticle = "article:"
+)
+
+// Field boost weights for the bleve search query. Match queries score
+// the field directly; prefix queries handle partial typed terms with a
+// slightly lower weight so exact matches still win. Title outranks
+// description outranks content outranks URL because users typically
+// search for what they remember most strongly first.
+const (
+	boostTitleMatch          = 4.0
+	boostTitlePrefix         = 3.5
+	boostDescriptionMatch    = 2.0
+	boostDescriptionPrefix   = 1.8
+	boostContentMatch        = 1.0
+	boostContentPrefix       = 0.8
+	boostURLMatch            = 0.5
+	boostURLPrefix           = 0.3
+)
+
 func (b *bleveEngine) reindexAll() error {
 	feeds, err := b.store.GetAllFeeds()
 	if err != nil {
@@ -255,41 +280,40 @@ func (b *bleveEngine) Search(query string, limit int) ([]*Result, error) {
 	tokens := tokenize(query)
 	var qs []bleveQuery.Query
 	for _, tok := range tokens {
-		// title^4
 		qt := bleve.NewMatchQuery(tok)
 		qt.SetField("title")
-		qt.SetBoost(4.0)
+		qt.SetBoost(boostTitleMatch)
 		qs = append(qs, qt)
 		qtp := bleve.NewPrefixQuery(strings.ToLower(tok))
 		qtp.SetField("title")
-		qtp.SetBoost(3.5)
+		qtp.SetBoost(boostTitlePrefix)
 		qs = append(qs, qtp)
-		// description^2
+
 		qd := bleve.NewMatchQuery(tok)
 		qd.SetField("description")
-		qd.SetBoost(2.0)
+		qd.SetBoost(boostDescriptionMatch)
 		qs = append(qs, qd)
 		qdp := bleve.NewPrefixQuery(strings.ToLower(tok))
 		qdp.SetField("description")
-		qdp.SetBoost(1.8)
+		qdp.SetBoost(boostDescriptionPrefix)
 		qs = append(qs, qdp)
-		// content^1
+
 		qc := bleve.NewMatchQuery(tok)
 		qc.SetField("content")
-		qc.SetBoost(1.0)
+		qc.SetBoost(boostContentMatch)
 		qs = append(qs, qc)
 		qcp := bleve.NewPrefixQuery(strings.ToLower(tok))
 		qcp.SetField("content")
-		qcp.SetBoost(0.8)
+		qcp.SetBoost(boostContentPrefix)
 		qs = append(qs, qcp)
-		// url^0.5
+
 		qu := bleve.NewMatchQuery(tok)
 		qu.SetField("url")
-		qu.SetBoost(0.5)
+		qu.SetBoost(boostURLMatch)
 		qs = append(qs, qu)
 		qup := bleve.NewPrefixQuery(strings.ToLower(tok))
 		qup.SetField("url")
-		qup.SetBoost(0.3)
+		qup.SetBoost(boostURLPrefix)
 		qs = append(qs, qup)
 	}
 	if len(qs) == 0 {
@@ -306,7 +330,7 @@ func (b *bleveEngine) Search(query string, limit int) ([]*Result, error) {
 	out := make([]*Result, 0, len(res.Hits))
 	for _, h := range res.Hits {
 		r := &Result{Score: h.Score}
-		if id, ok := strings.CutPrefix(h.ID, "feed:"); ok {
+		if id, ok := strings.CutPrefix(h.ID, docPrefixFeed); ok {
 			f := &storage.Feed{ID: id}
 			if t, ok := h.Fields["title"].(string); ok {
 				f.Title = t
@@ -319,7 +343,7 @@ func (b *bleveEngine) Search(query string, limit int) ([]*Result, error) {
 			}
 			r.Feed = f
 			r.IsArticle = false
-		} else if id, ok := strings.CutPrefix(h.ID, "article:"); ok {
+		} else if id, ok := strings.CutPrefix(h.ID, docPrefixArticle); ok {
 			a := &storage.Article{ID: id}
 			if t, ok := h.Fields["title"].(string); ok {
 				a.Title = t
@@ -490,5 +514,5 @@ func (b *bleveEngine) CommitBatch() {
 // Close closes the underlying index
 func (b *bleveEngine) Close() error { return b.idx.Close() }
 
-func docIDForFeed(feedID string) string   { return "feed:" + feedID }
-func docIDForArticle(artID string) string { return "article:" + artID }
+func docIDForFeed(feedID string) string   { return docPrefixFeed + feedID }
+func docIDForArticle(artID string) string { return docPrefixArticle + artID }
