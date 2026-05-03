@@ -55,6 +55,12 @@ type App struct {
 	view             View
 	previousView     View
 	cameFromSearch   bool // Track if current article was selected from search
+	// articlesOrigin records the view a user came from when entering
+	// ViewArticles. Set to ViewSearch when selectSearchResult navigates
+	// from a search hit on a feed; otherwise ViewFeeds. navigateBack
+	// from ViewArticles uses this so search → feed-result → Esc returns
+	// the user to their search results rather than the feed list.
+	articlesOrigin View
 	feeds            []*storage.Feed
 	articles         []*storage.Article
 	currentFeed      *storage.Feed

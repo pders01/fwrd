@@ -294,6 +294,7 @@ func (kh *KeyHandler) delegateToCharm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.String() == "enter" {
 			if i, ok := kh.app.feedList.SelectedItem().(feedItem); ok {
 				kh.app.currentFeed = i.feed
+				kh.app.articlesOrigin = ViewFeeds
 				kh.app.view = ViewArticles
 				return kh.app, kh.app.loadArticles(i.feed.ID)
 			}
@@ -425,6 +426,12 @@ func (kh *KeyHandler) selectSearchResult(result searchResultItem) (tea.Model, te
 	}
 	kh.app.currentFeed = result.feed
 	kh.app.cameFromSearch = false
+	// Mark the article list as having been opened from a search result
+	// so navigateBack returns the user to their search hits instead of
+	// the feed list. Also clear previousView so a later in-articles
+	// Ctrl+S does not pick up a stale ViewReader context.
+	kh.app.articlesOrigin = ViewSearch
+	kh.app.previousView = ViewArticles
 	kh.app.view = ViewArticles
 	return kh.app, kh.app.loadArticles(result.feed.ID)
 }
@@ -456,6 +463,12 @@ func (kh *KeyHandler) navigateBack() (tea.Model, tea.Cmd) {
 		// (or back-navigation overlays) does not show stale Charm filter
 		// state from a previous browse.
 		kh.app.articleList.ResetFilter()
+		if kh.app.articlesOrigin == ViewSearch {
+			kh.app.articlesOrigin = ViewFeeds
+			kh.app.view = ViewSearch
+			kh.app.searchInput.Blur()
+			return kh.app, nil
+		}
 		kh.app.view = ViewFeeds
 		return kh.app, nil
 
