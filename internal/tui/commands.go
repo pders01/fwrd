@@ -109,7 +109,6 @@ func (a *App) renderArticle(article *storage.Article) tea.Cmd {
 	// App fields concurrently with Update — capturing r and rerr by
 	// value avoids a race against tea.WindowSizeMsg handling.
 	r, rerr := a.getRenderer()
-	store := a.store
 	return func() tea.Msg {
 		var content strings.Builder
 
@@ -154,9 +153,9 @@ func (a *App) renderArticle(article *storage.Article) tea.Cmd {
 			return articleRenderedMsg{content: fmt.Sprintf("# Error\n\nFailed to render article: %s\n\nPress Escape to go back.", err.Error())}
 		}
 
-		if err := store.MarkArticleRead(article.ID, true); err != nil {
-			_ = err // Explicitly ignore error
-		}
+		// Read-state side-effect lives in markArticleRead, which is
+		// dispatched alongside this command from the article-open path.
+		// Duplicating the write here was a relic from before that split.
 
 		return articleRenderedMsg{content: rendered}
 	}

@@ -955,12 +955,20 @@ type mediaItem struct {
 	mediaType media.Type
 	index     int
 	total     int
+	// isArticle marks the synthetic "open article" entry that
+	// openMediaList prepends so users can still reach the parent
+	// article's canonical URL even when the article carries multiple
+	// media URLs. The entry is not part of currentArticle.MediaURLs.
+	isArticle bool
 }
 
 func (i mediaItem) Title() string {
 	icons := unicodeIcons
 	if i.icons != nil {
 		icons = *i.icons
+	}
+	if i.isArticle {
+		return withIcon(icons.Article, "Open article")
 	}
 	var typeStr string
 	switch i.mediaType {
