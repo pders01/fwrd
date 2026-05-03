@@ -449,6 +449,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.articlesLoadingMore = false
 		}
 
+	case articleReadToggledMsg:
+		if msg.err != nil {
+			a.err = msg.err
+		} else if msg.article != nil {
+			msg.article.Read = msg.read
+		}
+
 	case articleRenderedMsg:
 		// Always clear loading state — the render finished, regardless of
 		// whether the user has since navigated away. Setting viewport content
@@ -1005,6 +1012,17 @@ type articlesLoadedMsg struct {
 	cursor     string
 	appendPage bool
 	hasMore    bool
+}
+
+// articleReadToggledMsg reports the result of an in-place read-state
+// flip. The handler mutates the article's Read field on the Update
+// goroutine; the list re-reads it on the next render frame so no
+// SetItem call is needed and the user's selection / scroll position
+// stays put — unlike a full loadArticles reload which resets both.
+type articleReadToggledMsg struct {
+	article *storage.Article
+	err     error
+	read    bool
 }
 
 type articleRenderedMsg struct {

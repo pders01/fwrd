@@ -224,10 +224,11 @@ func (a *App) refreshFeeds() tea.Cmd {
 
 func (a *App) toggleRead(article *storage.Article) tea.Cmd {
 	return func() tea.Msg {
-		if err := a.store.MarkArticleRead(article.ID, !article.Read); err != nil {
-			return errorMsg{err: err}
+		newState := !article.Read
+		if err := a.store.MarkArticleRead(article.ID, newState); err != nil {
+			return articleReadToggledMsg{article: article, err: err}
 		}
-		return a.loadArticles(article.FeedID)()
+		return articleReadToggledMsg{article: article, read: newState}
 	}
 }
 
