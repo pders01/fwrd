@@ -13,6 +13,19 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Defaults exposed as constants so other packages can reference them
+// without re-declaring the literal. Keep these in sync with
+// defaultConfig() — defaultConfig is the single source of truth at
+// runtime, but these provide stable names for fallbacks elsewhere.
+const (
+	// DefaultSearchDebounceMs is the delay between the last keystroke
+	// in the search input and firing a query against the index.
+	DefaultSearchDebounceMs = 200
+	// DefaultMaxConcurrentRefreshes is the worker count used by the
+	// feed manager when no override is configured.
+	DefaultMaxConcurrentRefreshes = 5
+)
+
 type Config struct {
 	Database DatabaseConfig `mapstructure:"database"`
 	Feed     FeedConfig     `mapstructure:"feed"`
@@ -32,6 +45,10 @@ type FeedConfig struct {
 	RefreshInterval   time.Duration `mapstructure:"refresh_interval"`
 	DefaultRetryAfter time.Duration `mapstructure:"default_retry_after"`
 	UserAgent         string        `mapstructure:"user_agent"`
+	// MaxConcurrentRefreshes caps the number of feeds refreshed in
+	// parallel during RefreshAllFeeds. Set <= 0 to fall back to
+	// DefaultMaxConcurrentRefreshes.
+	MaxConcurrentRefreshes int `mapstructure:"max_concurrent_refreshes"`
 }
 
 type UIConfig struct {
@@ -100,10 +117,11 @@ func defaultConfig() *Config {
 			SearchIndex: searchIndexPath,
 		},
 		Feed: FeedConfig{
-			HTTPTimeout:       30 * time.Second,
-			RefreshInterval:   5 * time.Minute,
-			DefaultRetryAfter: 15 * time.Minute,
-			UserAgent:         "fwrd/1.0 (https://github.com/pders01/fwrd)",
+			HTTPTimeout:            30 * time.Second,
+			RefreshInterval:        5 * time.Minute,
+			DefaultRetryAfter:      15 * time.Minute,
+			UserAgent:              "fwrd/1.0 (https://github.com/pders01/fwrd)",
+			MaxConcurrentRefreshes: DefaultMaxConcurrentRefreshes,
 		},
 		UI: UIConfig{
 			Article: ArticleConfig{
@@ -114,7 +132,7 @@ func defaultConfig() *Config {
 			},
 			Icons:            "nerd",
 			Theme:            "auto",
-			SearchDebounceMs: 200,
+			SearchDebounceMs: DefaultSearchDebounceMs,
 		},
 		Media: MediaConfig{
 			Darwin: MediaPlayers{

@@ -19,6 +19,9 @@ refresh_interval = "5m"
 default_retry_after = "15m"
 # User agent string for HTTP requests
 user_agent = "fwrd/1.0 (https://github.com/pders01/fwrd)"
+# Cap on parallel feed fetches during a refresh. Lower this if your
+# upstream rate-limits or you want gentler behaviour on shared networks.
+max_concurrent_refreshes = 5
 
 [ui.colors]
 # Color scheme - accepts hex values or named colors
