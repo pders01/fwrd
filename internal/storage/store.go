@@ -313,9 +313,17 @@ func (s *Store) getArticlesForFeed(tx *bolt.Tx, ab *bolt.Bucket, feedID string, 
 		*articles = append(*articles, &article)
 	}
 
-	// Sort by date (newest first)
-	sort.Slice(*articles, func(i, j int) bool {
-		return (*articles)[i].Published.After((*articles)[j].Published)
+	// Sort by date (newest first), with article ID as a deterministic
+	// tie-breaker. Many feeds publish multiple items with identical
+	// pubDate values; without a secondary key the ordering of ties is
+	// arbitrary, which causes pagination to drop or duplicate articles
+	// across pages.
+	sort.SliceStable(*articles, func(i, j int) bool {
+		ai, aj := (*articles)[i], (*articles)[j]
+		if !ai.Published.Equal(aj.Published) {
+			return ai.Published.After(aj.Published)
+		}
+		return ai.ID < aj.ID
 	})
 
 	// Apply cursor-based filtering after sorting
