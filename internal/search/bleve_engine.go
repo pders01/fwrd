@@ -143,14 +143,14 @@ const (
 // description outranks content outranks URL because users typically
 // search for what they remember most strongly first.
 const (
-	boostTitleMatch          = 4.0
-	boostTitlePrefix         = 3.5
-	boostDescriptionMatch    = 2.0
-	boostDescriptionPrefix   = 1.8
-	boostContentMatch        = 1.0
-	boostContentPrefix       = 0.8
-	boostURLMatch            = 0.5
-	boostURLPrefix           = 0.3
+	boostTitleMatch        = 4.0
+	boostTitlePrefix       = 3.5
+	boostDescriptionMatch  = 2.0
+	boostDescriptionPrefix = 1.8
+	boostContentMatch      = 1.0
+	boostContentPrefix     = 0.8
+	boostURLMatch          = 0.5
+	boostURLPrefix         = 0.3
 )
 
 func (b *bleveEngine) reindexAll() error {

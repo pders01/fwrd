@@ -60,23 +60,23 @@ type App struct {
 	// from a search hit on a feed; otherwise ViewFeeds. navigateBack
 	// from ViewArticles uses this so search → feed-result → Esc returns
 	// the user to their search results rather than the feed list.
-	articlesOrigin View
-	feeds            []*storage.Feed
-	articles         []*storage.Article
-	currentFeed      *storage.Feed
-	currentArticle   *storage.Article
-	feedToDelete     *storage.Feed
-	feedToRename     *storage.Feed
-	searchResults    []searchResultItem
-	mediaURLs        []string // Current media URLs being displayed
-	width            int
-	height           int
-	err              error
-	glamourRenderer  *glamour.TermRenderer
-	rendererWidth    int    // Track the width used for the renderer
-	themePref        string // user preference: "auto" / "light" / "dark"
-	glamourStyle     string // Resolved style passed to glamour ("dark"/"light"/NoTTY)
-	loadingArticle   bool   // Track if we're loading an article
+	articlesOrigin  View
+	feeds           []*storage.Feed
+	articles        []*storage.Article
+	currentFeed     *storage.Feed
+	currentArticle  *storage.Article
+	feedToDelete    *storage.Feed
+	feedToRename    *storage.Feed
+	searchResults   []searchResultItem
+	mediaURLs       []string // Current media URLs being displayed
+	width           int
+	height          int
+	err             error
+	glamourRenderer *glamour.TermRenderer
+	rendererWidth   int    // Track the width used for the renderer
+	themePref       string // user preference: "auto" / "light" / "dark"
+	glamourStyle    string // Resolved style passed to glamour ("dark"/"light"/NoTTY)
+	loadingArticle  bool   // Track if we're loading an article
 
 	// Article list pagination state. articlesCursor stores the last
 	// article ID returned by the most recent page so the next page can
