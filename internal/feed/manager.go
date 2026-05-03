@@ -266,15 +266,15 @@ func (m *Manager) RefreshAllFeeds() (RefreshSummary, error) {
 		err      error
 	}
 
-	const maxConcurrent = 5
+	maxConcurrent := m.config.Feed.MaxConcurrentRefreshes
+	if maxConcurrent <= 0 {
+		maxConcurrent = config.DefaultMaxConcurrentRefreshes
+	}
 	feedChan := make(chan *storage.Feed, len(feeds))
 	resultChan := make(chan result, len(feeds))
 
 	var wg sync.WaitGroup
-	workers := maxConcurrent
-	if len(feeds) < workers {
-		workers = len(feeds)
-	}
+	workers := min(maxConcurrent, len(feeds))
 	for range workers {
 		wg.Add(1)
 		go func() {
