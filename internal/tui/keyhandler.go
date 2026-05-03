@@ -515,32 +515,42 @@ func (kh *KeyHandler) sanitizeSearchInput(input string) string {
 	return strings.TrimSpace(input)
 }
 
-// openURL opens a URL using the launcher and handles errors appropriately
+// openMediaList enters the media chooser populated from the current
+// article's MediaURLs. The article's own URL is prepended as a synthetic
+// entry so the chooser is never a dead-end: users can still open the
+// underlying article even when the article carries multiple media items.
 func (kh *KeyHandler) openMediaList() (tea.Model, tea.Cmd) {
 	if kh.app.currentArticle == nil || len(kh.app.currentArticle.MediaURLs) == 0 {
 		return kh.app, nil
 	}
 
-	// Prepare media items for the list
-	items := make([]list.Item, len(kh.app.currentArticle.MediaURLs))
 	detector, _ := media.NewTypeDetector()
+	mediaURLs := kh.app.currentArticle.MediaURLs
 
-	for i, url := range kh.app.currentArticle.MediaURLs {
+	items := make([]list.Item, 0, len(mediaURLs)+1)
+	if kh.app.currentArticle.URL != "" {
+		items = append(items, mediaItem{
+			url:       kh.app.currentArticle.URL,
+			isArticle: true,
+			icons:     &kh.app.icons,
+		})
+	}
+	for i, url := range mediaURLs {
 		mediaType := media.TypeUnknown
 		if detector != nil {
 			mediaType = detector.DetectType(url)
 		}
-		items[i] = mediaItem{
+		items = append(items, mediaItem{
 			url:       url,
 			mediaType: mediaType,
 			index:     i,
-			total:     len(kh.app.currentArticle.MediaURLs),
+			total:     len(mediaURLs),
 			icons:     &kh.app.icons,
-		}
+		})
 	}
 
 	kh.app.mediaList.SetItems(items)
-	kh.app.mediaURLs = kh.app.currentArticle.MediaURLs
+	kh.app.mediaURLs = mediaURLs
 	kh.app.previousView = kh.app.view
 	kh.app.view = ViewMedia
 
