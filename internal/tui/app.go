@@ -457,11 +457,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case articleRenderedMsg:
-		// Always clear loading state — the render finished, regardless of
-		// whether the user has since navigated away. Setting viewport content
-		// when not in ViewReader is harmless (it's just buffered for next entry).
+		// loadingArticle is set on user-driven article opens (Enter from
+		// list / search) and stays false for in-place re-renders such as
+		// the theme-toggle path. On a fresh open we always jump to the
+		// top; on a re-render we preserve the scroll offset so the user
+		// is not snapped back to the start of the article they were
+		// reading.
+		isInitialLoad := a.loadingArticle
+		yOffset := a.viewport.YOffset
 		a.viewport.SetContent(msg.content)
-		a.viewport.GotoTop()
+		if isInitialLoad {
+			a.viewport.GotoTop()
+		} else {
+			a.viewport.SetYOffset(yOffset)
+		}
 		a.loadingArticle = false
 		a.stopSpinner()
 
