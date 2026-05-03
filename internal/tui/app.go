@@ -72,6 +72,16 @@ type App struct {
 	glamourStyle     string // Resolved style passed to glamour ("dark"/"light"/NoTTY)
 	loadingArticle   bool   // Track if we're loading an article
 
+	// Article list pagination state. articlesCursor stores the last
+	// article ID returned by the most recent page so the next page can
+	// resume from it; articlesHasMore is true while the store may still
+	// have additional articles for the current feed; articlesLoadingMore
+	// guards against overlapping fetches when scroll events fire faster
+	// than a tea.Cmd round-trip.
+	articlesCursor      string
+	articlesHasMore     bool
+	articlesLoadingMore bool
+
 	// Theme change plumbing. themeEvents is signaled (without payload)
 	// whenever an external source — SIGUSR1 or the macOS plist watcher —
 	// asks the app to re-resolve. The reader-loop tea.Cmd installed in
@@ -422,12 +432,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case articlesLoadedMsg:
 		if a.view == ViewArticles {
-			a.articles = msg.articles
-			items := make([]list.Item, len(msg.articles))
-			for i, art := range msg.articles {
-				items[i] = articleItem{article: art, maxDescLen: a.config.UI.Article.MaxDescriptionLength}
+			if msg.appendPage {
+				a.articles = append(a.articles, msg.articles...)
+				items := a.articleList.Items()
+				for _, art := range msg.articles {
+					items = append(items, articleItem{article: art, maxDescLen: a.config.UI.Article.MaxDescriptionLength})
+				}
+				a.articleList.SetItems(items)
+			} else {
+				a.articles = msg.articles
+				items := make([]list.Item, len(msg.articles))
+				for i, art := range msg.articles {
+					items[i] = articleItem{article: art, maxDescLen: a.config.UI.Article.MaxDescriptionLength}
+				}
+				a.articleList.SetItems(items)
 			}
-			a.articleList.SetItems(items)
+			a.articlesCursor = msg.cursor
+			a.articlesHasMore = msg.hasMore
+			a.articlesLoadingMore = false
 		}
 
 	case articleRenderedMsg:
@@ -538,6 +560,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		newListModel, cmd := a.articleList.Update(msg)
 		a.articleList = newListModel
 		cmds = append(cmds, cmd)
+		if more := a.maybeLoadMoreArticles(); more != nil {
+			cmds = append(cmds, more)
+		}
 	case ViewReader:
 		newViewport, cmd := a.viewport.Update(msg)
 		a.viewport = newViewport
@@ -974,7 +999,10 @@ type feedsLoadedMsg struct {
 }
 
 type articlesLoadedMsg struct {
-	articles []*storage.Article
+	articles   []*storage.Article
+	cursor     string
+	appendPage bool
+	hasMore    bool
 }
 
 type articleRenderedMsg struct {

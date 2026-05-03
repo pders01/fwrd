@@ -22,13 +22,65 @@ func (a *App) loadFeeds() tea.Cmd {
 }
 
 func (a *App) loadArticles(feedID string) tea.Cmd {
+	return a.loadArticlesPage(feedID, "", false)
+}
+
+// loadMoreArticles fetches the next page of articles for feedID,
+// continuing after the supplied cursor. Used by the article list to
+// stream additional pages when the user scrolls toward the end.
+func (a *App) loadMoreArticles(feedID, cursor string) tea.Cmd {
+	return a.loadArticlesPage(feedID, cursor, true)
+}
+
+// loadArticlesPage is the shared implementation behind first-page
+// loads and incremental "load more" calls. It returns one
+// articlesLoadedMsg whose fields tell the Update handler whether to
+// replace or append, and where the next cursor sits.
+func (a *App) loadArticlesPage(feedID, cursor string, appendPage bool) tea.Cmd {
 	return func() tea.Msg {
-		articles, err := a.store.GetArticles(feedID, pickPositive(a.config.UI.Article.ListLimit, DefaultArticleLimit))
+		limit := pickPositive(a.config.UI.Article.ListLimit, DefaultArticleLimit)
+		articles, err := a.store.GetArticlesWithCursor(feedID, limit, cursor)
 		if err != nil {
 			return errorMsg{err: wrapErr("load articles", err)}
 		}
-		return articlesLoadedMsg{articles: articles}
+		nextCursor := ""
+		hasMore := false
+		if limit > 0 && len(articles) == limit {
+			hasMore = true
+			nextCursor = articles[len(articles)-1].ID
+		}
+		return articlesLoadedMsg{
+			articles:   articles,
+			appendPage: appendPage,
+			cursor:     nextCursor,
+			hasMore:    hasMore,
+		}
 	}
+}
+
+// articleListPrefetchMargin is how many items from the bottom of the
+// article list will trigger a prefetch of the next page. A small margin
+// keeps memory bounded; a non-zero value avoids the user noticing the
+// fetch latency at the very last item.
+const articleListPrefetchMargin = 10
+
+// maybeLoadMoreArticles dispatches the next pagination request when the
+// user has scrolled near the end of the loaded article list. Returns
+// nil when no fetch is needed (no current feed, no remaining pages, an
+// in-flight request, or the selection is far from the end).
+func (a *App) maybeLoadMoreArticles() tea.Cmd {
+	if !a.articlesHasMore || a.articlesLoadingMore || a.currentFeed == nil || a.articlesCursor == "" {
+		return nil
+	}
+	items := a.articleList.Items()
+	if len(items) == 0 {
+		return nil
+	}
+	if a.articleList.Index() < len(items)-articleListPrefetchMargin {
+		return nil
+	}
+	a.articlesLoadingMore = true
+	return a.loadMoreArticles(a.currentFeed.ID, a.articlesCursor)
 }
 
 // Content size limits for security and performance

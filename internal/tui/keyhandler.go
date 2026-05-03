@@ -315,6 +315,9 @@ func (kh *KeyHandler) delegateToCharm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return kh.app, tea.Batch(kh.app.startSpinner(MsgLoadingArticle), markReadCmd, renderCmd)
 			}
 		}
+		if more := kh.app.maybeLoadMoreArticles(); more != nil {
+			return kh.app, tea.Batch(cmd, more)
+		}
 		return kh.app, cmd
 
 	case ViewSearch:
