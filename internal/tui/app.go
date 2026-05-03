@@ -402,16 +402,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		a.feedList.SetSize(msg.Width, msg.Height-5)
-		a.articleList.SetSize(msg.Width, msg.Height-5)
-		// Search view layout requires 10 lines for UI chrome
-		searchListHeight := max(msg.Height-10,
-			// Minimum height
-			5)
+		a.feedList.SetSize(msg.Width, msg.Height-listViewChrome)
+		a.articleList.SetSize(msg.Width, msg.Height-listViewChrome)
+		searchListHeight := max(msg.Height-searchViewChrome, minSearchListHeight)
 		a.searchList.SetSize(msg.Width, searchListHeight)
-		a.mediaList.SetSize(msg.Width, msg.Height-3)
+		a.mediaList.SetSize(msg.Width, msg.Height-viewportChrome)
 		a.viewport.Width = msg.Width
-		a.viewport.Height = msg.Height - 3
+		a.viewport.Height = msg.Height - viewportChrome
 
 		inputWidth := msg.Width - 4
 		if inputWidth < 20 {
@@ -920,11 +917,8 @@ func (i searchResultItem) iconSet() IconSet {
 func (i searchResultItem) Description() string {
 	if i.isArticle {
 		desc := i.article.Description
-		// Make search result description responsive
-		// Use a reasonable description length for search results
-		maxDescLength := 50
-		if len(desc) > maxDescLength {
-			desc = desc[:maxDescLength] + "…"
+		if len(desc) > searchResultDescLength {
+			desc = desc[:searchResultDescLength] + "…"
 		}
 
 		// Show which feed this article belongs to

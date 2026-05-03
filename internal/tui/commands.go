@@ -271,11 +271,10 @@ func (a *App) performSearchWithContext(query, context string) tea.Cmd {
 			searchResults, err = a.searchEngine.SearchInArticle(a.currentArticle, query)
 			// If no results in-article, fall back to global to avoid empty UX
 			if err == nil && len(searchResults) == 0 {
-				searchResults, err = a.searchEngine.Search(query, 20)
+				searchResults, err = a.searchEngine.Search(query, defaultSearchResultLimit)
 			}
 		} else {
-			// Global search with limit
-			searchResults, err = a.searchEngine.Search(query, 20)
+			searchResults, err = a.searchEngine.Search(query, defaultSearchResultLimit)
 		}
 
 		if err != nil {

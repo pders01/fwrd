@@ -38,6 +38,23 @@ const (
 	// defaultMaxDescriptionLength is the fallback used when articleItem
 	// has no configured limit (typically only in tests).
 	defaultMaxDescriptionLength = 80
+
+	// Layout chrome — rows reserved for headers, status bars, and
+	// padding around the various list views. Subtracted from the total
+	// terminal height so the inner list/viewport gets the remaining
+	// space.
+	listViewChrome      = 5  // feed and article list views
+	searchViewChrome    = 10 // search view (input + status + results)
+	viewportChrome      = 3  // reader, media list (single header + status)
+	minSearchListHeight = 5  // floor when the terminal is very short
+
+	// defaultSearchResultLimit caps how many results a single search
+	// query returns to the UI.
+	defaultSearchResultLimit = 20
+
+	// searchResultDescLength caps the truncated description shown on
+	// each search result row in the result list.
+	searchResultDescLength = 50
 )
 
 // pickPositive returns v if positive, otherwise fallback. Used for
