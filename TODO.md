@@ -164,8 +164,6 @@ the article content rather than the feed roster.
 
 ---
 
-## Next Up
-
 ### **Feed-management page (`/feeds`) redesign** — COMPLETED
 
 Reworked from the pre-overhaul flat list to match the newspaper polish.
@@ -195,6 +193,48 @@ Surfacing errors would need an error/last-status field on `Feed`, written by
 Code: `internal/web/handlers.go` (`handleFeeds`, `feedCounts`),
 `internal/web/front.go` (`feedLabel`, `feedHost`, `feedSource`),
 `internal/web/templates/feeds.html`, `style.css`, `app.js`.
+
+---
+
+### **Code-review hardening** — COMPLETED
+
+A review of the web-viewer branch produced a set of correctness, security,
+and consistency fixes, each landed as its own commit:
+
+- **storage** — delete the stale date-index key when a re-saved article's
+  `Published` changes, so it can't appear twice in newest-first pagination
+  or float a zero-time key to the top (regression-tested).
+- **web** — buffer template rendering so a mid-render error returns a clean
+  500; bound the OPML upload with `MaxBytesReader` and remove spilled temp
+  files; strip CSS comment/escape chars from the custom font value; add a
+  `:focus-visible` ring (WCAG 2.4.7); replace the JS-only delete `confirm()`
+  with a no-JS `<details>` disclosure; emit `data-updated=0` for
+  never-fetched feeds.
+- **search** — close a bleve index opened after a lock timeout instead of
+  leaking it; close the test engine before temp cleanup (fixed a flaky
+  `RemoveAll` race); select permissive path validation via an explicit
+  argument rather than sniffing the temp-dir prefix.
+- **opml** — cap `Parse` input with an `io.LimitReader` (Go's xml does not
+  expand custom entities, so this only bounds size).
+- **cli / config / tui** — `--force` canonical with `--force-refresh` as a
+  deprecated alias; `toggle_star` added to the keybinding collision check
+  and example config; keyhandler consistency and a doc-comment fix.
+
+---
+
+## Next Up
+
+### **Persist feed fetch-error state**
+
+The `/feeds` meta row shows last-fetched but cannot show whether the last
+refresh failed, because `storage.Feed` stores no error/status field —
+last-fetched is the only staleness signal. Add a last-fetch error/status to
+`Feed`, write it from `Manager.RefreshFeed`, and surface it on `/feeds` (and
+optionally the TUI) as an error badge.
+
+Relevant code: `internal/storage/models.go` (`Feed`),
+`internal/feed/manager.go` (`RefreshFeed`), `internal/web/handlers.go`
+(`handleFeeds`), `internal/web/templates/feeds.html`.
 
 ---
 
