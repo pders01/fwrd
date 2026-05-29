@@ -33,7 +33,7 @@ func TestBleveEngineIndexesAndSearches(t *testing.T) {
 
 	// Create bleve index
 	idxPath := filepath.Join(dir, "index.bleve")
-	eng, err := NewBleveEngine(store, idxPath)
+	eng, err := newBleveEngine(store, idxPath, true)
 	require.NoError(t, err)
 
 	// Perform searches that should hit title/description/content
@@ -87,7 +87,7 @@ func TestBleveEngineIndexesFeedLargerThanChunkSize(t *testing.T) {
 	var eng Searcher
 	go func() {
 		defer close(done)
-		eng, err = NewBleveEngine(store, idxPath)
+		eng, err = newBleveEngine(store, idxPath, true)
 	}()
 	select {
 	case <-done:
@@ -139,7 +139,7 @@ func TestBleveEngineOnFeedDeleted_RemovesAllArticles(t *testing.T) {
 	}
 	require.NoError(t, store.SaveArticles(arts))
 
-	eng, err := NewBleveEngine(store, filepath.Join(dir, "idx.bleve"))
+	eng, err := newBleveEngine(store, filepath.Join(dir, "idx.bleve"), true)
 	require.NoError(t, err)
 
 	pre, err := eng.Search("victimsentinel", total)
