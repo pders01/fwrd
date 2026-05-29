@@ -99,14 +99,34 @@ so a second instance fails loudly instead of hanging on a held lock.
 
 ---
 
-## Optional Future Enhancements
+### **Web View Enhancements** — COMPLETED
 
-### **Web View Enhancements**
-- [ ] Star/favorite support (web + TUI; needs `Store.MarkArticleStarred`)
-- [ ] Progressive-enhancement JS for inline read toggles (avoid full reload)
-- [ ] OPML import/export
-- [ ] Optional auth / bind guidance for non-localhost exposure
-- [ ] Handler tests for add/refresh paths (currently manager-gated)
+The optional web-view follow-ups are now implemented:
+
+- **Star/favorite** — `Store.MarkArticleStarred` backs a `★` toggle in the
+  web view (feed list + article) and the TUI (`ctrl+f` in the article list
+  and reader, configurable via `[keys].toggle_star`). State is shared across
+  all three front-ends.
+- **Progressive-enhancement JS** — an embedded `app.js` upgrades the
+  read/star toggle forms to update in place via `fetch` (`redirect:
+  "manual"`, so the 303 is not followed into a wasted page render). With JS
+  off, the same no-JS POST forms drive the change — the server stays the
+  single source of truth.
+- **OPML import/export** — a shared `internal/opml` package (OPML 2.0,
+  nested-outline aware, dedup on import) is exposed both on the CLI
+  (`fwrd feed export/import [path]`, `-` for stdio) and the web view
+  (`GET /opml/export` download, `POST /opml/import` upload, 2 MiB cap).
+- **Auth / bind guidance** — optional HTTP Basic Auth via `[web.auth]`
+  (constant-time credential compare), a startup warning when binding a
+  non-loopback address without auth, and README "Exposing the web view"
+  guidance covering Basic Auth-behind-TLS and reverse-proxy setups.
+- **Handler tests** — manager-backed tests for add/refresh/OPML-import
+  (real fetch against an httptest backend with permissive validation), plus
+  star toggle, cross-origin rejection, OPML round-trip, and Basic Auth.
+
+---
+
+## Optional Future Enhancements
 
 ### **Testing Coverage Expansion**
 

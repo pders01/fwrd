@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -16,6 +20,7 @@ import (
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/feed"
+	"github.com/pders01/fwrd/internal/opml"
 	"github.com/pders01/fwrd/internal/plugins"
 	pluginlua "github.com/pders01/fwrd/internal/plugins/lua"
 	"github.com/pders01/fwrd/internal/search"
@@ -164,6 +169,26 @@ var feedRefreshCmd = &cobra.Command{
 	Run:   refreshFeeds,
 }
 
+var feedExportCmd = &cobra.Command{
+	Use:   "export [path]",
+	Short: "Export feeds to an OPML file",
+	Long: `export writes all stored feeds to an OPML 2.0 file other readers can
+import. Pass "-" as the path to write to stdout.`,
+	Args: cobra.ExactArgs(1),
+	Run:  exportFeeds,
+}
+
+var feedImportCmd = &cobra.Command{
+	Use:   "import [path]",
+	Short: "Import feeds from an OPML file",
+	Long: `import reads an OPML file and adds each listed feed, fetching it once
+so its articles are available immediately. Feeds that are already present or
+fail to fetch are reported and skipped; the rest still import. Pass "-" to
+read from stdin.`,
+	Args: cobra.ExactArgs(1),
+	Run:  importFeeds,
+}
+
 var pluginsCmd = &cobra.Command{
 	Use:   "plugins",
 	Short: "Inspect installed plugins",
@@ -181,6 +206,8 @@ func init() {
 	feedCmd.AddCommand(feedAddCmd)
 	feedCmd.AddCommand(feedDeleteCmd)
 	feedCmd.AddCommand(feedRefreshCmd)
+	feedCmd.AddCommand(feedExportCmd)
+	feedCmd.AddCommand(feedImportCmd)
 	pluginsCmd.AddCommand(pluginsListCmd)
 
 	// Add force flag to refresh command
@@ -370,6 +397,13 @@ func runServe(_ *cobra.Command, _ []string) {
 			return fmt.Errorf("failed to build web server: %w", err)
 		}
 
+		if !isLoopbackBind(serveAddr) && !srv.AuthEnabled() {
+			fmt.Fprintln(os.Stderr, "Warning: serving on a non-loopback address without authentication.")
+			fmt.Fprintln(os.Stderr, "         Anyone who can reach this address can read and modify your feeds.")
+			fmt.Fprintln(os.Stderr, "         Set [web.auth] username/password in your config, or front it with a")
+			fmt.Fprintln(os.Stderr, "         reverse proxy that handles auth/TLS. See README \"Exposing the web view\".")
+		}
+
 		fmt.Printf("fwrd serving on http://%s\n", serveAddr)
 		if err := srv.ListenAndServe(serveAddr); err != nil {
 			return fmt.Errorf("web server error: %w", err)
@@ -378,6 +412,25 @@ func runServe(_ *cobra.Command, _ []string) {
 	}); err != nil {
 		exitWithError(err)
 	}
+}
+
+// isLoopbackBind reports whether addr binds only the loopback interface,
+// so the warning about unauthenticated exposure is suppressed for the
+// default 127.0.0.1 bind. A bare port (":8080") or 0.0.0.0/empty host
+// counts as non-loopback because it accepts off-box connections.
+func isLoopbackBind(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // exitWithError prints err to stderr and exits non-zero. For known
@@ -490,6 +543,86 @@ func deleteFeed(_ *cobra.Command, args []string) {
 		}
 
 		fmt.Println("Feed deleted successfully.")
+		return nil
+	}); err != nil {
+		exitWithError(err)
+	}
+}
+
+func exportFeeds(_ *cobra.Command, args []string) {
+	path := args[0]
+	if err := withStore(func(store *storage.Store) error {
+		feeds, err := store.GetAllFeeds()
+		if err != nil {
+			return fmt.Errorf("failed to get feeds: %w", err)
+		}
+		data, err := opml.Export(feeds, time.Now())
+		if err != nil {
+			return fmt.Errorf("failed to render OPML: %w", err)
+		}
+		if path == "-" {
+			_, err = os.Stdout.Write(data)
+			return err
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			return fmt.Errorf("failed to write %s: %w", path, err)
+		}
+		fmt.Printf("Exported %d feed(s) to %s\n", len(feeds), path)
+		return nil
+	}); err != nil {
+		exitWithError(err)
+	}
+}
+
+func importFeeds(_ *cobra.Command, args []string) {
+	path := args[0]
+	if err := withStoreAndConfig(func(store *storage.Store, cfg *config.Config) error {
+		var data []byte
+		var err error
+		if path == "-" {
+			data, err = io.ReadAll(os.Stdin)
+		} else {
+			data, err = os.ReadFile(path)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read %s: %w", path, err)
+		}
+
+		feeds, err := opml.Parse(bytes.NewReader(data))
+		if err != nil {
+			return fmt.Errorf("failed to parse OPML: %w", err)
+		}
+		if len(feeds) == 0 {
+			fmt.Println("No feeds found in OPML file.")
+			return nil
+		}
+
+		manager := feed.NewManager(store, cfg)
+		loadLuaPlugins(manager)
+
+		// Snapshot existing URLs so already-subscribed feeds are skipped
+		// rather than re-fetched.
+		existing, _ := store.GetAllFeeds()
+		have := make(map[string]bool, len(existing))
+		for _, f := range existing {
+			have[f.URL] = true
+		}
+
+		var added, skipped, failed int
+		for _, f := range feeds {
+			if have[f.URL] {
+				skipped++
+				continue
+			}
+			fmt.Printf("Adding %s\n", f.URL)
+			if _, err := manager.AddFeed(f.URL); err != nil {
+				fmt.Fprintf(os.Stderr, "  failed: %v\n", err)
+				failed++
+				continue
+			}
+			added++
+		}
+		fmt.Printf("Imported %d feed(s); %d skipped (already present); %d failed.\n", added, skipped, failed)
 		return nil
 	}); err != nil {
 		exitWithError(err)

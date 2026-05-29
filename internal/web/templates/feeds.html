@@ -1,6 +1,8 @@
 {{define "title"}}Feeds{{end}}
 {{define "content"}}
-{{template "searchbar" ""}}
+{{template "masthead" ""}}
+<main>
+<nav class="crumbs"><a href="/">Front page</a> / Feeds</nav>
 <div class="page-head">
 <h1>Feeds</h1>
 <form action="/refresh" method="post"><button type="submit">Refresh all</button></form>
@@ -10,6 +12,14 @@
 <input type="url" name="url" placeholder="https://example.com/feed.xml" required aria-label="Feed URL">
 <button type="submit">Add feed</button>
 </form>
+
+<div class="opml-bar">
+<a href="/opml/export" class="link">Export OPML</a>
+<form action="/opml/import" method="post" enctype="multipart/form-data" class="opml-import">
+<input type="file" name="file" accept=".opml,.xml,text/xml,application/xml,text/x-opml" required aria-label="OPML file">
+<button type="submit" class="link">Import OPML</button>
+</form>
+</div>
 
 {{if .Feeds}}
 <ul class="feed-list">
@@ -30,4 +40,5 @@
 {{else}}
 <p class="muted">No feeds yet. Add one above, or via <code>fwrd feed add &lt;url&gt;</code>.</p>
 {{end}}
+</main>
 {{end}}

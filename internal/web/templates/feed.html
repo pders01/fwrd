@@ -1,7 +1,8 @@
 {{define "title"}}{{if .Feed.Title}}{{.Feed.Title}}{{else}}Feed{{end}}{{end}}
 {{define "content"}}
-{{template "searchbar" ""}}
-<nav class="crumbs"><a href="/">Feeds</a> / {{if .Feed.Title}}{{.Feed.Title}}{{else}}{{.Feed.URL}}{{end}}</nav>
+{{template "masthead" ""}}
+<main>
+<nav class="crumbs"><a href="/">Front page</a> / <a href="/feeds">Feeds</a> / {{if .Feed.Title}}{{.Feed.Title}}{{else}}{{.Feed.URL}}{{end}}</nav>
 <div class="page-head">
 <h1>{{if .Feed.Title}}{{.Feed.Title}}{{else}}{{.Feed.URL}}{{end}}</h1>
 <span class="feed-actions">
@@ -13,11 +14,17 @@
 {{if .Articles}}
 <ul class="article-list">
 {{range .Articles}}
-<li class="{{if .Read}}read{{end}}">
+<li class="{{if .Read}}read{{end}}{{if .Starred}} starred{{end}}">
 <a href="/article?id={{.ID}}">{{if .Title}}{{.Title}}{{else}}(untitled){{end}}</a>
 <span class="row-meta">
 {{if not .Published.IsZero}}<time class="muted">{{date .Published}}</time>{{end}}
-<form action="/read" method="post" class="inline">
+<form action="/star" method="post" class="inline js-toggle" data-kind="star">
+<input type="hidden" name="id" value="{{.ID}}">
+<input type="hidden" name="starred" value="{{if .Starred}}0{{else}}1{{end}}">
+<input type="hidden" name="return" value="/feeds/{{$.Feed.ID}}">
+<button type="submit" class="link" aria-pressed="{{if .Starred}}true{{else}}false{{end}}">{{if .Starred}}unstar{{else}}star{{end}}</button>
+</form>
+<form action="/read" method="post" class="inline js-toggle" data-kind="read">
 <input type="hidden" name="id" value="{{.ID}}">
 <input type="hidden" name="read" value="{{if .Read}}0{{else}}1{{end}}">
 <input type="hidden" name="return" value="/feeds/{{$.Feed.ID}}">
@@ -33,4 +40,5 @@
 {{else}}
 <p class="muted">No articles stored. Refresh above, or run <code>fwrd feed refresh</code>.</p>
 {{end}}
+</main>
 {{end}}

@@ -1,0 +1,43 @@
+{{define "title"}}fwrd{{end}}
+{{define "content"}}
+<header class="front-masthead">
+{{if not .Now.IsZero}}<p class="dateline">{{longdate .Now}}</p>{{end}}
+<a href="/" class="nameplate">fwrd</a>
+<p class="tagline">forward, through time</p>
+<form action="/search" method="get" class="search hero" role="search">
+<input type="search" name="q" placeholder="Search articles…" autofocus autocomplete="off" aria-label="Search articles">
+</form>
+<nav class="front-nav"><a href="/feeds">Manage feeds</a></nav>
+</header>
+
+{{if .HasContent}}
+<main class="front">
+<article class="lead">
+<a class="lead-link" href="/article?id={{.Lead.ID}}"><h1 class="lead-hl">{{if .Lead.Title}}{{.Lead.Title}}{{else}}(untitled){{end}}</h1></a>
+<p class="byline">{{.LeadFeed}}{{if not .Lead.Published.IsZero}} · <time>{{date .Lead.Published}}</time>{{end}}</p>
+{{if .LeadDeck}}<p class="deck">{{.LeadDeck}}</p>{{end}}
+</article>
+
+<div class="sections">
+{{range .Sections}}
+<section class="topic-block">
+<h2 class="section-label"><a href="/topic/{{.Slug}}">{{.Label}}</a></h2>
+<ul class="headlines">
+{{range .Headlines}}
+<li class="{{if .Article.Read}}read{{end}}{{if .Article.Starred}} starred{{end}}">
+<a href="/article?id={{.Article.ID}}">{{if .Article.Title}}{{.Article.Title}}{{else}}(untitled){{end}}</a>
+<span class="byline">{{.Feed}}{{if not .Article.Published.IsZero}} · {{date .Article.Published}}{{end}}</span>
+</li>
+{{end}}
+</ul>
+{{if gt .More 0}}<p class="more"><a href="/topic/{{.Slug}}">+{{.More}} more →</a></p>{{end}}
+</section>
+{{end}}
+</div>
+</main>
+{{else}}
+<main class="front">
+<p class="muted empty">No articles yet. <a href="/feeds">Add feeds</a> to build your front page, or run <code>fwrd feed add &lt;url&gt;</code>.</p>
+</main>
+{{end}}
+{{end}}

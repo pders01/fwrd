@@ -1,6 +1,7 @@
 {{define "title"}}Search{{end}}
 {{define "content"}}
-{{template "searchbar" .Query}}
+{{template "masthead" .Query}}
+<main>
 {{if not .Available}}
 <p class="muted">Search is unavailable (index failed to initialize).</p>
 {{else if .Query}}
@@ -8,7 +9,7 @@
 {{if .Results}}
 <ul class="article-list">
 {{range .Results}}
-<li><a href="/article?id={{.ID}}">{{if .Title}}{{.Title}}{{else}}(untitled){{end}}</a>
+<li class="{{if .Read}}read{{end}}{{if .Starred}} starred{{end}}"><a href="/article?id={{.ID}}">{{if .Title}}{{.Title}}{{else}}(untitled){{end}}</a>
 {{if not .Published.IsZero}}<time class="muted">{{date .Published}}</time>{{end}}</li>
 {{end}}
 </ul>
@@ -18,4 +19,5 @@
 {{else}}
 <p class="muted">Type a query above.</p>
 {{end}}
+</main>
 {{end}}
