@@ -247,6 +247,29 @@ Code: `internal/tui/branding.go`, `internal/tui/theme.go`,
 
 ---
 
+### **Background service, mDNS (fwrd.local), and favicon** — COMPLETED
+
+Make the web view a first-class always-on surface reachable by name:
+
+- **mDNS** (`internal/mdns`, hashicorp/mdns) — `serve --mdns` advertises an
+  `fwrd.local` A record plus an `_http._tcp` service on the bind port, so any
+  LAN device reaches `http://fwrd.local:8080` without DNS/hosts/static IP.
+  IPv4-only, link-local; warns on a loopback bind (the name would resolve to
+  an unreachable interface). Coexists with Avahi on Linux. `--mdns-name`
+  changes the label.
+- **Service** (`internal/service`) — `fwrd service install/uninstall` writes
+  and activates a per-user systemd unit (Linux) or launchd LaunchAgent
+  (macOS), pointing at the running binary and forwarding `--config`/`--db`.
+  Defaults to `--addr 0.0.0.0:8080 --mdns`. Build-tag split per OS with an
+  unsupported-platform stub; unit/plist rendered with `text/template` (plist
+  values XML-escaped via a template func). Pure render functions are tested;
+  install/uninstall shell out to systemctl/launchctl.
+- **Favicon** — a theme-aware SVG (forward triangle, `prefers-color-scheme`)
+  embedded and served at `/favicon.svg` + `/favicon.ico`, linked from
+  `layout.html`.
+
+---
+
 ### **Styled CLI logging (charmbracelet/log)** — COMPLETED
 
 The CLI's operational output (startup, plugin load/registration, `serve`
