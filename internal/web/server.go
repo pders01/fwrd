@@ -9,6 +9,7 @@ package web
 import (
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/pders01/fwrd/internal/config"
@@ -26,6 +27,12 @@ type Server struct {
 	searcher search.Searcher
 	cfg      *config.Config
 	tmpl     *templates
+
+	// writeMu serializes operations that notify the search index. The
+	// DataListener/DeleteListener contract requires that notifications not
+	// arrive concurrently; net/http runs each request in its own goroutine,
+	// so without this two mutating requests could race the bleve batch.
+	writeMu sync.Mutex
 }
 
 // NewServer wires handlers over the given backends. manager drives feed

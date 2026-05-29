@@ -5,10 +5,12 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/pders01/fwrd/internal/config"
+	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/storage"
 )
 
@@ -197,6 +199,50 @@ func TestFeedPagination(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "cursor=") {
 		t.Error("expected a pagination link when articles exceed one page")
+	}
+}
+
+// stubDeleteListener is a Searcher whose OnFeedDeleted writes an
+// unsynchronized map. If the server fails to serialize index-touching
+// mutations, concurrent deletes race this map and -race fails the test.
+type stubDeleteListener struct {
+	deleted map[string]int
+}
+
+func (s *stubDeleteListener) Search(string, int) ([]*search.Result, error) { return nil, nil }
+func (s *stubDeleteListener) SearchInArticle(*storage.Article, string) ([]*search.Result, error) {
+	return nil, nil
+}
+func (s *stubDeleteListener) OnFeedDeleted(id string) { s.deleted[id]++ }
+
+func TestConcurrentMutationsSerialized(t *testing.T) {
+	store, err := storage.NewStore(storage.MemoryPath)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	stub := &stubDeleteListener{deleted: map[string]int{}}
+	srv, err := NewServer(store, nil, stub, &config.Config{})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	h := srv.Handler()
+
+	const n = 50
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			postForm(t, h, "/feeds/f/delete", url.Values{}, true)
+			_ = i
+		}(i)
+	}
+	wg.Wait()
+
+	if stub.deleted["f"] != n {
+		t.Errorf("OnFeedDeleted called %d times, want %d", stub.deleted["f"], n)
 	}
 }
 

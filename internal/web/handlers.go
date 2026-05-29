@@ -145,6 +145,8 @@ func (s *Server) handleAddFeed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing feed url", http.StatusBadRequest)
 		return
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if _, err := s.manager.AddFeed(url); err != nil {
 		http.Error(w, "failed to add feed: "+err.Error(), http.StatusBadGateway)
 		return
@@ -158,6 +160,8 @@ func (s *Server) handleRefreshFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if err := s.manager.RefreshFeed(id); err != nil {
 		http.Error(w, "failed to refresh feed: "+err.Error(), http.StatusBadGateway)
 		return
@@ -170,6 +174,8 @@ func (s *Server) handleRefreshAll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "feed management is disabled", http.StatusServiceUnavailable)
 		return
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if _, err := s.manager.RefreshAllFeeds(); err != nil {
 		http.Error(w, "failed to refresh feeds: "+err.Error(), http.StatusBadGateway)
 		return
@@ -179,6 +185,8 @@ func (s *Server) handleRefreshAll(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if err := s.store.DeleteFeed(id); err != nil {
 		http.Error(w, "failed to delete feed: "+err.Error(), http.StatusInternalServerError)
 		return
