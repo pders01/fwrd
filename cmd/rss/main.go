@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -20,10 +21,12 @@ import (
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/feed"
+	"github.com/pders01/fwrd/internal/mdns"
 	"github.com/pders01/fwrd/internal/opml"
 	"github.com/pders01/fwrd/internal/plugins"
 	pluginlua "github.com/pders01/fwrd/internal/plugins/lua"
 	"github.com/pders01/fwrd/internal/search"
+	"github.com/pders01/fwrd/internal/service"
 	"github.com/pders01/fwrd/internal/storage"
 	"github.com/pders01/fwrd/internal/tui"
 	"github.com/pders01/fwrd/internal/validation"
@@ -64,12 +67,17 @@ func loadLuaPlugins(m *feed.Manager) {
 var Version = "dev"
 
 var (
-	cfgFile      string
-	dbPath       string
-	debugFlag    bool
-	quiet        bool
-	forceRefresh bool
-	serveAddr    string
+	cfgFile       string
+	dbPath        string
+	debugFlag     bool
+	quiet         bool
+	forceRefresh  bool
+	serveAddr     string
+	serveMDNS     bool
+	serveMDNSName string
+	svcAddr       string
+	svcMDNS       bool
+	svcMDNSName   string
 )
 
 var rootCmd = &cobra.Command{
@@ -95,6 +103,16 @@ func init() {
 
 	// serve flags
 	serveCmd.Flags().StringVar(&serveAddr, "addr", "127.0.0.1:8080", "address to bind the web server")
+	serveCmd.Flags().BoolVar(&serveMDNS, "mdns", false, "advertise the web view on the LAN over mDNS (e.g. http://fwrd.local:PORT)")
+	serveCmd.Flags().StringVar(&serveMDNSName, "mdns-name", "fwrd", "mDNS hostname label; advertised as <name>.local")
+
+	// service flags: default to a LAN bind + mDNS, since a background
+	// service exists to be reachable from other devices as fwrd.local.
+	serviceInstallCmd.Flags().StringVar(&svcAddr, "addr", "0.0.0.0:8080", "address the service binds")
+	serviceInstallCmd.Flags().BoolVar(&svcMDNS, "mdns", true, "advertise the service over mDNS as <name>.local")
+	serviceInstallCmd.Flags().StringVar(&svcMDNSName, "mdns-name", "fwrd", "mDNS hostname label; advertised as <name>.local")
+	serviceCmd.AddCommand(serviceInstallCmd)
+	serviceCmd.AddCommand(serviceUninstallCmd)
 
 	// Add commands
 	rootCmd.AddCommand(versionCmd)
@@ -102,6 +120,7 @@ func init() {
 	rootCmd.AddCommand(feedCmd)
 	rootCmd.AddCommand(pluginsCmd)
 	rootCmd.AddCommand(serveCmd)
+	rootCmd.AddCommand(serviceCmd)
 }
 
 var serveCmd = &cobra.Command{
@@ -114,6 +133,26 @@ than the lossy terminal markdown the TUI must use.
 The web server holds the database open for its lifetime, so it cannot run
 against the same --db as a concurrent TUI (BoltDB is single-process).`,
 	Run: runServe,
+}
+
+var serviceCmd = &cobra.Command{
+	Use:   "service",
+	Short: "Install or remove fwrd as a background web service",
+	Long: `service manages a per-user background service that runs "fwrd serve":
+a systemd user unit on Linux, a launchd LaunchAgent on macOS. It installs
+under your home directory and needs no root.`,
+}
+
+var serviceInstallCmd = &cobra.Command{
+	Use:   "install",
+	Short: "Install and start the fwrd web service for the current user",
+	Run:   runServiceInstall,
+}
+
+var serviceUninstallCmd = &cobra.Command{
+	Use:   "uninstall",
+	Short: "Stop and remove the fwrd web service",
+	Run:   runServiceUninstall,
 }
 
 var versionCmd = &cobra.Command{
@@ -415,6 +454,12 @@ func runServe(_ *cobra.Command, _ []string) {
 					"handling auth/TLS (README: \"Exposing the web view\")")
 		}
 
+		if serveMDNS {
+			if adv := startMDNS(serveAddr); adv != nil {
+				defer func() { _ = adv.Close() }()
+			}
+		}
+
 		logger.Info("serving", "url", "http://"+serveAddr)
 		if err := srv.ListenAndServe(serveAddr); err != nil {
 			return fmt.Errorf("web server error: %w", err)
@@ -423,6 +468,77 @@ func runServe(_ *cobra.Command, _ []string) {
 	}); err != nil {
 		exitWithError(err)
 	}
+}
+
+func runServiceInstall(_ *cobra.Command, _ []string) {
+	bin, err := os.Executable()
+	if err != nil {
+		logger.Fatal("cannot resolve the fwrd binary path", "err", err)
+	}
+	// Resolve symlinks so the unit points at the real binary, not a launcher
+	// shim that might move.
+	if resolved, rerr := filepath.EvalSymlinks(bin); rerr == nil {
+		bin = resolved
+	}
+	path, err := service.Install(&service.Options{
+		BinPath:  bin,
+		Addr:     svcAddr,
+		MDNS:     svcMDNS,
+		MDNSName: svcMDNSName,
+		Config:   cfgFile,
+		DB:       dbPath,
+	})
+	if err != nil {
+		// A non-empty path means the file was written but activation failed —
+		// surface the path so the user can enable it by hand.
+		if path != "" {
+			logger.Error("service file written but activation failed", "path", path, "err", err)
+			os.Exit(1)
+		}
+		logger.Fatal("service install failed", "err", err)
+	}
+	logger.Info("service installed and started", "path", path)
+	if svcMDNS {
+		if _, port, perr := net.SplitHostPort(svcAddr); perr == nil {
+			logger.Info("reachable on the LAN", "url", "http://"+svcMDNSName+".local:"+port)
+		}
+	}
+}
+
+func runServiceUninstall(_ *cobra.Command, _ []string) {
+	path, err := service.Uninstall()
+	if err != nil {
+		logger.Fatal("service uninstall failed", "err", err)
+	}
+	logger.Info("service removed", "path", path)
+}
+
+// startMDNS advertises the web view over mDNS as <mdns-name>.local. A failure
+// is non-fatal — the server still runs, just without the .local alias — so it
+// logs and returns nil rather than aborting serve.
+func startMDNS(addr string) *mdns.Advertiser {
+	_, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		logger.Warn("mDNS disabled: cannot parse serve address", "addr", addr, "err", err)
+		return nil
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		logger.Warn("mDNS disabled: invalid port", "port", portStr, "err", err)
+		return nil
+	}
+	if isLoopbackBind(addr) {
+		logger.Warn("mDNS advertises a LAN address but the server is bound to loopback; "+
+			"clients resolving the .local name cannot reach it",
+			"fix", "bind a non-loopback address, e.g. --addr 0.0.0.0:"+portStr)
+	}
+	adv, err := mdns.Advertise(serveMDNSName, port)
+	if err != nil {
+		logger.Warn("mDNS disabled", "err", err)
+		return nil
+	}
+	logger.Info("mDNS advertising", "url", "http://"+serveMDNSName+".local:"+portStr)
+	return adv
 }
 
 // isLoopbackBind reports whether addr binds only the loopback interface,
