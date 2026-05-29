@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,6 +16,7 @@ import (
 	"github.com/spf13/viper"
 
 	tea "github.com/charmbracelet/bubbletea"
+	charmlog "github.com/charmbracelet/log"
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/feed"
@@ -30,12 +30,18 @@ import (
 	"github.com/pders01/fwrd/internal/web"
 )
 
-// stdLogger adapts standard log.Printf to plugins/lua's Logger so the
-// CLI surfaces plugin load issues on stderr.
-type stdLogger struct{}
+// logger is the CLI's operational logger: styled, leveled output on stderr
+// via charm's log (colored level badges, timestamps, key=value rendering).
+// It carries plugin-load and serve diagnostics; the file-based debuglog
+// package is separate and handles verbose per-request tracing.
+var logger = charmlog.NewWithOptions(os.Stderr, charmlog.Options{ReportTimestamp: true})
 
-func (stdLogger) Infof(format string, args ...any) { log.Printf("INFO  "+format, args...) }
-func (stdLogger) Warnf(format string, args ...any) { log.Printf("WARN  "+format, args...) }
+// pluginLogger adapts charm's log to plugins/lua's printf-style Logger
+// interface so plugin load events flow through the same styled output.
+type pluginLogger struct{}
+
+func (pluginLogger) Infof(format string, args ...any) { logger.Infof(format, args...) }
+func (pluginLogger) Warnf(format string, args ...any) { logger.Warnf(format, args...) }
 
 // loadLuaPlugins registers user-authored Lua plugins onto m's registry.
 // Failures are logged and ignored — a malformed plugin must not break
@@ -43,14 +49,14 @@ func (stdLogger) Warnf(format string, args ...any) { log.Printf("WARN  "+format,
 func loadLuaPlugins(m *feed.Manager) {
 	dir := pluginlua.DefaultPluginDir()
 	if err := pluginlua.EnsureDefaults(dir); err != nil {
-		log.Printf("WARN  seeding default lua plugins in %s: %v", dir, err)
+		logger.Warn("seeding default lua plugins", "dir", dir, "err", err)
 	}
 	bindings := pluginlua.Bindings{
 		HTTPClient: m.PluginHTTPClient(),
-		Logger:     stdLogger{},
+		Logger:     pluginLogger{},
 	}
 	if _, err := pluginlua.LoadAndRegister(m.PluginRegistry(), dir, bindings); err != nil {
-		log.Printf("WARN  loading lua plugins from %s: %v", dir, err)
+		logger.Warn("loading lua plugins", "dir", dir, "err", err)
 	}
 }
 
@@ -134,7 +140,7 @@ var configGenCmd = &cobra.Command{
 		configFile := filepath.Join(configDir, "config.toml")
 
 		if err := config.GenerateDefaultConfig(configFile); err != nil {
-			log.Fatalf("Failed to generate config: %v", err)
+			logger.Fatal("failed to generate config", "err", err)
 		}
 		fmt.Printf("Generated default configuration at: %s\n", configFile)
 	},
@@ -329,7 +335,7 @@ func runTUI(_ *cobra.Command, _ []string) {
 
 	if err := withStoreAndConfig(func(store *storage.Store, cfg *config.Config) error {
 		for _, w := range config.Warnings(cfg) {
-			fmt.Fprintln(os.Stderr, "Warning:", w)
+			logger.Warn(w)
 		}
 		app := tui.NewApp(store, cfg)
 		defer app.Close()
@@ -378,7 +384,7 @@ func runServe(_ *cobra.Command, _ []string) {
 
 	if err := withStoreAndConfig(func(store *storage.Store, cfg *config.Config) error {
 		for _, w := range config.Warnings(cfg) {
-			fmt.Fprintln(os.Stderr, "Warning:", w)
+			logger.Warn(w)
 		}
 
 		searcher, err := buildSearcher(store, cfg)
@@ -403,13 +409,13 @@ func runServe(_ *cobra.Command, _ []string) {
 		}
 
 		if !isLoopbackBind(serveAddr) && !srv.AuthEnabled() {
-			fmt.Fprintln(os.Stderr, "Warning: serving on a non-loopback address without authentication.")
-			fmt.Fprintln(os.Stderr, "         Anyone who can reach this address can read and modify your feeds.")
-			fmt.Fprintln(os.Stderr, "         Set [web.auth] username/password in your config, or front it with a")
-			fmt.Fprintln(os.Stderr, "         reverse proxy that handles auth/TLS. See README \"Exposing the web view\".")
+			logger.Warn("serving on a non-loopback address without authentication; "+
+				"anyone who can reach it can read and modify your feeds",
+				"fix", "set [web.auth] in your config, or front it with a reverse proxy "+
+					"handling auth/TLS (README: \"Exposing the web view\")")
 		}
 
-		fmt.Printf("fwrd serving on http://%s\n", serveAddr)
+		logger.Info("serving", "url", "http://"+serveAddr)
 		if err := srv.ListenAndServe(serveAddr); err != nil {
 			return fmt.Errorf("web server error: %w", err)
 		}
@@ -637,17 +643,17 @@ func importFeeds(_ *cobra.Command, args []string) {
 func listPlugins(_ *cobra.Command, _ []string) {
 	cfg, err := loadConfig()
 	if err != nil {
-		log.Fatalf("Error: failed to load config: %v", err)
+		logger.Fatal("failed to load config", "err", err)
 	}
 	dir := pluginlua.DefaultPluginDir()
 	if seedErr := pluginlua.EnsureDefaults(dir); seedErr != nil {
-		log.Printf("WARN  seeding default lua plugins in %s: %v", dir, seedErr)
+		logger.Warn("seeding default lua plugins", "dir", dir, "err", seedErr)
 	}
 
 	reg := plugins.NewRegistry(cfg.Feed.HTTPTimeout)
-	bindings := pluginlua.Bindings{Logger: stdLogger{}}
+	bindings := pluginlua.Bindings{Logger: pluginLogger{}}
 	if _, err := pluginlua.LoadAndRegister(reg, dir, bindings); err != nil {
-		log.Fatalf("Error: loading plugins from %s: %v", dir, err)
+		logger.Fatal("loading plugins", "dir", dir, "err", err)
 	}
 
 	loaded := reg.ListPlugins()
