@@ -7,7 +7,12 @@
 <h1>{{if .Feed.Title}}{{.Feed.Title}}{{else}}{{.Feed.URL}}{{end}}</h1>
 <span class="feed-actions">
 <form action="/feeds/{{.Feed.ID}}/refresh" method="post"><button type="submit">Refresh</button></form>
-<form action="/feeds/{{.Feed.ID}}/delete" method="post" onsubmit="return confirm('Delete this feed and its articles?')"><button type="submit" class="danger">Delete</button></form>
+<details class="confirm"><summary class="as-button">Delete</summary>
+<form action="/feeds/{{.Feed.ID}}/delete" method="post" class="confirm-form">
+<span class="confirm-q">Delete feed and its articles?</span>
+<button type="submit" class="danger">Yes, delete</button>
+</form>
+</details>
 </span>
 </div>
 {{if .Feed.Description}}<p class="muted">{{.Feed.Description}}</p>{{end}}

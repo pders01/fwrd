@@ -257,6 +257,26 @@ button.link {
 }
 button.danger { color: #c0392b; }
 button.link.danger { color: #c0392b; }
+
+/* No-JS delete confirmation: a <details> disclosure replaces an
+   onsubmit="confirm()" so the guard still works with JavaScript off — the
+   trigger expands to reveal the actual POST button rather than submitting
+   on the first click. */
+.confirm { display: inline; }
+.confirm > summary { cursor: pointer; list-style: none; color: #c0392b; }
+.confirm > summary::-webkit-details-marker { display: none; }
+.confirm > summary::marker { content: ""; }
+.confirm[open] > summary { display: none; }
+.confirm-form { display: inline-flex; align-items: center; gap: 0.5rem; }
+.confirm-q { color: var(--muted); font-size: 0.9rem; }
+summary.as-link { text-decoration: underline; }
+summary.as-button {
+  display: inline-block;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+summary.as-button:hover { border-color: var(--accent); }
 button[aria-pressed="true"] { font-weight: 700; }
 form.inline { display: inline; }
 /* feed-management toolbar: add-feed, filter/sort, and OPML in one block,
