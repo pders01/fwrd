@@ -42,6 +42,18 @@ type WebConfig struct {
 	// font-family list to use verbatim. No web fonts are bundled or
 	// fetched; rendering always uses the system font library.
 	Font string `mapstructure:"font"`
+	// Auth optionally protects the web view with HTTP Basic Auth. It is
+	// off by default (empty username), which suits the localhost-only
+	// default bind. Set it before exposing the server beyond loopback.
+	Auth WebAuthConfig `mapstructure:"auth"`
+}
+
+// WebAuthConfig holds optional HTTP Basic Auth credentials for the web
+// view. When Username is empty, auth is disabled and every request is
+// served. When set, every request must present matching credentials.
+type WebAuthConfig struct {
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
 }
 
 type DatabaseConfig struct {
@@ -110,6 +122,7 @@ type KeyBindings struct {
 	DeleteFeed  string `mapstructure:"delete_feed"`
 	Refresh     string `mapstructure:"refresh"`
 	ToggleRead  string `mapstructure:"toggle_read"`
+	ToggleStar  string `mapstructure:"toggle_star"`
 	OpenMedia   string `mapstructure:"open_media"`
 	ThemeToggle string `mapstructure:"theme_toggle"`
 	Back        string `mapstructure:"back"`
@@ -175,6 +188,7 @@ func defaultConfig() *Config {
 				DeleteFeed:  "x",
 				Refresh:     "r",
 				ToggleRead:  "u",
+				ToggleStar:  "f",
 				OpenMedia:   "o",
 				ThemeToggle: "t",
 				Back:        "esc",
