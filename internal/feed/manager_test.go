@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -352,6 +353,67 @@ func TestRefreshFeedWithMockServer(t *testing.T) {
 	updatedFeed, err := store.GetFeed(feed.ID)
 	require.NoError(t, err)
 	assert.True(t, updatedFeed.LastFetched.After(feed.LastFetched))
+}
+
+// TestRefreshFeed_RecordsAndClearsError asserts that a failing refresh
+// persists LastError/LastErrorAt (leaving LastFetched at its prior, last-
+// successful value) and that a subsequent successful refresh clears them.
+func TestRefreshFeed_RecordsAndClearsError(t *testing.T) {
+	feedContent := `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>OK Feed</title>
+<item><title>A</title><link>http://example.com/a</link><guid>a</guid>
+<pubDate>Mon, 02 Jan 2024 12:00:00 GMT</pubDate></item></channel></rss>`
+
+	var fail atomic.Bool
+	fail.Store(true)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if fail.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/rss+xml")
+		fmt.Fprint(w, feedContent)
+	}))
+	defer server.Close()
+
+	cfg := config.TestConfig()
+	cfg.Feed.RefreshInterval = 1 * time.Millisecond
+
+	store, err := storage.NewStore(":memory:")
+	require.NoError(t, err)
+	defer store.Close()
+
+	manager := NewManager(store, cfg)
+	manager.SetForceRefresh(true) // skip ETag/Last-Modified caching
+
+	lastGood := time.Now().Add(-2 * time.Hour)
+	feed := &storage.Feed{
+		ID:          generateFeedID(server.URL),
+		URL:         server.URL,
+		Title:       "OK Feed",
+		LastFetched: lastGood,
+		UpdatedAt:   lastGood,
+	}
+	require.NoError(t, store.SaveFeed(feed))
+
+	// Failing refresh records the error without clobbering LastFetched.
+	err = manager.RefreshFeed(feed.ID)
+	require.Error(t, err)
+	failed, err := store.GetFeed(feed.ID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, failed.LastError, "expected LastError to be recorded")
+	assert.False(t, failed.LastErrorAt.IsZero(), "expected LastErrorAt to be set")
+	assert.WithinDuration(t, lastGood, failed.LastFetched, time.Second,
+		"failed refresh must not advance LastFetched")
+
+	// Successful refresh clears the error.
+	fail.Store(false)
+	require.NoError(t, manager.RefreshFeed(feed.ID))
+	ok, err := store.GetFeed(feed.ID)
+	require.NoError(t, err)
+	assert.Empty(t, ok.LastError, "expected LastError cleared after success")
+	assert.True(t, ok.LastErrorAt.IsZero(), "expected LastErrorAt cleared after success")
+	assert.True(t, ok.LastFetched.After(lastGood), "expected LastFetched advanced")
 }
 
 // TestAddFeed_CapsBodyAtMaxSize asserts that a server attempting to

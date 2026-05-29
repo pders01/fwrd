@@ -13,6 +13,12 @@ type Feed struct {
 	ETag         string    `json:"etag"`
 	LastModified string    `json:"last_modified"`
 	UpdatedAt    time.Time `json:"updated_at"`
+	// LastError holds the message from the most recent failed refresh, or
+	// "" when the last attempt succeeded. LastErrorAt timestamps that
+	// failure. LastFetched still tracks the last *successful* fetch, so the
+	// two together distinguish "stale because failing" from "just stale".
+	LastError   string    `json:"last_error,omitempty"`
+	LastErrorAt time.Time `json:"last_error_at,omitzero"`
 }
 
 type Article struct {
