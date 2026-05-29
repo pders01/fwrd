@@ -222,6 +222,22 @@ func (s *Store) SaveArticles(articles []*Article) error {
 			if err != nil {
 				return err
 			}
+			// Capture the prior record before overwriting. The date index
+			// is keyed by timestamp, so if a re-saved article's Published
+			// changed (e.g. a feed adds a pubDate to a previously undated
+			// item) the old key is orphaned: the article then surfaces
+			// twice in newest-first pagination, and a stale zero-time key
+			// floats to the very top. Delete the old key below.
+			var prevPublished time.Time
+			hadPrev := false
+			if dateIdx != nil {
+				if existing := b.Get([]byte(article.ID)); existing != nil {
+					var old Article
+					if json.Unmarshal(existing, &old) == nil {
+						prevPublished, hadPrev = old.Published, true
+					}
+				}
+			}
 			if err := b.Put([]byte(article.ID), data); err != nil {
 				return err
 			}
@@ -239,6 +255,9 @@ func (s *Store) SaveArticles(articles []*Article) error {
 
 			// Update date index: store article ID with reverse timestamp key for newest-first ordering
 			if dateIdx != nil {
+				if hadPrev && !prevPublished.Equal(article.Published) {
+					_ = dateIdx.Delete(makeDateIndexKey(prevPublished, article.ID))
+				}
 				dateKey := makeDateIndexKey(article.Published, article.ID)
 				if err := dateIdx.Put(dateKey, []byte(article.ID)); err != nil {
 					return err
