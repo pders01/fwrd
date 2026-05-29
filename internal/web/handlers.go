@@ -268,10 +268,17 @@ func (s *Server) handleOPMLImport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "feed management is disabled", http.StatusServiceUnavailable)
 		return
 	}
+	// Bound the whole request body, not just the in-memory portion:
+	// ParseMultipartForm's argument caps memory and spills the rest to
+	// disk, so without this a hostile body could fill the disk.
+	r.Body = http.MaxBytesReader(w, r.Body, opmlMaxUpload)
 	if err := r.ParseMultipartForm(opmlMaxUpload); err != nil {
 		http.Error(w, "invalid upload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	// RemoveAll deletes any temp files ParseMultipartForm spilled to disk;
+	// closing the file handle alone does not. Runs on every return below.
+	defer func() { _ = r.MultipartForm.RemoveAll() }()
 	file, _, err := r.FormFile("file")
 	if err != nil {
 		http.Error(w, "missing OPML file", http.StatusBadRequest)
