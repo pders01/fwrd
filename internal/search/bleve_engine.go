@@ -3,7 +3,6 @@ package search
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -76,12 +75,22 @@ type bleveEngine struct {
 	pending *bleve.Batch
 }
 
-// NewBleveEngine creates or opens a Bleve index at indexPath and indexes current data.
+// NewBleveEngine creates or opens a Bleve index at indexPath and indexes
+// current data. The index path is always validated with the secure path
+// handler — production never relaxes validation based on where the index
+// happens to live.
 func NewBleveEngine(store *storage.Store, indexPath string) (Searcher, error) {
-	// Validate and sanitize the index path for security
-	// Use permissive validation for testing (when path is in temp directory)
+	return newBleveEngine(store, indexPath, false)
+}
+
+// newBleveEngine is the implementation behind NewBleveEngine. permissive
+// selects the relaxed path validator, which only tests need so they can
+// index under a temp directory the secure handler would reject. Keeping it
+// an explicit argument (rather than sniffing the path for the temp-dir
+// prefix) means a production path can't silently downgrade validation.
+func newBleveEngine(store *storage.Store, indexPath string, permissive bool) (Searcher, error) {
 	pathHandler := validation.NewSecurePathHandler()
-	if strings.Contains(indexPath, os.TempDir()) {
+	if permissive {
 		pathHandler = validation.NewPermissivePathHandler()
 	}
 
