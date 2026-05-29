@@ -83,7 +83,9 @@ func init() {
 
 	// TUI-specific flags
 	rootCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "skip startup banner")
-	rootCmd.Flags().BoolVar(&forceRefresh, "force-refresh", false, "ignore ETag/Last-Modified headers on refresh")
+	rootCmd.Flags().BoolVar(&forceRefresh, "force", false, "ignore ETag/Last-Modified headers on refresh")
+	rootCmd.Flags().BoolVar(&forceRefresh, "force-refresh", false, "deprecated alias for --force")
+	_ = rootCmd.Flags().MarkDeprecated("force-refresh", "use --force")
 
 	// serve flags
 	serveCmd.Flags().StringVar(&serveAddr, "addr", "127.0.0.1:8080", "address to bind the web server")
@@ -210,8 +212,11 @@ func init() {
 	feedCmd.AddCommand(feedImportCmd)
 	pluginsCmd.AddCommand(pluginsListCmd)
 
-	// Add force flag to refresh command
+	// Add force flag to refresh command (with a deprecated alias matching
+	// the root TUI flag, so the same name works in both contexts).
 	feedRefreshCmd.Flags().BoolVar(&forceRefresh, "force", false, "ignore ETag/Last-Modified headers")
+	feedRefreshCmd.Flags().BoolVar(&forceRefresh, "force-refresh", false, "deprecated alias for --force")
+	_ = feedRefreshCmd.Flags().MarkDeprecated("force-refresh", "use --force")
 }
 
 func initConfig() {
