@@ -5,6 +5,8 @@ A fast, terminal-based RSS feed aggregator with full-text search capabilities, b
 ## Features
 
 - **Triple Interface**: Interactive TUI (Bubble Tea) + Command-line interface (Cobra) + web view (`fwrd serve`)
+- **Newspaper web view**: The web front page is a newspaper — a lead story plus emergent topic sections clustered from recent articles; feeds are managed at `/feeds`
+- **Auto light/dark**: Every front-end follows the system light/dark setting — the web view via CSS, the TUI by detecting the terminal/OS appearance (override with `[ui] theme`)
 - **Full‑text search**: Bleve‑powered search across feeds and articles with debounced input
 - **Comprehensive CLI**: Complete feed management from command line (add, list, delete, refresh)
 - **Smart caching**: Honors ETag and Last-Modified; handles 304/Retry-After responses
@@ -12,7 +14,7 @@ A fast, terminal-based RSS feed aggregator with full-text search capabilities, b
 - **Media integration**: Detects media types and opens in appropriate applications
 - **Local storage**: BoltDB-backed offline reading with optimized indexing
 - **Lua scriptable plugins**: Drop a `.lua` file into `~/.config/fwrd/plugins/` to add a feed-URL handler — no recompile, hot-reload included
-- **Debug logging**: Structured logging system with configurable levels
+- **Logging**: Styled, leveled CLI output (charmbracelet/log) for startup and plugin/serve diagnostics, plus a separate file-based debug log with configurable levels
 - **Cross-platform**: Builds for Linux, macOS, Windows (amd64, arm64, arm)
 
 ## Installation
@@ -53,6 +55,14 @@ Download the appropriate binary for your platform from the [latest release](http
 ./fwrd --config /path/to/config.toml --db /path/to/feeds.db
 ```
 
+The interface follows your system light/dark setting automatically. Force a
+mode (or cycle it live with `ctrl+t`) via config:
+
+```toml
+[ui]
+theme = "auto"   # "auto" (default, detect) / "light" / "dark"
+```
+
 ### Command Line Interface
 
 ```bash
@@ -78,7 +88,9 @@ Download the appropriate binary for your platform from the [latest release](http
 
 ### Web Mode
 
-Serve a web view of stored feeds and articles. Unlike the TUI — which
+Serve a web view of your feeds. The front page is a newspaper: a lead story
+and emergent topic sections clustered from your most recent articles, with
+search up top. Feed management lives at `/feeds`. Unlike the TUI — which
 converts HTML to terminal markdown — the web view renders article content
 as sanitized HTML, the form it was authored in.
 
@@ -89,12 +101,16 @@ as sanitized HTML, the form it was authored in.
 
 Near-parity with the TUI/CLI:
 
-- Browse feeds and articles, with unread counts and cursor pagination
+- Newspaper front page: a lead story plus topic sections built from recent
+  articles; a section opens in full at `/topic/{slug}`
+- Manage feeds at `/feeds` — add, refresh (per-feed or all), and delete, with
+  unread counts, last-fetched time, and a **fetch-failed badge** when a feed's
+  last refresh errored
 - Read full article HTML, media links, and the original source link
-- Full-text search (Bleve)
-- Add, refresh (per-feed or all), and delete feeds
+- Full-text search (Bleve), front-and-center and autofocused
 - Mark articles read/unread and star/unstar
 - Import and export subscriptions as OPML
+- Follows your system light/dark setting (CSS `prefers-color-scheme`)
 
 State-changing actions are no-JS `POST` forms guarded by a same-origin
 check, so the page works without JavaScript while rejecting cross-site
@@ -153,7 +169,7 @@ Note: The modifier key defaults to `ctrl` and can be changed in config.
 - Feeds: `ctrl+n` add • `ctrl+r` refresh • `ctrl+x` delete • `Enter` view articles
 - Articles: `ctrl+u` toggle read • `ctrl+f` star/unstar • `Enter` read • `esc` back
 - Reader: `ctrl+o` open media/links • `ctrl+f` star/unstar • `esc` back
-- Global: `ctrl+s` search • `q` quit
+- Global: `ctrl+s` search • `ctrl+t` cycle theme (auto/light/dark) • `q` quit
 
 ### Search
 
@@ -307,6 +323,7 @@ make release-snapshot   # builds artifacts but does not publish
 - `github.com/charmbracelet/bubbles` - TUI components  
 - `github.com/charmbracelet/lipgloss` - Styling
 - `github.com/charmbracelet/glamour` - Markdown rendering
+- `github.com/charmbracelet/log` - Styled CLI logging
 - `github.com/spf13/cobra` - CLI framework
 - `github.com/spf13/viper` - Configuration management
 - `github.com/mmcdole/gofeed` - RSS/Atom parsing

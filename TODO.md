@@ -247,6 +247,37 @@ Code: `internal/tui/branding.go`, `internal/tui/theme.go`,
 
 ---
 
+### **Styled CLI logging (charmbracelet/log)** — COMPLETED
+
+The CLI's operational output (startup, plugin load/registration, `serve`
+diagnostics) moved from stdlib `log.Printf` and `fmt.Fprintln` banners to
+`charmbracelet/log`: colored level badges, timestamps, and `key=value`
+rendering, TTY-aware (plain when piped). A `pluginLogger` adapts it to the
+`plugins/lua` printf Logger so plugin events share the styled output; serve
+and plugin-load diagnostics now carry structured fields (`dir`/`err`/`fix`/
+`url`). The file-based `internal/debuglog` sink is unchanged and separate.
+
+Code: `cmd/rss/main.go`.
+
+---
+
+### **Search field newspaper restyle** — COMPLETED
+
+The web search input was the lone SaaS-styled element (rounded box, focus
+glow) clashing with the newspaper chrome. Reworked into a fill-in-the-blank
+ruled underline: transparent background, ink-rule underline, reading serif
+with an italic placeholder, centered on the hero. Focus is a thickened accent
+underline rather than a box — the hero input is autofocused, so an outline box
+would frame it on every load. a11y preserved: `--ink-rule` boundary clears
+WCAG 1.4.11 (3:1); the focus underline meets 2.4.7 / 2.4.11; placeholder keeps
+full contrast (`opacity:1`). A `pageshow`/`event.persisted` handler refocuses
+the autofocused search on back/forward-cache restore (autofocus does not
+re-fire on a bfcache restore).
+
+Code: `internal/web/templates/style.css`, `internal/web/templates/app.js`.
+
+---
+
 ### **Persist feed fetch-error state** — COMPLETED
 
 `storage.Feed` gained `LastError` (message; `""` = last attempt succeeded) and
