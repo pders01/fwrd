@@ -383,7 +383,7 @@ func (kh *KeyHandler) delegateToCharm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// handleDeleteConfirmKeys handles keys in delete confirmation view
+// handleMediaCustomKeys handles keys in the media list view
 func (kh *KeyHandler) handleMediaCustomKeys(key string) (tea.Model, tea.Cmd, bool) {
 	switch key {
 	case "enter":
