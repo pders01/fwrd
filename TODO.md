@@ -60,7 +60,53 @@ startup; one bad file does not block the rest of the directory.
 
 ---
 
+### **Web View (`fwrd serve`)** — COMPLETED
+
+A third front-end alongside the TUI and CLI, reusing the same storage,
+feed, and search backends. Unlike the TUI — which degrades HTML to
+terminal markdown — the web view renders article content as sanitized
+HTML (the form it was authored in), so it is strictly less lossy.
+
+**Surface (near-parity with TUI/CLI):**
+
+- Browse feeds (with unread counts) and articles (cursor pagination)
+- Read full article HTML, media links, and the original source link
+- Full-text search (Bleve), front-and-center and autofocused
+- Add, refresh (per-feed and all), and delete feeds
+- Mark articles read/unread
+
+**Stack:** `net/http` ServeMux (Go 1.22 method+path patterns, no router
+dependency), `html/template` with `//go:embed`-ed pages and CSS. Article
+HTML passes through the same `bluemonday.UGCPolicy` sanitizer the TUI
+uses — the security boundary for untrusted feed content.
+
+**Safety:** state-changing actions are no-JS `POST` forms using
+Post/Redirect/Get; a same-origin guard rejects cross-site (CSRF)
+submissions and caller-supplied redirects are constrained to local
+paths. Index-touching mutations are serialized with a mutex because
+`net/http` serves each request on its own goroutine (the
+`DataListener` contract forbids concurrent notification). SIGINT/SIGTERM
+trigger a graceful `http.Server.Shutdown` so BoltDB and Bleve locks
+release cleanly.
+
+**Config:** `[web] font` selects the reading font from the OS system
+font library — presets `serif` (default) / `sans` / `mono`, or a raw CSS
+font-family. No web fonts bundled or fetched.
+
+**Isolation:** `--db` now relocates the search index alongside the
+database, and `bleve.Open` is bounded by a timeout (`ErrIndexLocked`),
+so a second instance fails loudly instead of hanging on a held lock.
+
+---
+
 ## Optional Future Enhancements
+
+### **Web View Enhancements**
+- [ ] Star/favorite support (web + TUI; needs `Store.MarkArticleStarred`)
+- [ ] Progressive-enhancement JS for inline read toggles (avoid full reload)
+- [ ] OPML import/export
+- [ ] Optional auth / bind guidance for non-localhost exposure
+- [ ] Handler tests for add/refresh paths (currently manager-gated)
 
 ### **Testing Coverage Expansion**
 
