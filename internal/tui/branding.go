@@ -104,13 +104,13 @@ func init() { applyPalette(true) }
 func applyPalette(dark bool) {
 	if dark {
 		FgColor = lipgloss.Color("#EAEAEA")
-		MutedColor = lipgloss.Color("#94A3B8") // Muted gray-blue
-		UnreadColor = lipgloss.Color("#FFE66D") // Bright yellow - new/unread
+		MutedColor = lipgloss.Color("#94A3B8")     // Muted gray-blue
+		UnreadColor = lipgloss.Color("#FFE66D")    // Bright yellow - new/unread
 		SecondaryColor = lipgloss.Color("#4ECDC4") // Teal - morning
 	} else {
-		FgColor = lipgloss.Color("#1A1A2E") // Dark ink on a light terminal
-		MutedColor = lipgloss.Color("#57636E") // Slate, darker for white-bg contrast
-		UnreadColor = lipgloss.Color("#B45309") // Amber-700; yellow is unreadable on white
+		FgColor = lipgloss.Color("#1A1A2E")        // Dark ink on a light terminal
+		MutedColor = lipgloss.Color("#57636E")     // Slate, darker for white-bg contrast
+		UnreadColor = lipgloss.Color("#B45309")    // Amber-700; yellow is unreadable on white
 		SecondaryColor = lipgloss.Color("#0E7490") // Cyan-700; teal is too pale on white
 	}
 

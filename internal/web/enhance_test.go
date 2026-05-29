@@ -28,7 +28,7 @@ const sampleRSS = `<?xml version="1.0" encoding="UTF-8"?>
 // serving sampleRSS, so the add/refresh/import handlers exercise the same
 // fetch path production uses. Permissive validation is required because the
 // backend binds loopback, which the secure validator rejects.
-func newManagerServer(t *testing.T) (*Server, *storage.Store, *httptest.Server) {
+func newManagerServer(t *testing.T) (srv *Server, store *storage.Store, backend *httptest.Server) {
 	t.Helper()
 	store, err := storage.NewStore(storage.MemoryPath)
 	if err != nil {
@@ -36,7 +36,7 @@ func newManagerServer(t *testing.T) (*Server, *storage.Store, *httptest.Server) 
 	}
 	t.Cleanup(func() { store.Close() })
 
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	backend = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/rss+xml")
 		_, _ = w.Write([]byte(sampleRSS))
 	}))
@@ -49,7 +49,7 @@ func newManagerServer(t *testing.T) (*Server, *storage.Store, *httptest.Server) 
 	mgr := feed.NewManager(store, cfg)
 	mgr.SetPermissiveValidation(true)
 
-	srv, err := NewServer(store, mgr, nil, cfg)
+	srv, err = NewServer(store, mgr, nil, cfg)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
