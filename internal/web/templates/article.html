@@ -9,6 +9,12 @@
 <p class="meta muted">
 {{if not .Article.Published.IsZero}}<time>{{date .Article.Published}}</time>{{end}}
 {{if .Article.URL}} · <a href="{{.Article.URL}}" rel="noopener noreferrer">Original</a>{{end}}
+ · <form action="/read" method="post" class="inline">
+<input type="hidden" name="id" value="{{.Article.ID}}">
+<input type="hidden" name="read" value="{{if .Article.Read}}0{{else}}1{{end}}">
+<input type="hidden" name="return" value="/article?id={{.Article.ID}}">
+<button type="submit" class="link">{{if .Article.Read}}mark unread{{else}}mark read{{end}}</button>
+</form>
 </p>
 <div class="content">
 {{.Body}}

@@ -328,7 +328,19 @@ func runServe(_ *cobra.Command, _ []string) {
 		}
 
 		searcher := buildSearcher(store, cfg)
-		srv, err := web.NewServer(store, searcher, cfg)
+
+		// Wire the manager exactly as the TUI does so feeds added or
+		// refreshed via the web UI are indexed for search.
+		manager := feed.NewManager(store, cfg)
+		loadLuaPlugins(manager)
+		if dl, ok := searcher.(feed.DataListener); ok {
+			manager.RegisterDataListener(dl)
+		}
+		if bs, ok := searcher.(feed.BatchScope); ok {
+			manager.RegisterBatchScope(bs)
+		}
+
+		srv, err := web.NewServer(store, manager, searcher, cfg)
 		if err != nil {
 			return fmt.Errorf("failed to build web server: %w", err)
 		}

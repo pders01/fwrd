@@ -1,18 +1,35 @@
 {{define "title"}}{{if .Feed.Title}}{{.Feed.Title}}{{else}}Feed{{end}}{{end}}
 {{define "content"}}
 <nav class="crumbs"><a href="/">Feeds</a> / {{if .Feed.Title}}{{.Feed.Title}}{{else}}{{.Feed.URL}}{{end}}</nav>
+<div class="page-head">
 <h1>{{if .Feed.Title}}{{.Feed.Title}}{{else}}{{.Feed.URL}}{{end}}</h1>
+<span class="feed-actions">
+<form action="/feeds/{{.Feed.ID}}/refresh" method="post"><button type="submit">Refresh</button></form>
+<form action="/feeds/{{.Feed.ID}}/delete" method="post" onsubmit="return confirm('Delete this feed and its articles?')"><button type="submit" class="danger">Delete</button></form>
+</span>
+</div>
 {{if .Feed.Description}}<p class="muted">{{.Feed.Description}}</p>{{end}}
 {{if .Articles}}
 <ul class="article-list">
 {{range .Articles}}
 <li class="{{if .Read}}read{{end}}">
 <a href="/article?id={{.ID}}">{{if .Title}}{{.Title}}{{else}}(untitled){{end}}</a>
+<span class="row-meta">
 {{if not .Published.IsZero}}<time class="muted">{{date .Published}}</time>{{end}}
+<form action="/read" method="post" class="inline">
+<input type="hidden" name="id" value="{{.ID}}">
+<input type="hidden" name="read" value="{{if .Read}}0{{else}}1{{end}}">
+<input type="hidden" name="return" value="/feeds/{{$.Feed.ID}}">
+<button type="submit" class="link">{{if .Read}}mark unread{{else}}mark read{{end}}</button>
+</form>
+</span>
 </li>
 {{end}}
 </ul>
+{{if .NextCursor}}
+<p class="pager"><a href="/feeds/{{.Feed.ID}}?cursor={{.NextCursor}}">Older articles →</a></p>
+{{end}}
 {{else}}
-<p class="muted">No articles stored. Refresh with <code>fwrd feed refresh</code>.</p>
+<p class="muted">No articles stored. Refresh above, or run <code>fwrd feed refresh</code>.</p>
 {{end}}
 {{end}}
