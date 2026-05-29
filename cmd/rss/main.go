@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -17,9 +18,11 @@ import (
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/plugins"
 	pluginlua "github.com/pders01/fwrd/internal/plugins/lua"
+	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/storage"
 	"github.com/pders01/fwrd/internal/tui"
 	"github.com/pders01/fwrd/internal/validation"
+	"github.com/pders01/fwrd/internal/web"
 )
 
 // stdLogger adapts standard log.Printf to plugins/lua's Logger so the
@@ -55,6 +58,7 @@ var (
 	debugFlag    bool
 	quiet        bool
 	forceRefresh bool
+	serveAddr    string
 )
 
 var rootCmd = &cobra.Command{
@@ -76,11 +80,27 @@ func init() {
 	rootCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "skip startup banner")
 	rootCmd.Flags().BoolVar(&forceRefresh, "force-refresh", false, "ignore ETag/Last-Modified headers on refresh")
 
+	// serve flags
+	serveCmd.Flags().StringVar(&serveAddr, "addr", "127.0.0.1:8080", "address to bind the web server")
+
 	// Add commands
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(feedCmd)
 	rootCmd.AddCommand(pluginsCmd)
+	rootCmd.AddCommand(serveCmd)
+}
+
+var serveCmd = &cobra.Command{
+	Use:   "serve",
+	Short: "Serve a read-only web view of stored feeds and articles",
+	Long: `serve starts an HTTP server rendering the same feeds, articles, and
+search backing the TUI. Article content is served as sanitized HTML rather
+than the lossy terminal markdown the TUI must use.
+
+The web server holds the database open for its lifetime, so it cannot run
+against the same --db as a concurrent TUI (BoltDB is single-process).`,
+	Run: runServe,
 }
 
 var versionCmd = &cobra.Command{
@@ -271,6 +291,52 @@ func runTUI(_ *cobra.Command, _ []string) {
 			return fmt.Errorf("TUI error: %w", err)
 		}
 
+		return nil
+	}); err != nil {
+		exitWithError(err)
+	}
+}
+
+// buildSearcher constructs the Bleve-backed searcher, mirroring the index
+// path resolution the TUI uses. On failure it falls back to the basic
+// in-memory engine so search still works, just less well.
+func buildSearcher(store *storage.Store, cfg *config.Config) search.Searcher {
+	idxPath := cfg.Database.SearchIndex
+	if idxPath == "" {
+		switch cfg.Database.Path {
+		case "", storage.MemoryPath:
+			idxPath = "fwrd.bleve"
+		default:
+			base := strings.TrimSuffix(cfg.Database.Path, filepath.Ext(cfg.Database.Path))
+			idxPath = base + ".bleve"
+		}
+	}
+	if be, err := search.NewBleveEngine(store, idxPath); err == nil && be != nil {
+		return be
+	}
+	return search.NewEngine(store)
+}
+
+func runServe(_ *cobra.Command, _ []string) {
+	if debugFlag {
+		debuglog.SetupWithBool(true)
+	}
+
+	if err := withStoreAndConfig(func(store *storage.Store, cfg *config.Config) error {
+		for _, w := range config.Warnings(cfg) {
+			fmt.Fprintln(os.Stderr, "Warning:", w)
+		}
+
+		searcher := buildSearcher(store, cfg)
+		srv, err := web.NewServer(store, searcher, cfg)
+		if err != nil {
+			return fmt.Errorf("failed to build web server: %w", err)
+		}
+
+		fmt.Printf("fwrd serving on http://%s\n", serveAddr)
+		if err := srv.ListenAndServe(serveAddr); err != nil {
+			return fmt.Errorf("web server error: %w", err)
+		}
 		return nil
 	}); err != nil {
 		exitWithError(err)

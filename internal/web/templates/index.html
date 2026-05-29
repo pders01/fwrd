@@ -1,0 +1,14 @@
+{{define "title"}}Feeds{{end}}
+{{define "content"}}
+<h1>Feeds</h1>
+{{if .Feeds}}
+<ul class="feed-list">
+{{range .Feeds}}
+<li><a href="/feeds/{{.ID}}">{{if .Title}}{{.Title}}{{else}}{{.URL}}{{end}}</a>
+{{if .Description}}<span class="muted">{{.Description}}</span>{{end}}</li>
+{{end}}
+</ul>
+{{else}}
+<p class="muted">No feeds yet. Add one with <code>fwrd feed add &lt;url&gt;</code>.</p>
+{{end}}
+{{end}}

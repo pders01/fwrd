@@ -1,0 +1,18 @@
+{{define "title"}}{{if .Feed.Title}}{{.Feed.Title}}{{else}}Feed{{end}}{{end}}
+{{define "content"}}
+<nav class="crumbs"><a href="/">Feeds</a> / {{if .Feed.Title}}{{.Feed.Title}}{{else}}{{.Feed.URL}}{{end}}</nav>
+<h1>{{if .Feed.Title}}{{.Feed.Title}}{{else}}{{.Feed.URL}}{{end}}</h1>
+{{if .Feed.Description}}<p class="muted">{{.Feed.Description}}</p>{{end}}
+{{if .Articles}}
+<ul class="article-list">
+{{range .Articles}}
+<li class="{{if .Read}}read{{end}}">
+<a href="/article?id={{.ID}}">{{if .Title}}{{.Title}}{{else}}(untitled){{end}}</a>
+{{if not .Published.IsZero}}<time class="muted">{{date .Published}}</time>{{end}}
+</li>
+{{end}}
+</ul>
+{{else}}
+<p class="muted">No articles stored. Refresh with <code>fwrd feed refresh</code>.</p>
+{{end}}
+{{end}}

@@ -1,0 +1,21 @@
+{{define "title"}}Search{{end}}
+{{define "content"}}
+<h1>Search</h1>
+{{if not .Available}}
+<p class="muted">Search is unavailable (index failed to initialize).</p>
+{{else if .Query}}
+<p class="muted">Results for “{{.Query}}”</p>
+{{if .Results}}
+<ul class="article-list">
+{{range .Results}}
+<li><a href="/article?id={{.ID}}">{{if .Title}}{{.Title}}{{else}}(untitled){{end}}</a>
+{{if not .Published.IsZero}}<time class="muted">{{date .Published}}</time>{{end}}</li>
+{{end}}
+</ul>
+{{else}}
+<p class="muted">No matches.</p>
+{{end}}
+{{else}}
+<p class="muted">Type a query above.</p>
+{{end}}
+{{end}}

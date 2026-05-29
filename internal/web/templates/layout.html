@@ -1,0 +1,20 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{template "title" .}} · fwrd</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+<a href="/" class="brand">fwrd</a>
+<form action="/search" method="get" class="search" role="search">
+<input type="search" name="q" placeholder="Search articles…" aria-label="Search articles">
+</form>
+</header>
+<main>
+{{template "content" .}}
+</main>
+</body>
+</html>{{end}}

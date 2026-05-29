@@ -83,6 +83,24 @@ Implements the scriptable plugin runtime on top of gopher-lua:
 - **Watcher**: uses fsnotify to hot-reload edits, unregister deletes,
   and keep a previously-working plugin in place when a save is bad
 
+### internal/web
+A read-only HTTP front-end over the same storage, feed, and search backends
+the TUI and CLI use — a third consumer of the interface-agnostic core, not a
+fork of it:
+- **Server**: `net/http` ServeMux (Go 1.22 method+path patterns, no router
+  dependency) with hardened timeouts; constructed from the same `*storage.Store`
+  and `search.Searcher` `runTUI` builds
+- **Handlers**: feed list, per-feed article list, single article, and search.
+  Article IDs are composite (`feedID:articleURL`) so they ride in a query
+  parameter rather than a path segment
+- **Render**: `html/template` with `//go:embed`-ed templates and CSS. Article
+  HTML is run through the same `bluemonday.UGCPolicy` sanitizer the TUI uses
+  before being marked `template.HTML` — the security boundary for untrusted
+  feed content. The web view is strictly *less* lossy than the TUI, which must
+  degrade HTML to terminal markdown
+- **Concurrency note**: the server holds the BoltDB file open for its lifetime,
+  so `serve` is mutually exclusive with a TUI on the same `--db`
+
 ### internal/validation
 Provides comprehensive security validation:
 - **URL Validation**: Secure feed URL validation with protocol checks, domain validation, and malicious URL detection
