@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"embed"
 	"html/template"
 	"net/http"
@@ -96,10 +97,17 @@ func (s *Server) render(w http.ResponseWriter, name string, data any) {
 		http.Error(w, "unknown template: "+name, http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := set.ExecuteTemplate(w, "layout", data); err != nil {
+	// Render into a buffer first: ExecuteTemplate writing straight to w
+	// would commit a 200 and partial body before a mid-stream error, after
+	// which http.Error can no longer set a 500 — the client gets truncated
+	// HTML. Buffering lets a failed render surface as a clean 500.
+	var buf bytes.Buffer
+	if err := set.ExecuteTemplate(&buf, "layout", data); err != nil {
 		http.Error(w, "render error: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = buf.WriteTo(w)
 }
 
 func (s *Server) handleCSS(w http.ResponseWriter, _ *http.Request) {
