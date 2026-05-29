@@ -4,7 +4,7 @@ A fast, terminal-based RSS feed aggregator with full-text search capabilities, b
 
 ## Features
 
-- **Triple Interface**: Interactive TUI (Bubble Tea) + Command-line interface (Cobra) + read-only web view (`fwrd serve`)
+- **Triple Interface**: Interactive TUI (Bubble Tea) + Command-line interface (Cobra) + web view (`fwrd serve`)
 - **Full‑text search**: Bleve‑powered search across feeds and articles with debounced input
 - **Comprehensive CLI**: Complete feed management from command line (add, list, delete, refresh)
 - **Smart caching**: Honors ETag and Last-Modified; handles 304/Retry-After responses
@@ -78,19 +78,30 @@ Download the appropriate binary for your platform from the [latest release](http
 
 ### Web Mode
 
-Serve a read-only web view of stored feeds and articles. Unlike the TUI —
-which converts HTML to terminal markdown — the web view renders article
-content as sanitized HTML, the form it was authored in.
+Serve a web view of stored feeds and articles. Unlike the TUI — which
+converts HTML to terminal markdown — the web view renders article content
+as sanitized HTML, the form it was authored in.
 
 ```bash
 ./fwrd serve                       # http://127.0.0.1:8080
 ./fwrd serve --addr 127.0.0.1:9000 # custom bind address
 ```
 
+Near-parity with the TUI/CLI:
+
+- Browse feeds and articles, with unread counts and cursor pagination
+- Read full article HTML, media links, and the original source link
+- Full-text search (Bleve)
+- Add, refresh (per-feed or all), and delete feeds
+- Mark articles read/unread
+
+State-changing actions are no-JS `POST` forms guarded by a same-origin
+check, so the page works without JavaScript while rejecting cross-site
+(CSRF) form submissions. Bind to `127.0.0.1` (the default) for personal use.
+
 The server holds the database open for its lifetime, so it cannot run
-against the same `--db` as a concurrent TUI (BoltDB is single-process).
-Refresh feeds from the CLI (`fwrd feed refresh`, e.g. via cron) and the web
-view reflects the new articles on its next request.
+against the same `--db` (or search index) as a concurrent TUI or second
+`serve` — BoltDB and the Bleve index are single-process.
 
 ### Keyboard Shortcuts (default)
 

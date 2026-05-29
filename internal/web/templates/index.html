@@ -1,14 +1,32 @@
 {{define "title"}}Feeds{{end}}
 {{define "content"}}
+<div class="page-head">
 <h1>Feeds</h1>
+<form action="/refresh" method="post"><button type="submit">Refresh all</button></form>
+</div>
+
+<form action="/feeds" method="post" class="add-feed">
+<input type="url" name="url" placeholder="https://example.com/feed.xml" required aria-label="Feed URL">
+<button type="submit">Add feed</button>
+</form>
+
 {{if .Feeds}}
 <ul class="feed-list">
 {{range .Feeds}}
-<li><a href="/feeds/{{.ID}}">{{if .Title}}{{.Title}}{{else}}{{.URL}}{{end}}</a>
-{{if .Description}}<span class="muted">{{.Description}}</span>{{end}}</li>
+<li>
+<div class="feed-row">
+<a class="feed-title" href="/feeds/{{.Feed.ID}}">{{if .Feed.Title}}{{.Feed.Title}}{{else}}{{.Feed.URL}}{{end}}</a>
+{{if gt .Unread 0}}<span class="badge">{{.Unread}}</span>{{end}}
+<span class="feed-actions">
+<form action="/feeds/{{.Feed.ID}}/refresh" method="post"><button type="submit" class="link">refresh</button></form>
+<form action="/feeds/{{.Feed.ID}}/delete" method="post" onsubmit="return confirm('Delete this feed and its articles?')"><button type="submit" class="link danger">delete</button></form>
+</span>
+</div>
+{{if .Feed.Description}}<span class="muted">{{.Feed.Description}}</span>{{end}}
+</li>
 {{end}}
 </ul>
 {{else}}
-<p class="muted">No feeds yet. Add one with <code>fwrd feed add &lt;url&gt;</code>.</p>
+<p class="muted">No feeds yet. Add one above, or via <code>fwrd feed add &lt;url&gt;</code>.</p>
 {{end}}
 {{end}}

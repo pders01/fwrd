@@ -84,22 +84,34 @@ Implements the scriptable plugin runtime on top of gopher-lua:
   and keep a previously-working plugin in place when a save is bad
 
 ### internal/web
-A read-only HTTP front-end over the same storage, feed, and search backends
-the TUI and CLI use — a third consumer of the interface-agnostic core, not a
-fork of it:
+An HTTP front-end over the same storage, feed, and search backends the TUI
+and CLI use — a third consumer of the interface-agnostic core, not a fork of
+it. It reaches near-parity with the other front-ends:
 - **Server**: `net/http` ServeMux (Go 1.22 method+path patterns, no router
-  dependency) with hardened timeouts; constructed from the same `*storage.Store`
-  and `search.Searcher` `runTUI` builds
-- **Handlers**: feed list, per-feed article list, single article, and search.
-  Article IDs are composite (`feedID:articleURL`) so they ride in a query
-  parameter rather than a path segment
+  dependency) with hardened timeouts; constructed from the same `*storage.Store`,
+  `*feed.Manager`, and `search.Searcher` `runTUI` builds. The manager is wired
+  with the searcher as a `DataListener`/`BatchScope` so feeds added or refreshed
+  via the web are indexed for search, exactly as in the TUI
+- **Read handlers**: feed list (with unread counts), per-feed article list
+  (cursor pagination), single article, and search. Article IDs are composite
+  (`feedID:articleURL`) so they ride in a query parameter rather than a path
+  segment
+- **Write handlers**: add / refresh (per-feed and all) / delete feeds, and
+  mark articles read/unread. These are `POST`-only and use Post/Redirect/Get
+  (303) so a browser refresh won't re-submit
+- **CSRF defense**: a same-origin guard rejects non-GET requests whose
+  `Origin`/`Referer` host doesn't match the request host. With no cookies or
+  sessions there's no credential to steal, but the guard still blocks forged
+  cross-site form posts (e.g. a feed-delete). Caller-supplied redirect targets
+  are constrained to local paths to prevent open redirects
 - **Render**: `html/template` with `//go:embed`-ed templates and CSS. Article
   HTML is run through the same `bluemonday.UGCPolicy` sanitizer the TUI uses
   before being marked `template.HTML` — the security boundary for untrusted
   feed content. The web view is strictly *less* lossy than the TUI, which must
   degrade HTML to terminal markdown
-- **Concurrency note**: the server holds the BoltDB file open for its lifetime,
-  so `serve` is mutually exclusive with a TUI on the same `--db`
+- **Concurrency note**: the server holds the BoltDB file and the Bleve index
+  open for its lifetime, so `serve` is mutually exclusive with a TUI or second
+  `serve` on the same `--db`/index
 
 ### internal/validation
 Provides comprehensive security validation:
