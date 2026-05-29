@@ -221,6 +221,32 @@ and consistency fixes, each landed as its own commit:
 
 ---
 
+### **Auto light/dark theming across all front-ends** — COMPLETED
+
+All three surfaces now follow the system light/dark setting:
+
+- **Web** — already adapted via CSS `@media (prefers-color-scheme: dark)`
+  over the `:root` design tokens; no change needed beyond confirming the new
+  feed-error badge uses the established danger red.
+- **TUI chrome** — previously only the glamour *article body* adapted; the
+  lipgloss UI chrome (`branding.go`) was hardcoded for a dark background, so
+  text and muted/unread/header hues were near-invisible on a light terminal.
+  Introduced `applyPalette(dark)`, which flips the background-dependent
+  colors (new adaptive `FgColor` for body/modal text, plus `MutedColor`,
+  `UnreadColor`, `SecondaryColor`) and rebuilds every dependent style; brand
+  and status hues stay fixed. The dark/light bit is derived from the existing
+  `resolveGlamourStyle` resolution (`glamourStyleIsDark`) — reusing the
+  macOS plist watcher, `COLORFGBG`, and explicit-override logic rather than a
+  lipgloss OSC 11 probe (which the project avoids for its multi-second
+  startup hang). Applied at construction and on every live theme change, so
+  toggling system appearance re-themes the whole UI, not just the reader.
+
+Code: `internal/tui/branding.go`, `internal/tui/theme.go`,
+`internal/tui/app.go`. Tested in `theme_test.go`
+(`TestGlamourStyleIsDark`, `TestApplyPalette_FlipsBackgroundDependentColors`).
+
+---
+
 ### **Persist feed fetch-error state** — COMPLETED
 
 `storage.Feed` gained `LastError` (message; `""` = last attempt succeeded) and

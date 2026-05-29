@@ -37,111 +37,104 @@ var BannerColors = []lipgloss.Color{
 	lipgloss.Color("#FF6B6B"),
 }
 
-// Brand colors inspired by time progression
-// Dawn -> Day -> Dusk -> Night
+// Brand colors inspired by time progression: Dawn -> Day -> Dusk -> Night.
+//
+// Two groups. The fixed hues below read well on both light and dark
+// terminals, or sit on their own colored chip, so they never change. The
+// background-dependent set (FgColor, MutedColor, UnreadColor,
+// SecondaryColor) is flipped by applyPalette when the resolved theme
+// changes. The flip reuses the same light/dark resolution that drives the
+// glamour reader (resolveGlamourStyle) rather than a lipgloss OSC 11
+// background probe, which we avoid because it can block startup for seconds.
 var (
-	// Primary colors - gradient from dawn to day
-	PrimaryColor   = lipgloss.Color("#FF6B6B") // Warm coral - dawn
-	SecondaryColor = lipgloss.Color("#4ECDC4") // Teal - morning
-	AccentColor    = lipgloss.Color("#95E1D3") // Mint - fresh start
-
-	// UI colors
-	BackgroundColor = lipgloss.Color("#1A1A2E") // Deep night
-	SurfaceColor    = lipgloss.Color("#16213E") // Midnight blue
-	TextColor       = lipgloss.Color("#EAEAEA") // Soft white
-	MutedColor      = lipgloss.Color("#94A3B8") // Muted gray-blue
-
-	// Status colors
-	UnreadColor  = lipgloss.Color("#FFE66D") // Bright yellow - new/unread
-	ReadColor    = lipgloss.Color("#64748B") // Slate - read/past
-	StarColor    = lipgloss.Color("#F59E0B") // Amber - starred/favorite
-	ErrorColor   = lipgloss.Color("#EF4444") // Red
-	SuccessColor = lipgloss.Color("#10B981") // Green
+	PrimaryColor    = lipgloss.Color("#FF6B6B") // Warm coral - dawn
+	AccentColor     = lipgloss.Color("#95E1D3") // Mint - selection background
+	BackgroundColor = lipgloss.Color("#1A1A2E") // Deep night - chip foreground
+	SurfaceColor    = lipgloss.Color("#16213E") // Midnight blue - title bar
+	TextColor       = lipgloss.Color("#EAEAEA") // Soft white - text on dark chips
+	ReadColor       = lipgloss.Color("#64748B") // Slate - read/past
+	StarColor       = lipgloss.Color("#F59E0B") // Amber - starred/favorite
+	ErrorColor      = lipgloss.Color("#EF4444") // Red
+	SuccessColor    = lipgloss.Color("#10B981") // Green
 )
 
-// Styled components
+// Background-dependent colors. Zero-valued here; applyPalette assigns them
+// for a dark or light terminal.
 var (
-	LogoStyle = lipgloss.NewStyle().
-			Foreground(PrimaryColor).
-			Bold(true)
+	FgColor        lipgloss.Color // body/modal text rendered on the terminal bg
+	MutedColor     lipgloss.Color // secondary text, hints, separators
+	UnreadColor    lipgloss.Color // unread markers, highlights, warnings
+	SecondaryColor lipgloss.Color // headers and feed titles
+)
 
-	TitleStyle = lipgloss.NewStyle().
-			Foreground(TextColor).
-			Background(SurfaceColor).
-			Bold(true).
-			Padding(0, 2)
+// Styled components. Assigned by applyPalette so the ones using a
+// background-dependent color rebuild when the theme flips.
+var (
+	LogoStyle           lipgloss.Style
+	TitleStyle          lipgloss.Style
+	HeaderStyle         lipgloss.Style
+	StatusBarStyle      lipgloss.Style
+	UnreadItemStyle     lipgloss.Style
+	ReadItemStyle       lipgloss.Style
+	StarStyle           lipgloss.Style
+	SelectedItemStyle   lipgloss.Style
+	HelpStyle           lipgloss.Style
+	TimeStyle           lipgloss.Style
+	ModalTextStyle      lipgloss.Style
+	ModalHighlightStyle lipgloss.Style
+	ErrorMessageStyle   lipgloss.Style
+	SeparatorStyle      lipgloss.Style
+	StatusInfoStyle     lipgloss.Style
+	StatusSuccessStyle  lipgloss.Style
+	StatusWarnStyle     lipgloss.Style
+	StatusErrorStyle    lipgloss.Style
+	FeedTitleStyle      lipgloss.Style
+	EmptyStyle          lipgloss.Style
+)
 
-	HeaderStyle = lipgloss.NewStyle().
-			Foreground(SecondaryColor).
-			Bold(true)
+// init seeds the palette with the dark variant; App overrides it once the
+// theme is resolved (and again on every live theme change).
+func init() { applyPalette(true) }
 
-	StatusBarStyle = lipgloss.NewStyle().
-			Foreground(MutedColor).
-			Padding(0, 1)
+// applyPalette sets the background-dependent colors for a dark or light
+// terminal and rebuilds every style that uses them. The brand and status
+// hues are fixed; only text, muted, unread, and secondary flip. Call it from
+// the Bubble Tea update loop (single-goroutine) — it reassigns package
+// globals, so it must not race with rendering on another goroutine.
+func applyPalette(dark bool) {
+	if dark {
+		FgColor = lipgloss.Color("#EAEAEA")
+		MutedColor = lipgloss.Color("#94A3B8") // Muted gray-blue
+		UnreadColor = lipgloss.Color("#FFE66D") // Bright yellow - new/unread
+		SecondaryColor = lipgloss.Color("#4ECDC4") // Teal - morning
+	} else {
+		FgColor = lipgloss.Color("#1A1A2E") // Dark ink on a light terminal
+		MutedColor = lipgloss.Color("#57636E") // Slate, darker for white-bg contrast
+		UnreadColor = lipgloss.Color("#B45309") // Amber-700; yellow is unreadable on white
+		SecondaryColor = lipgloss.Color("#0E7490") // Cyan-700; teal is too pale on white
+	}
 
-	UnreadItemStyle = lipgloss.NewStyle().
-			Foreground(UnreadColor).
-			Bold(true)
-
-	ReadItemStyle = lipgloss.NewStyle().
-			Foreground(ReadColor)
-
-	StarStyle = lipgloss.NewStyle().
-			Foreground(StarColor).
-			Bold(true)
-
-	SelectedItemStyle = lipgloss.NewStyle().
-				Foreground(BackgroundColor).
-				Background(AccentColor).
-				Bold(true)
-
-	HelpStyle = lipgloss.NewStyle().
-			Foreground(MutedColor).
-			Italic(true)
-
-	TimeStyle = lipgloss.NewStyle().
-			Foreground(MutedColor).
-			Faint(true)
-
-	// Modal styles
-	ModalTextStyle = lipgloss.NewStyle().
-			Foreground(TextColor)
-
-	ModalHighlightStyle = lipgloss.NewStyle().
-				Foreground(UnreadColor).
-				Bold(true)
-
-	// Error display style
-	ErrorMessageStyle = lipgloss.NewStyle().
-				Foreground(ErrorColor).
-				Bold(true)
-
-	// Separator style
-	SeparatorStyle = lipgloss.NewStyle().
-			Foreground(MutedColor)
-
-	// Status styles by severity
-	StatusInfoStyle = lipgloss.NewStyle().
-			Foreground(MutedColor)
-
-	StatusSuccessStyle = lipgloss.NewStyle().
-				Foreground(SuccessColor)
-
-	StatusWarnStyle = lipgloss.NewStyle().
-			Foreground(UnreadColor)
-
-	StatusErrorStyle = lipgloss.NewStyle().
-				Foreground(ErrorColor).
-				Bold(true)
-
-	// Feed item styles
-	FeedTitleStyle = lipgloss.NewStyle().
-			Foreground(SecondaryColor).
-			Bold(true)
-
-	// Empty style for resetting
+	LogoStyle = lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true)
+	TitleStyle = lipgloss.NewStyle().Foreground(TextColor).Background(SurfaceColor).Bold(true).Padding(0, 2)
+	HeaderStyle = lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true)
+	StatusBarStyle = lipgloss.NewStyle().Foreground(MutedColor).Padding(0, 1)
+	UnreadItemStyle = lipgloss.NewStyle().Foreground(UnreadColor).Bold(true)
+	ReadItemStyle = lipgloss.NewStyle().Foreground(ReadColor)
+	StarStyle = lipgloss.NewStyle().Foreground(StarColor).Bold(true)
+	SelectedItemStyle = lipgloss.NewStyle().Foreground(BackgroundColor).Background(AccentColor).Bold(true)
+	HelpStyle = lipgloss.NewStyle().Foreground(MutedColor).Italic(true)
+	TimeStyle = lipgloss.NewStyle().Foreground(MutedColor).Faint(true)
+	ModalTextStyle = lipgloss.NewStyle().Foreground(FgColor)
+	ModalHighlightStyle = lipgloss.NewStyle().Foreground(UnreadColor).Bold(true)
+	ErrorMessageStyle = lipgloss.NewStyle().Foreground(ErrorColor).Bold(true)
+	SeparatorStyle = lipgloss.NewStyle().Foreground(MutedColor)
+	StatusInfoStyle = lipgloss.NewStyle().Foreground(MutedColor)
+	StatusSuccessStyle = lipgloss.NewStyle().Foreground(SuccessColor)
+	StatusWarnStyle = lipgloss.NewStyle().Foreground(UnreadColor)
+	StatusErrorStyle = lipgloss.NewStyle().Foreground(ErrorColor).Bold(true)
+	FeedTitleStyle = lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true)
 	EmptyStyle = lipgloss.NewStyle()
-)
+}
 
 // StatusBarStyleWithPadding returns a properly formatted status bar style with padding
 func StatusBarStyleWithPadding() lipgloss.Style {

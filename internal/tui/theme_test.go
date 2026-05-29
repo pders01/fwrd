@@ -7,6 +7,43 @@ import (
 	"github.com/charmbracelet/glamour/styles"
 )
 
+func TestGlamourStyleIsDark(t *testing.T) {
+	if glamourStyleIsDark(styles.LightStyle) {
+		t.Errorf("light style should map to light palette")
+	}
+	for _, s := range []string{styles.DarkStyle, styles.NoTTYStyle, "ascii", ""} {
+		if !glamourStyleIsDark(s) {
+			t.Errorf("style %q should map to dark palette", s)
+		}
+	}
+}
+
+func TestApplyPalette_FlipsBackgroundDependentColors(t *testing.T) {
+	// Snapshot and restore so the package-global palette doesn't leak into
+	// other tests' rendering expectations.
+	saveFg, saveMuted, saveUnread, saveSecondary := FgColor, MutedColor, UnreadColor, SecondaryColor
+	t.Cleanup(func() {
+		FgColor, MutedColor, UnreadColor, SecondaryColor = saveFg, saveMuted, saveUnread, saveSecondary
+		applyPalette(true)
+	})
+
+	applyPalette(true)
+	dark := FgColor
+	applyPalette(false)
+	light := FgColor
+	if dark == light {
+		t.Errorf("FgColor did not flip between dark/light: both %q", dark)
+	}
+	// The fixed hues must not move with the palette.
+	if PrimaryColor != "#FF6B6B" || ErrorColor != "#EF4444" {
+		t.Errorf("fixed brand hue changed: primary=%q error=%q", PrimaryColor, ErrorColor)
+	}
+	// Styles must rebuild against the active color, not keep a stale one.
+	if got := ModalTextStyle.GetForeground(); got != light {
+		t.Errorf("ModalTextStyle foreground %v not rebuilt to light FgColor %v", got, light)
+	}
+}
+
 func TestResolveGlamourStyle_ExplicitPrefWins(t *testing.T) {
 	t.Setenv("GLAMOUR_STYLE", "")
 	t.Setenv("COLORFGBG", "0;15") // would normally select light

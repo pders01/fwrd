@@ -184,6 +184,11 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 		icons:                NewIconSet(cfg.UI.Icons),
 	}
 
+	// Theme the lipgloss chrome to match the resolved (light/dark) style.
+	// The glamour reader already honors this; applyPalette extends it to the
+	// list/header/status UI. Re-applied on every live theme change below.
+	applyPalette(glamourStyleIsDark(app.glamourStyle))
+
 	// Prefer Bleve-backed engine if available (build with -tags=bleve)
 	// Use search index path from config, with fallback logic for special cases
 	idxPath := cfg.Database.SearchIndex
@@ -300,6 +305,8 @@ func (a *App) applyResolvedStyle() bool {
 	}
 	a.glamourStyle = next
 	a.glamourRenderer = nil
+	// Keep the lipgloss chrome in step with the reader's light/dark style.
+	applyPalette(glamourStyleIsDark(next))
 	return true
 }
 

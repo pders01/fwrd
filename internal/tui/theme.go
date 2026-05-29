@@ -73,6 +73,14 @@ func resolveGlamourStyle(pref string) string {
 	return styles.DarkStyle
 }
 
+// glamourStyleIsDark maps a resolved glamour style to the dark/light bit the
+// lipgloss palette needs. Only the explicit light style is light; the dark,
+// NoTTY, and ASCII fallbacks all use the dark palette (matching the dark
+// default elsewhere in resolveGlamourStyle).
+func glamourStyleIsDark(glamourStyle string) bool {
+	return glamourStyle != styles.LightStyle
+}
+
 // isMacOSDarkAppearance returns true if AppleInterfaceStyle is set to
 // "Dark" in the user's global defaults. The defaults binary exits 1
 // when the key is absent (which is the macOS light-mode signal), so a
