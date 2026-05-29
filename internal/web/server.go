@@ -7,9 +7,15 @@
 package web
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/pders01/fwrd/internal/config"
@@ -17,6 +23,11 @@ import (
 	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/storage"
 )
+
+// shutdownGrace bounds how long a graceful shutdown waits for in-flight
+// requests (e.g. a synchronous feed refresh) to finish before connections
+// are forced closed.
+const shutdownGrace = 15 * time.Second
 
 // Server holds the dependencies shared across handlers. It owns nothing
 // the caller doesn't already own: the store, manager, and searcher are
@@ -120,6 +131,12 @@ func sameOrigin(r *http.Request) bool {
 // timeouts guard against slow-loris-style clients even on a personal box.
 // WriteTimeout is generous because a synchronous feed refresh makes
 // network calls within the request.
+//
+// On SIGINT/SIGTERM it shuts down gracefully: it stops accepting new
+// connections and drains in-flight requests for up to shutdownGrace before
+// returning, so the caller's deferred store/index Close runs and releases
+// the BoltDB and Bleve locks cleanly instead of relying on the OS to reap
+// them. Returns nil on a clean shutdown.
 func (s *Server) ListenAndServe(addr string) error {
 	srv := &http.Server{
 		Addr:              addr,
@@ -129,5 +146,32 @@ func (s *Server) ListenAndServe(addr string) error {
 		WriteTimeout:      120 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	return srv.ListenAndServe()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- srv.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serveErr:
+		// Failed to bind, or otherwise stopped without a signal.
+		return err
+	case <-ctx.Done():
+		stop() // restore default signal handling so a second ^C kills hard
+		fmt.Fprintln(os.Stderr, "\nshutting down… (waiting for in-flight requests)")
+		shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+		defer cancel()
+		if err := srv.Shutdown(shutCtx); err != nil {
+			return fmt.Errorf("graceful shutdown: %w", err)
+		}
+		// Drain the goroutine's result; ListenAndServe returns
+		// ErrServerClosed once Shutdown completes.
+		if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	}
 }
