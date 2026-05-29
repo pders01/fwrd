@@ -251,10 +251,12 @@ func (kh *KeyHandler) handleArticlesCustomKeys(key string) (tea.Model, tea.Cmd, 
 		if i, ok := kh.app.articleList.SelectedItem().(articleItem); ok {
 			return kh.app, kh.app.toggleRead(i.article), true
 		}
+		return kh.app, nil, true
 	case kh.modifierKey + b.ToggleStar:
 		if i, ok := kh.app.articleList.SelectedItem().(articleItem); ok {
 			return kh.app, kh.app.toggleStarred(i.article), true
 		}
+		return kh.app, nil, true
 	}
 	return kh.app, nil, false
 }
