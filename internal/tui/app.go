@@ -462,6 +462,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.article.Read = msg.read
 		}
 
+	case articleStarToggledMsg:
+		if msg.err != nil {
+			a.err = msg.err
+		} else if msg.article != nil {
+			msg.article.Starred = msg.starred
+		}
+
 	case articleRenderedMsg:
 		// loadingArticle is set on user-driven article opens (Enter from
 		// list / search) and stays false for in-place re-renders such as
@@ -880,10 +887,14 @@ type articleItem struct {
 }
 
 func (i articleItem) Title() string {
-	if i.article.Read {
-		return ReadItemStyle.Render(i.article.Title)
+	star := ""
+	if i.article.Starred {
+		star = StarStyle.Render("★ ")
 	}
-	return UnreadItemStyle.Render("● " + i.article.Title)
+	if i.article.Read {
+		return star + ReadItemStyle.Render(i.article.Title)
+	}
+	return star + UnreadItemStyle.Render("● "+i.article.Title)
 }
 
 func (i articleItem) Description() string {
@@ -1038,6 +1049,16 @@ type articleReadToggledMsg struct {
 	article *storage.Article
 	err     error
 	read    bool
+}
+
+// articleStarToggledMsg reports the result of an in-place star-state flip,
+// mirroring articleReadToggledMsg: the article's Starred field is mutated
+// on the Update goroutine and re-read on the next render frame, so the
+// list updates without a reload and the selection stays put.
+type articleStarToggledMsg struct {
+	article *storage.Article
+	err     error
+	starred bool
 }
 
 type articleRenderedMsg struct {

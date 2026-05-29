@@ -251,12 +251,22 @@ func (kh *KeyHandler) handleArticlesCustomKeys(key string) (tea.Model, tea.Cmd, 
 		if i, ok := kh.app.articleList.SelectedItem().(articleItem); ok {
 			return kh.app, kh.app.toggleRead(i.article), true
 		}
+	case kh.modifierKey + b.ToggleStar:
+		if i, ok := kh.app.articleList.SelectedItem().(articleItem); ok {
+			return kh.app, kh.app.toggleStarred(i.article), true
+		}
 	}
 	return kh.app, nil, false
 }
 
 // handleReaderCustomKeys handles only custom action keys in reader view
 func (kh *KeyHandler) handleReaderCustomKeys(key string) (tea.Model, tea.Cmd, bool) {
+	if key == kh.modifierKey+kh.config.Keys.Bindings.ToggleStar {
+		if kh.app.currentArticle != nil {
+			return kh.app, kh.app.toggleStarred(kh.app.currentArticle), true
+		}
+		return kh.app, nil, true
+	}
 	if key == kh.modifierKey+kh.config.Keys.Bindings.OpenMedia {
 		if kh.app.currentArticle != nil {
 			// If there are multiple media URLs, show media list
@@ -608,10 +618,10 @@ func (kh *KeyHandler) GetHelpForCurrentView() []string {
 		return help
 
 	case ViewArticles:
-		return []string{kh.modifierKey + b.OpenMedia + ": open", kh.modifierKey + b.ToggleRead + ": toggle read", kh.modifierKey + b.Search + ": search"}
+		return []string{kh.modifierKey + b.OpenMedia + ": open", kh.modifierKey + b.ToggleRead + ": toggle read", kh.modifierKey + b.ToggleStar + ": star", kh.modifierKey + b.Search + ": search"}
 
 	case ViewReader:
-		return []string{kh.modifierKey + b.OpenMedia + ": open media", kh.modifierKey + b.Search + ": search"}
+		return []string{kh.modifierKey + b.OpenMedia + ": open media", kh.modifierKey + b.ToggleStar + ": star", kh.modifierKey + b.Search + ": search"}
 
 	case ViewSearch:
 		// Include search engine status in search view

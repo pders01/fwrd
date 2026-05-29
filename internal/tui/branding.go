@@ -54,6 +54,7 @@ var (
 	// Status colors
 	UnreadColor  = lipgloss.Color("#FFE66D") // Bright yellow - new/unread
 	ReadColor    = lipgloss.Color("#64748B") // Slate - read/past
+	StarColor    = lipgloss.Color("#F59E0B") // Amber - starred/favorite
 	ErrorColor   = lipgloss.Color("#EF4444") // Red
 	SuccessColor = lipgloss.Color("#10B981") // Green
 )
@@ -84,6 +85,10 @@ var (
 
 	ReadItemStyle = lipgloss.NewStyle().
 			Foreground(ReadColor)
+
+	StarStyle = lipgloss.NewStyle().
+			Foreground(StarColor).
+			Bold(true)
 
 	SelectedItemStyle = lipgloss.NewStyle().
 				Foreground(BackgroundColor).

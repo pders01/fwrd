@@ -232,6 +232,16 @@ func (a *App) toggleRead(article *storage.Article) tea.Cmd {
 	}
 }
 
+func (a *App) toggleStarred(article *storage.Article) tea.Cmd {
+	return func() tea.Msg {
+		newState := !article.Starred
+		if err := a.store.MarkArticleStarred(article.ID, newState); err != nil {
+			return articleStarToggledMsg{article: article, err: err}
+		}
+		return articleStarToggledMsg{article: article, starred: newState}
+	}
+}
+
 func (a *App) markArticleRead(article *storage.Article) tea.Cmd {
 	return func() tea.Msg {
 		if !article.Read {

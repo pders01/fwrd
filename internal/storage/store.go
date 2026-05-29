@@ -439,6 +439,34 @@ func (s *Store) MarkArticleRead(id string, read bool) error {
 	})
 }
 
+// MarkArticleStarred flips an article's Starred flag. It mirrors
+// MarkArticleRead: the article document is rewritten in place and the
+// secondary indexes and search index are untouched, since neither keys on
+// star state.
+func (s *Store) MarkArticleStarred(id string, starred bool) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(articlesBucket)
+		data := b.Get([]byte(id))
+		if data == nil {
+			return fmt.Errorf("article not found")
+		}
+
+		var article Article
+		if err := json.Unmarshal(data, &article); err != nil {
+			return err
+		}
+
+		article.Starred = starred
+
+		data, err := json.Marshal(article)
+		if err != nil {
+			return err
+		}
+
+		return b.Put([]byte(id), data)
+	})
+}
+
 func (s *Store) DeleteFeed(id string) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
 		feedBucket := tx.Bucket(feedsBucket)
