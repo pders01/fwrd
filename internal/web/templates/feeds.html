@@ -41,7 +41,12 @@
 {{if gt .Unread 0}}<span class="badge">{{.Unread}} unread</span>{{end}}
 <span class="feed-actions">
 <form action="/feeds/{{.Feed.ID}}/refresh" method="post"><button type="submit" class="link">refresh</button></form>
-<form action="/feeds/{{.Feed.ID}}/delete" method="post" onsubmit="return confirm('Delete this feed and its articles?')"><button type="submit" class="link danger">delete</button></form>
+<details class="confirm"><summary class="as-link">delete</summary>
+<form action="/feeds/{{.Feed.ID}}/delete" method="post" class="confirm-form">
+<span class="confirm-q">Delete feed and its articles?</span>
+<button type="submit" class="link danger">Yes, delete</button>
+</form>
+</details>
 </span>
 </div>
 <div class="row-meta muted">
