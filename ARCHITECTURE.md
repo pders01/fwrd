@@ -121,11 +121,16 @@ Provides comprehensive security validation:
 - **Security Policies**: Configurable validation policies (secure vs permissive modes)
 
 ### internal/debuglog
-Structured logging system for debugging and monitoring:
+File-based diagnostic logging, separate from the CLI's user-facing output:
 - **Configurable Levels**: Debug, info, warn, error logging levels
-- **File Logging**: Persistent logging to `~/.fwrd/fwrd.log`
+- **File Logging**: Persistent logging to `~/.fwrd/fwrd.log`, opt-in via `--debug`
 - **Structured Output**: JSON-formatted logs for machine processing
 - **Performance Monitoring**: Operation timing and resource usage tracking
+
+The CLI's *operational* output (startup, plugin load, `serve` diagnostics) is
+separate: it goes to stderr through `charmbracelet/log` (styled level badges,
+timestamps, key=value fields, TTY-aware color), wired in `cmd/rss`. debuglog
+remains the verbose file sink; the two do not overlap.
 
 ## Data Flow
 
