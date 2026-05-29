@@ -7,6 +7,7 @@ A fast, terminal-based RSS feed aggregator with full-text search capabilities, b
 - **Triple Interface**: Interactive TUI (Bubble Tea) + Command-line interface (Cobra) + web view (`fwrd serve`)
 - **Newspaper web view**: The web front page is a newspaper — a lead story plus emergent topic sections clustered from recent articles; feeds are managed at `/feeds`
 - **Auto light/dark**: Every front-end follows the system light/dark setting — the web view via CSS, the TUI by detecting the terminal/OS appearance (override with `[ui] theme`)
+- **Zero-config LAN access**: `serve --mdns` advertises the web view at `http://fwrd.local:8080` over mDNS; `fwrd service install` runs it as a systemd/launchd background service
 - **Full‑text search**: Bleve‑powered search across feeds and articles with debounced input
 - **Comprehensive CLI**: Complete feed management from command line (add, list, delete, refresh)
 - **Smart caching**: Honors ETag and Last-Modified; handles 304/Retry-After responses
@@ -95,8 +96,9 @@ converts HTML to terminal markdown — the web view renders article content
 as sanitized HTML, the form it was authored in.
 
 ```bash
-./fwrd serve                       # http://127.0.0.1:8080
-./fwrd serve --addr 127.0.0.1:9000 # custom bind address
+./fwrd serve                          # http://127.0.0.1:8080
+./fwrd serve --addr 127.0.0.1:9000    # custom bind address
+./fwrd serve --addr 0.0.0.0:8080 --mdns  # LAN-reachable at http://fwrd.local:8080
 ```
 
 Near-parity with the TUI/CLI:
@@ -151,6 +153,34 @@ Two ways to protect it:
 - **Reverse proxy.** Front fwrd with nginx/Caddy/Traefik handling TLS and
   authentication, and keep fwrd bound to `127.0.0.1`. This is the
   recommended setup for anything beyond a trusted LAN.
+
+#### Reach it at `fwrd.local` (mDNS)
+
+`--mdns` advertises the web view on the local network over multicast DNS, so
+any device on the same LAN can reach it at `http://fwrd.local:8080` — no DNS,
+hosts file, or static IP. Change the label with `--mdns-name <name>`
+(advertised as `<name>.local`).
+
+mDNS is link-local and the advertised address is a LAN interface, so `--mdns`
+only makes sense with a non-loopback bind (`--addr 0.0.0.0:8080`); a
+loopback-bound server logs a warning because the name would resolve to an
+unreachable interface. On Linux it coexists with a running Avahi.
+
+#### Run it as a background service
+
+Install `fwrd serve` as a per-user service — a systemd user unit on Linux, a
+launchd LaunchAgent on macOS. No root; it writes under your home directory.
+
+```bash
+./fwrd service install     # defaults to --addr 0.0.0.0:8080 --mdns
+./fwrd service uninstall
+```
+
+`install` writes the unit/plist (pointing at the running binary, forwarding
+any `--config`/`--db` you pass), then enables and starts it. Override the bind
+or mDNS name with the same `--addr` / `--mdns` / `--mdns-name` flags. Because
+the default bind is LAN-facing and unauthenticated, set `[web.auth]` (see
+above) when installing on a shared network.
 
 #### OPML on the command line
 
