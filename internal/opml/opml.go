@@ -14,6 +14,11 @@ import (
 	"github.com/pders01/fwrd/internal/storage"
 )
 
+// maxOPMLSize bounds the bytes Parse will read from any source. Even a
+// large subscription list is a few hundred KiB; this is a generous ceiling
+// that still rejects a pathological document.
+const maxOPMLSize = 8 << 20 // 8 MiB
+
 // document is the root OPML element. Only the subset fwrd produces and
 // consumes is modelled; unknown elements and attributes are ignored on
 // parse, which is what lets us read OPML written by other readers.
@@ -96,7 +101,12 @@ func Export(feeds []*storage.Feed, created time.Time) ([]byte, error) {
 // seen. A document with no feed outlines parses cleanly to an empty slice.
 func Parse(r io.Reader) ([]Feed, error) {
 	var doc document
-	dec := xml.NewDecoder(r)
+	// Bound total input so a pathological document can't exhaust memory,
+	// regardless of caller. Go's encoding/xml does not expand custom DTD
+	// entities (an undefined &entity; is a parse error), so there is no
+	// billion-laughs vector to defend against — this only caps raw size.
+	// Subscription lists are small; maxOPMLSize is a generous ceiling.
+	dec := xml.NewDecoder(io.LimitReader(r, maxOPMLSize))
 	if err := dec.Decode(&doc); err != nil {
 		return nil, fmt.Errorf("parse opml: %w", err)
 	}
