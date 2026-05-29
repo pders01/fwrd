@@ -36,6 +36,10 @@ body {
 }
 a { color: var(--fg); text-decoration: none; }
 a:hover { text-decoration: underline; }
+/* Keyboard focus ring for links/buttons (WCAG 2.4.7). Text inputs opt out
+   here and supply their own box-shadow ring below. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+input:focus-visible { outline: none; }
 .muted { color: var(--muted); font-size: 0.92rem; }
 main { max-width: var(--maxw); margin: 0 auto; padding: 1.25rem 1.25rem 4rem; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
