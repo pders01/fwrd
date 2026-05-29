@@ -7,14 +7,17 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<header>
-<a href="/" class="brand">fwrd</a>
-<form action="/search" method="get" class="search" role="search">
-<input type="search" name="q" placeholder="Search articles…" aria-label="Search articles">
-</form>
-</header>
 <main>
 {{template "content" .}}
 </main>
 </body>
 </html>{{end}}
+
+{{define "searchbar"}}
+<div class="search-hero">
+<a href="/" class="brand" aria-label="Home">fwrd</a>
+<form action="/search" method="get" class="search" role="search">
+<input type="search" name="q" value="{{.}}" placeholder="Search articles…" autofocus autocomplete="off" aria-label="Search articles">
+</form>
+</div>
+{{end}}

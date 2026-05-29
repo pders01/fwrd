@@ -1,6 +1,6 @@
 {{define "title"}}Search{{end}}
 {{define "content"}}
-<h1>Search</h1>
+{{template "searchbar" .Query}}
 {{if not .Available}}
 <p class="muted">Search is unavailable (index failed to initialize).</p>
 {{else if .Query}}

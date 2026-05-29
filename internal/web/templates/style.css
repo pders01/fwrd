@@ -18,37 +18,50 @@
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 17px;
+  line-height: 1.65;
+  font-family: var(--reading-font, ui-serif, "New York", Georgia, Cambria, "Times New Roman", Times, serif);
   color: var(--fg);
   background: var(--bg);
 }
-header {
+/* UI chrome (search, buttons, brand) uses a system sans for crisp controls,
+   leaving the reading font for prose. */
+.brand, .search input, button, input, .badge, .crumbs, .row-meta, .feed-actions {
+  font-family: var(--ui-font, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+}
+main { max-width: var(--maxw); margin: 0 auto; padding: 1.5rem 1.25rem 4rem; }
+
+/* search hero — front and center, autofocused */
+.search-hero {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 1rem;
-  padding: 0.75rem 1.25rem;
-  border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  background: var(--bg);
+  gap: 0.75rem;
+  margin: 1.5rem 0 2.25rem;
 }
 .brand {
   font-weight: 700;
-  font-size: 1.15rem;
+  font-size: 1.05rem;
   color: var(--accent);
   text-decoration: none;
-  letter-spacing: -0.02em;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
 }
-.search { margin-left: auto; }
+.search { width: 100%; }
 .search input {
-  padding: 0.4rem 0.7rem;
+  width: 100%;
+  padding: 0.7rem 1rem;
+  font-size: 1.1rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--bg);
   color: var(--fg);
-  min-width: 14rem;
 }
-main { max-width: var(--maxw); margin: 0 auto; padding: 1.5rem 1.25rem 4rem; }
+.search input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
 h1 { font-size: 1.6rem; letter-spacing: -0.02em; }
 a { color: var(--accent); }
 .muted { color: var(--muted); font-size: 0.92rem; }
