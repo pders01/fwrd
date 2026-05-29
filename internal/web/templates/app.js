@@ -129,3 +129,26 @@
   if (filter) filter.addEventListener("input", applyFilter);
   if (sorter) sorter.addEventListener("change", applySort);
 })();
+
+// Re-apply the front page's autofocus when the page is restored from the
+// back/forward cache. A bfcache restore does not re-parse the document, so
+// the `autofocus` attribute never fires again — navigating back from an
+// article would otherwise leave the search field blurred. pageshow with
+// event.persisted is the bfcache-restore signal; a normal load honours
+// autofocus on its own and reports persisted === false here.
+(function () {
+  "use strict";
+  window.addEventListener("pageshow", function (event) {
+    if (!event.persisted) return;
+    var input = document.querySelector("input[autofocus]");
+    if (!input) return;
+    input.focus();
+    // Drop the caret after any text the browser restored.
+    var n = input.value.length;
+    try {
+      input.setSelectionRange(n, n);
+    } catch (e) {
+      // type="search" rejects setSelectionRange in some browsers; focus alone is enough.
+    }
+  });
+})();
