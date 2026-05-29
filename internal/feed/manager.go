@@ -213,11 +213,17 @@ func (m *Manager) refreshFeedByID(feedID string, notify bool) (*storage.Feed, []
 
 	resp, updated, err := m.fetcher.Fetch(feed)
 	if err != nil {
+		// Persist the failure so /feeds can surface a stale/error badge.
+		// Best-effort: a save error here is subordinate to the fetch error.
+		recordFeedError(feed, err)
+		_ = m.store.SaveFeed(feed)
 		return feed, nil, fmt.Errorf("fetching feed: %w", err)
 	}
 
 	if !updated || resp == nil {
+		// 304/unchanged is a successful round-trip — clear any prior error.
 		feed.LastFetched = time.Now()
+		clearFeedError(feed)
 		if saveErr := m.store.SaveFeed(feed); saveErr != nil {
 			return feed, nil, fmt.Errorf("saving feed metadata: %w", saveErr)
 		}
@@ -227,11 +233,14 @@ func (m *Manager) refreshFeedByID(feedID string, notify bool) (*storage.Feed, []
 
 	articles, err := m.parser.Parse(io.LimitReader(resp.Body, maxFeedBodySize), feedID)
 	if err != nil {
+		recordFeedError(feed, err)
+		_ = m.store.SaveFeed(feed)
 		return feed, nil, fmt.Errorf("parsing feed: %w", err)
 	}
 
 	m.fetcher.UpdateFeedMetadata(feed, resp)
 	feed.UpdatedAt = time.Now()
+	clearFeedError(feed)
 
 	if err := m.store.SaveFeed(feed); err != nil {
 		return feed, nil, fmt.Errorf("saving feed: %w", err)
@@ -311,6 +320,19 @@ func (m *Manager) RefreshAllFeeds() (RefreshSummary, error) {
 	}
 
 	return summary, errors.Join(summary.Errors...)
+}
+
+// recordFeedError stamps a failed refresh onto the feed. LastFetched is left
+// untouched so it keeps pointing at the last *successful* fetch.
+func recordFeedError(feed *storage.Feed, err error) {
+	feed.LastError = err.Error()
+	feed.LastErrorAt = time.Now()
+}
+
+// clearFeedError wipes any prior failure after a successful refresh.
+func clearFeedError(feed *storage.Feed) {
+	feed.LastError = ""
+	feed.LastErrorAt = time.Time{}
 }
 
 func generateFeedID(url string) string {

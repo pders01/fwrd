@@ -185,10 +185,9 @@ Observed issues (132-feed real DB) and their fixes:
 - [x] Broadsheet type scale → reuses the shared `masthead`/`crumbs` chrome
       and a hairline rule under the toolbar, consistent with `/topic/{slug}`.
 
-**Gap (no data):** `storage.Feed` persists no fetch-error state, so the meta
-row can't show an error badge — last-fetched is the only staleness signal.
-Surfacing errors would need an error/last-status field on `Feed`, written by
-`Manager.RefreshFeed`.
+**Gap closed:** `storage.Feed` now persists `LastError`/`LastErrorAt`, written
+by `Manager.RefreshFeed`, and `/feeds` renders a "fetch failed" badge plus a
+meta-row line — see "Persist feed fetch-error state" below.
 
 Code: `internal/web/handlers.go` (`handleFeeds`, `feedCounts`),
 `internal/web/front.go` (`feedLabel`, `feedHost`, `feedSource`),
@@ -222,19 +221,22 @@ and consistency fixes, each landed as its own commit:
 
 ---
 
-## Next Up
+### **Persist feed fetch-error state** — COMPLETED
 
-### **Persist feed fetch-error state**
+`storage.Feed` gained `LastError` (message; `""` = last attempt succeeded) and
+`LastErrorAt` (timestamp). `Manager.refreshFeedByID` records both on
+fetch/parse failure — saving the feed on the error paths that previously
+returned without a write — and clears them on success or 304. `LastFetched`
+still tracks the last *successful* fetch, so a feed can show "updated 3d ago"
+and a "fetch failed" badge at once. `/feeds` renders the badge plus a red
+meta-row line (`last refresh failed <when>`), both with the full error in a
+`title=` tooltip. Regression-tested in `manager_test.go`
+(`TestRefreshFeed_RecordsAndClearsError`).
 
-The `/feeds` meta row shows last-fetched but cannot show whether the last
-refresh failed, because `storage.Feed` stores no error/status field —
-last-fetched is the only staleness signal. Add a last-fetch error/status to
-`Feed`, write it from `Manager.RefreshFeed`, and surface it on `/feeds` (and
-optionally the TUI) as an error badge.
+TUI badge is still open as an optional follow-up.
 
-Relevant code: `internal/storage/models.go` (`Feed`),
-`internal/feed/manager.go` (`RefreshFeed`), `internal/web/handlers.go`
-(`handleFeeds`), `internal/web/templates/feeds.html`.
+Code: `internal/storage/models.go`, `internal/feed/manager.go`,
+`internal/web/templates/feeds.html`, `internal/web/templates/style.css`.
 
 ---
 

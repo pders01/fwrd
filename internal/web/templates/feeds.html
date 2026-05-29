@@ -39,6 +39,7 @@
 <div class="feed-row">
 <a class="feed-title" href="/feeds/{{.Feed.ID}}">{{.Label}}</a>
 {{if gt .Unread 0}}<span class="badge">{{.Unread}} unread</span>{{end}}
+{{if .Feed.LastError}}<span class="badge error" title="{{.Feed.LastError}}">fetch failed</span>{{end}}
 <span class="feed-actions">
 <form action="/feeds/{{.Feed.ID}}/refresh" method="post"><button type="submit" class="link">refresh</button></form>
 <details class="confirm"><summary class="as-link">delete</summary>
@@ -53,6 +54,7 @@
 {{if and .Source (ne .Source .Label)}}<span class="feed-host">{{.Source}}</span>{{end}}
 <span>{{.Total}} article{{if ne .Total 1}}s{{end}}</span>
 {{if not .Feed.LastFetched.IsZero}}<span>updated {{date .Feed.LastFetched}}</span>{{else}}<span>never fetched</span>{{end}}
+{{if .Feed.LastError}}<span class="meta-error" title="{{.Feed.LastError}}">last refresh failed{{if not .Feed.LastErrorAt.IsZero}} {{date .Feed.LastErrorAt}}{{end}}</span>{{end}}
 </div>
 </li>
 {{end}}
