@@ -145,10 +145,32 @@ func feedLabel(f *storage.Feed) string {
 	if f.Title != "" {
 		return f.Title
 	}
+	if h := feedHost(f); h != "" {
+		return h
+	}
+	return f.URL
+}
+
+// feedHost is the feed URL's host with a leading "www." trimmed, or "" if
+// the URL has no parseable host. It is the bare-host fallback label.
+func feedHost(f *storage.Feed) string {
 	if u, err := url.Parse(f.URL); err == nil && u.Host != "" {
 		return strings.TrimPrefix(u.Host, "www.")
 	}
-	return f.URL
+	return ""
+}
+
+// feedSource is host+path (scheme, "www.", and a trailing slash stripped),
+// used as a disambiguating subtitle on the feed-management page. Three
+// "arXiv" feeds sharing a title and host are still distinguishable by path
+// (arxiv.org/rss/cs.AI vs cs.LG). Empty when the URL has no parseable host.
+func feedSource(f *storage.Feed) string {
+	u, err := url.Parse(f.URL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	s := strings.TrimPrefix(u.Host, "www.") + u.Path
+	return strings.TrimSuffix(s, "/")
 }
 
 func containsArticle(arts []*storage.Article, id string) bool {

@@ -126,6 +126,78 @@ The optional web-view follow-ups are now implemented:
 
 ---
 
+### **Newspaper Front Page & Topic Clustering** — COMPLETED
+
+The web view was reworked from a feed-list home into a newspaper, driven by
+the article content rather than the feed roster.
+
+- **Front page (`/`)** — masthead (dateline, nameplate, autofocused search),
+  a single **lead story**, then **topical section blocks** flowing as true
+  CSS columns with a rule. `/topic/{slug}` lists a section in full.
+- **Feed management moved to `/feeds`** — the old index (feed list, add,
+  refresh, delete, OPML) now lives there; `/` is a reading surface. Inner
+  pages share a compact masthead partial; breadcrumbs point back to `/feeds`.
+- **Topic engine (`internal/topics`)** — emergent sections via TF-IDF over
+  title+description and greedy shared-term clustering. Dependency-free and
+  deterministic (stable slugs), reads `storage` directly so it works under
+  either search backend. Each article lands in exactly one section; the
+  catch-all `Latest` is always last.
+- **Data-quality guards (important)** — real
+  feeds emit undated (zero-time) and future-dated articles; BoltDB's date
+  index floats zero-time to the top, so naive newest-first surfaced a feed
+  about-page as the lead. `rankFunc` ranks zero/future articles stale so
+  they never lead or dominate. URLs and aggregator/statuspage boilerplate
+  (HN "points", statuspage "scheduled/completed", months, timezones) are
+  stripped/stopworded to stop bogus topics ("tildes", "url", "utc").
+
+**Known limitations (candidates for follow-up):**
+
+- No stemming, so near-synonyms split into separate sections
+  (`Russia` vs `Russian`, singular vs plural). Light stemming or a synonym
+  merge step would consolidate them.
+- The catch-all `Latest` is large (~70% of a 132-feed corpus). Single-term
+  clustering leaves a long tail; multi-term topic labels, co-occurrence
+  seeding, or per-feed-category hints could section more of it.
+- Topics recompute per request over the top `frontCorpus` (400) articles.
+  Fine at this scale; revisit with a cache keyed on corpus signature if the
+  corpus grows large.
+
+---
+
+## Next Up
+
+### **Feed-management page (`/feeds`) redesign** — COMPLETED
+
+Reworked from the pre-overhaul flat list to match the newspaper polish.
+Observed issues (132-feed real DB) and their fixes:
+
+- [x] Flat alphabetical wall → client-side **filter box** + **sort**
+      (A–Z / Unread / Updated) in the toolbar. Progressive enhancement: the
+      list is fully rendered and label-sorted server-side, so it stays usable
+      with JS off; the controls are hidden until `<body>.has-js`.
+- [x] Indistinguishable duplicates → every row carries a **host+path
+      subtitle** (`feedSource`), shown whenever it differs from the display
+      label. Three same-titled `arxiv.org` feeds now split by path
+      (`/rss/cs.AI` vs `/rss/cs.LG`). Sort breaks label ties on URL so dups
+      land adjacent.
+- [x] Bare unread badges → labeled **"N unread"** plus a meta row with
+      **article count** and **last-fetched** ("updated …" / "never fetched").
+- [x] Unstyled file input → real **toolbar** (add-feed row, filter/sort row,
+      OPML row); the native file input is driven by a link-styled `<label>`.
+- [x] Broadsheet type scale → reuses the shared `masthead`/`crumbs` chrome
+      and a hairline rule under the toolbar, consistent with `/topic/{slug}`.
+
+**Gap (no data):** `storage.Feed` persists no fetch-error state, so the meta
+row can't show an error badge — last-fetched is the only staleness signal.
+Surfacing errors would need an error/last-status field on `Feed`, written by
+`Manager.RefreshFeed`.
+
+Code: `internal/web/handlers.go` (`handleFeeds`, `feedCounts`),
+`internal/web/front.go` (`feedLabel`, `feedHost`, `feedSource`),
+`internal/web/templates/feeds.html`, `style.css`, `app.js`.
+
+---
+
 ## Optional Future Enhancements
 
 ### **Testing Coverage Expansion**

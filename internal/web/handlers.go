@@ -24,7 +24,10 @@ const articlesPerPage = 50
 
 type feedView struct {
 	Feed   *storage.Feed
+	Label  string
+	Source string
 	Unread int
+	Total  int
 }
 
 type indexData struct {
@@ -59,31 +62,45 @@ func (s *Server) handleFeeds(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "failed to load feeds: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Sort by display label (case-insensitive); identical labels — e.g.
+	// three untitled arxiv.org feeds — break to URL so duplicates land
+	// adjacent and in a stable order.
 	sort.Slice(feeds, func(i, j int) bool {
-		return feeds[i].Title < feeds[j].Title
+		li, lj := feedLabel(feeds[i]), feedLabel(feeds[j])
+		if strings.EqualFold(li, lj) {
+			return feeds[i].URL < feeds[j].URL
+		}
+		return strings.ToLower(li) < strings.ToLower(lj)
 	})
 	views := make([]feedView, 0, len(feeds))
 	for _, f := range feeds {
-		views = append(views, feedView{Feed: f, Unread: s.unreadCount(f.ID)})
+		unread, total := s.feedCounts(f.ID)
+		views = append(views, feedView{
+			Feed:   f,
+			Label:  feedLabel(f),
+			Source: feedSource(f),
+			Unread: unread,
+			Total:  total,
+		})
 	}
 	s.render(w, "feeds.html", indexData{Feeds: views})
 }
 
-// unreadCount counts unread articles in a feed. It scans the feed's
-// articles; feeds are bounded in size so this stays cheap. Errors collapse
-// to 0 — an unread badge is not worth failing a page render over.
-func (s *Server) unreadCount(feedID string) int {
+// feedCounts returns the unread and total article counts for a feed in a
+// single scan. Feeds are bounded in size so this stays cheap. Errors
+// collapse to zero — a count is not worth failing a page render over.
+func (s *Server) feedCounts(feedID string) (unread, total int) {
 	articles, err := s.store.GetArticles(feedID, 0)
 	if err != nil {
-		return 0
+		return 0, 0
 	}
-	n := 0
+	total = len(articles)
 	for _, a := range articles {
 		if !a.Read {
-			n++
+			unread++
 		}
 	}
-	return n
+	return unread, total
 }
 
 func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
