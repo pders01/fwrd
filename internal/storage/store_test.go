@@ -388,6 +388,43 @@ func TestStore_CursorPagination_TraversesFullSet(t *testing.T) {
 	}
 }
 
+// TestStore_SaveArticles_ReSaveWithChangedDateNoDuplicate guards against a
+// date-index leak: re-saving an article with a different Published (e.g. a
+// feed adds a pubDate to a previously undated item) must remove the old
+// timestamp-keyed index entry, so the article is not returned twice and a
+// stale zero-time key does not float to the top.
+func TestStore_SaveArticles_ReSaveWithChangedDateNoDuplicate(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	// First save undated (zero time) — the inverted-timestamp index would
+	// otherwise float this to the very top.
+	a := &Article{ID: "a1", FeedID: "feed1", Title: "Article"}
+	if err := store.SaveArticles([]*Article{a}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	// Re-save the same ID with a real Published date.
+	a.Published = time.Now()
+	if err := store.SaveArticles([]*Article{a}); err != nil {
+		t.Fatalf("re-save: %v", err)
+	}
+
+	got, err := store.GetArticles("", 0)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	count := 0
+	for _, x := range got {
+		if x.ID == "a1" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("article a1 returned %d times, want 1 (stale date-index key leaked)", count)
+	}
+}
+
 // TestStore_CursorPagination_OrderingMatchesNewestFirst verifies that
 // successive pages return articles in strictly descending Published order.
 func TestStore_CursorPagination_OrderingMatchesNewestFirst(t *testing.T) {
