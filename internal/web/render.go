@@ -11,13 +11,13 @@ import (
 	"github.com/pders01/fwrd/internal/storage"
 )
 
-//go:embed templates/*.html templates/style.css
+//go:embed templates/*.html templates/style.css templates/app.js
 var assets embed.FS
 
 // pages are the content templates; each is parsed together with layout.html
 // into its own set so their "title"/"content" block definitions don't
 // collide in a shared namespace.
-var pages = []string{"index.html", "feed.html", "article.html", "search.html"}
+var pages = []string{"front.html", "topic.html", "feeds.html", "feed.html", "article.html", "search.html"}
 
 // sanitizer strips scripts, event handlers, and other active content from
 // feed-supplied HTML before it is marked template.HTML and rendered. Feed
@@ -40,6 +40,7 @@ func getSanitizer() *bluemonday.Policy {
 type templates struct {
 	sets map[string]*template.Template
 	css  []byte
+	js   []byte
 }
 
 func funcMap() template.FuncMap {
@@ -49,6 +50,12 @@ func funcMap() template.FuncMap {
 				return ""
 			}
 			return tm.Format("2006-01-02 15:04")
+		},
+		"longdate": func(tm time.Time) string {
+			if tm.IsZero() {
+				return ""
+			}
+			return tm.Format("Monday, January 2, 2006")
 		},
 	}
 }
@@ -67,7 +74,11 @@ func loadTemplates() (*templates, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &templates{sets: sets, css: css}, nil
+	js, err := assets.ReadFile("templates/app.js")
+	if err != nil {
+		return nil, err
+	}
+	return &templates{sets: sets, css: css, js: js}, nil
 }
 
 // articleBody picks the richest available HTML for an article: full
@@ -100,4 +111,9 @@ func (s *Server) handleCSS(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(":root{--reading-font:" + s.readingFont + ";--ui-font:" + systemSans + "}\n"))
 	}
 	_, _ = w.Write(s.tmpl.css)
+}
+
+func (s *Server) handleJS(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	_, _ = w.Write(s.tmpl.js)
 }

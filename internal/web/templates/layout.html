@@ -5,19 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{template "title" .}} · fwrd</title>
 <link rel="stylesheet" href="/static/style.css">
+<script src="/static/app.js" defer></script>
 </head>
 <body>
-<main>
 {{template "content" .}}
-</main>
 </body>
 </html>{{end}}
 
-{{define "searchbar"}}
-<div class="search-hero">
-<a href="/" class="brand" aria-label="Home">fwrd</a>
+{{/* Compact header for inner pages: brand, search, manage link. The front
+     page renders its own grand masthead instead. Dot (.) is the search
+     query to pre-fill, or "". */}}
+{{define "masthead"}}
+<header class="masthead">
+<a href="/" class="brand" aria-label="fwrd home">fwrd</a>
 <form action="/search" method="get" class="search" role="search">
-<input type="search" name="q" value="{{.}}" placeholder="Search articles…" autofocus autocomplete="off" aria-label="Search articles">
+<input type="search" name="q" value="{{.}}" placeholder="Search…" autocomplete="off" aria-label="Search articles">
 </form>
-</div>
+<nav class="mast-nav"><a href="/feeds">Feeds</a></nav>
+</header>
 {{end}}

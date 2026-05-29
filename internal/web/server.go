@@ -8,6 +8,7 @@ package web
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net/http"
@@ -39,6 +40,8 @@ type Server struct {
 	cfg         *config.Config
 	tmpl        *templates
 	readingFont string // resolved CSS font-family for reading text
+	authUser    string // HTTP Basic Auth username; empty disables auth
+	authPass    string // HTTP Basic Auth password
 
 	// writeMu serializes operations that notify the search index. The
 	// DataListener/DeleteListener contract requires that notifications not
@@ -56,8 +59,11 @@ func NewServer(store *storage.Store, manager *feed.Manager, searcher search.Sear
 		return nil, err
 	}
 	font := ""
+	authUser, authPass := "", ""
 	if cfg != nil {
 		font = cfg.Web.Font
+		authUser = cfg.Web.Auth.Username
+		authPass = cfg.Web.Auth.Password
 	}
 	return &Server{
 		store:       store,
@@ -66,29 +72,66 @@ func NewServer(store *storage.Store, manager *feed.Manager, searcher search.Sear
 		cfg:         cfg,
 		tmpl:        tmpl,
 		readingFont: resolveFont(font),
+		authUser:    authUser,
+		authPass:    authPass,
 	}, nil
 }
+
+// AuthEnabled reports whether HTTP Basic Auth is configured. The serve
+// command uses it to decide whether to warn about an unauthenticated
+// non-loopback bind.
+func (s *Server) AuthEnabled() bool { return s.authUser != "" }
 
 // Handler builds the route table. Go 1.22 ServeMux method+path patterns
 // keep this dependency-free — no router library needed. Mutating routes
 // are POST-only and run behind the same-origin guard.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", s.handleIndex)
+	mux.HandleFunc("GET /{$}", s.handleFront)
+	mux.HandleFunc("GET /feeds", s.handleFeeds)
+	mux.HandleFunc("GET /topic/{slug}", s.handleTopic)
 	mux.HandleFunc("GET /feeds/{id}", s.handleFeed)
 	// Article IDs are composite (feedID:articleURL) and contain slashes and
 	// query chars, so they can't ride in a path segment — use a query param.
 	mux.HandleFunc("GET /article", s.handleArticle)
 	mux.HandleFunc("GET /search", s.handleSearch)
 	mux.HandleFunc("GET /static/style.css", s.handleCSS)
+	mux.HandleFunc("GET /static/app.js", s.handleJS)
+	mux.HandleFunc("GET /opml/export", s.handleOPMLExport)
 
 	mux.HandleFunc("POST /feeds", s.handleAddFeed)
+	mux.HandleFunc("POST /opml/import", s.handleOPMLImport)
 	mux.HandleFunc("POST /feeds/{id}/refresh", s.handleRefreshFeed)
 	mux.HandleFunc("POST /feeds/{id}/delete", s.handleDeleteFeed)
 	mux.HandleFunc("POST /refresh", s.handleRefreshAll)
 	mux.HandleFunc("POST /read", s.handleToggleRead)
+	mux.HandleFunc("POST /star", s.handleToggleStar)
 
-	return s.sameOriginGuard(mux)
+	// basicAuth is outermost so unauthenticated requests never reach a
+	// handler; the same-origin guard then gates the mutating routes.
+	return s.basicAuth(s.sameOriginGuard(mux))
+}
+
+// basicAuth gates every request behind HTTP Basic Auth when credentials
+// are configured. With no username set it is a pass-through, preserving
+// the open localhost default. Credential comparison is constant-time to
+// avoid leaking length/equality through timing.
+func (s *Server) basicAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.authUser == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		user, pass, ok := r.BasicAuth()
+		userOK := subtle.ConstantTimeCompare([]byte(user), []byte(s.authUser)) == 1
+		passOK := subtle.ConstantTimeCompare([]byte(pass), []byte(s.authPass)) == 1
+		if !ok || !userOK || !passOK {
+			w.Header().Set("WWW-Authenticate", `Basic realm="fwrd", charset="UTF-8"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // sameOriginGuard rejects state-changing requests whose Origin/Referer host

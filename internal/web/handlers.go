@@ -5,10 +5,17 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/pders01/fwrd/internal/opml"
 	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/storage"
 )
+
+// opmlMaxUpload bounds the size of an uploaded OPML file held in memory
+// while parsing. Subscription lists are small; this is a generous ceiling
+// that still rejects a hostile multi-megabyte upload.
+const opmlMaxUpload = 2 << 20 // 2 MiB
 
 // articlesPerPage bounds how many articles a feed page renders before
 // offering a "next" link. The store supports cursor pagination, so deep
@@ -42,7 +49,11 @@ type searchData struct {
 	Available bool
 }
 
-func (s *Server) handleIndex(w http.ResponseWriter, _ *http.Request) {
+// handleFeeds renders the feed-management page: the full feed list with
+// unread counts plus the add / refresh / delete / OPML controls. The
+// reading surface (the newspaper front page) lives at "/"; this is the
+// "manage" half of the read/manage split.
+func (s *Server) handleFeeds(w http.ResponseWriter, _ *http.Request) {
 	feeds, err := s.store.GetAllFeeds()
 	if err != nil {
 		http.Error(w, "failed to load feeds: "+err.Error(), http.StatusInternalServerError)
@@ -55,7 +66,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, _ *http.Request) {
 	for _, f := range feeds {
 		views = append(views, feedView{Feed: f, Unread: s.unreadCount(f.ID)})
 	}
-	s.render(w, "index.html", indexData{Feeds: views})
+	s.render(w, "feeds.html", indexData{Feeds: views})
 }
 
 // unreadCount counts unread articles in a feed. It scans the feed's
@@ -206,6 +217,84 @@ func (s *Server) handleToggleRead(w http.ResponseWriter, r *http.Request) {
 	}
 	read := r.FormValue("read") == "1"
 	if err := s.store.MarkArticleRead(id, read); err != nil {
+		http.Error(w, "failed to update article: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	redirect(w, r, safeReturn(r.FormValue("return")))
+}
+
+// handleOPMLExport streams all feeds as an OPML attachment. It is a GET so
+// it can be a plain link; no state changes, so the same-origin guard does
+// not apply.
+func (s *Server) handleOPMLExport(w http.ResponseWriter, _ *http.Request) {
+	feeds, err := s.store.GetAllFeeds()
+	if err != nil {
+		http.Error(w, "failed to load feeds: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	data, err := opml.Export(feeds, time.Now())
+	if err != nil {
+		http.Error(w, "failed to render OPML: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/x-opml; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="fwrd-feeds.opml"`)
+	_, _ = w.Write(data)
+}
+
+// handleOPMLImport accepts an uploaded OPML file and adds each listed feed.
+// Like the CLI importer it skips feeds already present and reports failures
+// without aborting the rest. AddFeed notifies the search index, so this
+// holds writeMu like the other manager-driven mutations.
+func (s *Server) handleOPMLImport(w http.ResponseWriter, r *http.Request) {
+	if s.manager == nil {
+		http.Error(w, "feed management is disabled", http.StatusServiceUnavailable)
+		return
+	}
+	if err := r.ParseMultipartForm(opmlMaxUpload); err != nil {
+		http.Error(w, "invalid upload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "missing OPML file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	feeds, err := opml.Parse(file)
+	if err != nil {
+		http.Error(w, "failed to parse OPML: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	existing, _ := s.store.GetAllFeeds()
+	have := make(map[string]bool, len(existing))
+	for _, f := range existing {
+		have[f.URL] = true
+	}
+	for _, f := range feeds {
+		if have[f.URL] {
+			continue
+		}
+		// Best-effort: a feed that fails to fetch is skipped so one bad
+		// entry doesn't abort the whole import.
+		_, _ = s.manager.AddFeed(f.URL)
+	}
+	redirect(w, r, "/")
+}
+
+func (s *Server) handleToggleStar(w http.ResponseWriter, r *http.Request) {
+	id := r.FormValue("id")
+	if id == "" {
+		http.Error(w, "missing article id", http.StatusBadRequest)
+		return
+	}
+	starred := r.FormValue("starred") == "1"
+	if err := s.store.MarkArticleStarred(id, starred); err != nil {
 		http.Error(w, "failed to update article: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

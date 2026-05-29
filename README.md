@@ -93,23 +93,66 @@ Near-parity with the TUI/CLI:
 - Read full article HTML, media links, and the original source link
 - Full-text search (Bleve)
 - Add, refresh (per-feed or all), and delete feeds
-- Mark articles read/unread
+- Mark articles read/unread and star/unstar
+- Import and export subscriptions as OPML
 
 State-changing actions are no-JS `POST` forms guarded by a same-origin
 check, so the page works without JavaScript while rejecting cross-site
-(CSRF) form submissions. Bind to `127.0.0.1` (the default) for personal use.
+(CSRF) form submissions. A small progressive-enhancement script upgrades
+the read/star toggles to update in place (no full reload) when JavaScript
+is available; with it off, the forms fall back to the same POST endpoints.
 
 The server holds the database open for its lifetime, so it cannot run
 against the same `--db` (or search index) as a concurrent TUI or second
 `serve` — BoltDB and the Bleve index are single-process.
+
+#### Exposing the web view
+
+The default `127.0.0.1` bind is reachable only from the local machine,
+which suits personal use and needs no auth. To reach the web view from
+another device you must bind a non-loopback address (e.g.
+`--addr 0.0.0.0:8080`) — and then **anyone who can reach that address can
+read and modify your feeds.** `serve` prints a warning when it binds
+off-box without auth configured.
+
+Two ways to protect it:
+
+- **Built-in HTTP Basic Auth.** Set credentials in your config; every
+  request (read and write) then requires them:
+
+  ```toml
+  [web]
+  font = "serif"
+
+  [web.auth]
+  username = "you"
+  password = "a-long-random-secret"
+  ```
+
+  Basic Auth sends credentials base64-encoded, not encrypted, so only use
+  it behind TLS (a reverse proxy, or a tunnel like Tailscale/WireGuard).
+
+- **Reverse proxy.** Front fwrd with nginx/Caddy/Traefik handling TLS and
+  authentication, and keep fwrd bound to `127.0.0.1`. This is the
+  recommended setup for anything beyond a trusted LAN.
+
+#### OPML on the command line
+
+```bash
+./fwrd feed export feeds.opml   # write all subscriptions (use "-" for stdout)
+./fwrd feed import feeds.opml   # add each listed feed (use "-" for stdin)
+```
+
+Import skips feeds already subscribed and reports any that fail to fetch
+without aborting the rest.
 
 ### Keyboard Shortcuts (default)
 
 Note: The modifier key defaults to `ctrl` and can be changed in config.
 
 - Feeds: `ctrl+n` add • `ctrl+r` refresh • `ctrl+x` delete • `Enter` view articles
-- Articles: `ctrl+u` toggle read • `Enter` read • `esc` back
-- Reader: `ctrl+o` open media/links • `esc` back
+- Articles: `ctrl+u` toggle read • `ctrl+f` star/unstar • `Enter` read • `esc` back
+- Reader: `ctrl+o` open media/links • `ctrl+f` star/unstar • `esc` back
 - Global: `ctrl+s` search • `q` quit
 
 ### Search

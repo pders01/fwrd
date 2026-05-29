@@ -1,0 +1,35 @@
+{{define "title"}}{{.Label}}{{end}}
+{{define "content"}}
+{{template "masthead" ""}}
+<main>
+<nav class="crumbs"><a href="/">Front page</a> / {{.Label}}</nav>
+<div class="page-head"><h1 class="topic-title">{{.Label}}</h1></div>
+
+{{if .Articles}}
+<ul class="article-list">
+{{range .Articles}}
+<li class="{{if .Article.Read}}read{{end}}{{if .Article.Starred}} starred{{end}}">
+<a href="/article?id={{.Article.ID}}">{{if .Article.Title}}{{.Article.Title}}{{else}}(untitled){{end}}</a>
+<span class="row-meta">
+<span class="byline">{{.Feed}}{{if not .Article.Published.IsZero}} · {{date .Article.Published}}{{end}}</span>
+<form action="/star" method="post" class="inline js-toggle" data-kind="star">
+<input type="hidden" name="id" value="{{.Article.ID}}">
+<input type="hidden" name="starred" value="{{if .Article.Starred}}0{{else}}1{{end}}">
+<input type="hidden" name="return" value="/topic/{{$.Slug}}">
+<button type="submit" class="link" aria-pressed="{{if .Article.Starred}}true{{else}}false{{end}}">{{if .Article.Starred}}unstar{{else}}star{{end}}</button>
+</form>
+<form action="/read" method="post" class="inline js-toggle" data-kind="read">
+<input type="hidden" name="id" value="{{.Article.ID}}">
+<input type="hidden" name="read" value="{{if .Article.Read}}0{{else}}1{{end}}">
+<input type="hidden" name="return" value="/topic/{{$.Slug}}">
+<button type="submit" class="link">{{if .Article.Read}}mark unread{{else}}mark read{{end}}</button>
+</form>
+</span>
+</li>
+{{end}}
+</ul>
+{{else}}
+<p class="muted">No articles in this topic.</p>
+{{end}}
+</main>
+{{end}}
