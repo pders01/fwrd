@@ -205,7 +205,29 @@ func initConfig() {
 }
 
 func loadConfig() (*config.Config, error) {
-	return config.Load(cfgFile)
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return nil, err
+	}
+	// When --db overrides the database path, the search index must follow
+	// it; otherwise a custom-db instance collides with the default
+	// ~/.fwrd/index.bleve and blocks on its lock. Relocating the index
+	// makes --db a fully self-contained instance.
+	if dbPath != "" {
+		cfg.Database.SearchIndex = deriveIndexPath(dbPath)
+	}
+	return cfg, nil
+}
+
+// deriveIndexPath returns the Bleve index path sited next to a database
+// path, mirroring the fallback used when no index is configured.
+func deriveIndexPath(dbFilePath string) string {
+	switch dbFilePath {
+	case "", storage.MemoryPath:
+		return "fwrd.bleve"
+	default:
+		return strings.TrimSuffix(dbFilePath, filepath.Ext(dbFilePath)) + ".bleve"
+	}
 }
 
 func getStore(cfg *config.Config) (*storage.Store, error) {
@@ -298,23 +320,23 @@ func runTUI(_ *cobra.Command, _ []string) {
 }
 
 // buildSearcher constructs the Bleve-backed searcher, mirroring the index
-// path resolution the TUI uses. On failure it falls back to the basic
-// in-memory engine so search still works, just less well.
-func buildSearcher(store *storage.Store, cfg *config.Config) search.Searcher {
+// path resolution the TUI uses. A locked index (another fwrd holding it) is
+// returned as an error so the caller can fail loudly with a hint; any other
+// bleve failure falls back to the basic in-memory engine so search still
+// works, just less well.
+func buildSearcher(store *storage.Store, cfg *config.Config) (search.Searcher, error) {
 	idxPath := cfg.Database.SearchIndex
 	if idxPath == "" {
-		switch cfg.Database.Path {
-		case "", storage.MemoryPath:
-			idxPath = "fwrd.bleve"
-		default:
-			base := strings.TrimSuffix(cfg.Database.Path, filepath.Ext(cfg.Database.Path))
-			idxPath = base + ".bleve"
-		}
+		idxPath = deriveIndexPath(cfg.Database.Path)
 	}
-	if be, err := search.NewBleveEngine(store, idxPath); err == nil && be != nil {
-		return be
+	be, err := search.NewBleveEngine(store, idxPath)
+	if err == nil && be != nil {
+		return be, nil
 	}
-	return search.NewEngine(store)
+	if errors.Is(err, search.ErrIndexLocked) {
+		return nil, err
+	}
+	return search.NewEngine(store), nil
 }
 
 func runServe(_ *cobra.Command, _ []string) {
@@ -327,7 +349,10 @@ func runServe(_ *cobra.Command, _ []string) {
 			fmt.Fprintln(os.Stderr, "Warning:", w)
 		}
 
-		searcher := buildSearcher(store, cfg)
+		searcher, err := buildSearcher(store, cfg)
+		if err != nil {
+			return err
+		}
 
 		// Wire the manager exactly as the TUI does so feeds added or
 		// refreshed via the web UI are indexed for search.
@@ -362,6 +387,11 @@ func exitWithError(err error) {
 	if errors.Is(err, storage.ErrDatabaseLocked) {
 		fmt.Fprintln(os.Stderr, "Error: another fwrd process is already using the database.")
 		fmt.Fprintln(os.Stderr, "Hint: close the other instance, or pass --db to use a different file.")
+		os.Exit(1)
+	}
+	if errors.Is(err, search.ErrIndexLocked) {
+		fmt.Fprintln(os.Stderr, "Error: the search index is locked by another fwrd process.")
+		fmt.Fprintln(os.Stderr, "Hint: close the other instance, or pass --db to use a different file (the index follows it).")
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stderr, "Error: %v\n", err)

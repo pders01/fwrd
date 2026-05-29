@@ -1,10 +1,12 @@
 package search
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/analysis/analyzer/standard"
@@ -15,6 +17,48 @@ import (
 	"github.com/pders01/fwrd/internal/validation"
 )
 
+// ErrIndexLocked is returned when the Bleve index cannot be opened within
+// indexOpenTimeout, which almost always means another fwrd process holds
+// its lock. bleve.Open blocks indefinitely on a held lock, so we bound it.
+var ErrIndexLocked = errors.New("search index is locked by another process")
+
+// indexOpenTimeout bounds how long we wait to acquire the index lock. A
+// legitimate open only needs the lock + an mmap, both near-instant;
+// exceeding this means the lock is held elsewhere.
+const indexOpenTimeout = 5 * time.Second
+
+// openOrCreateIndex opens an existing index or creates a new one, bounded
+// by indexOpenTimeout. On a lock held by another process bleve.Open blocks
+// forever; the timeout converts that hang into ErrIndexLocked. The blocked
+// goroutine is abandoned (the buffered channel lets it exit if the lock
+// later frees), which is acceptable on this error path since the caller
+// either exits or falls back to the basic engine.
+func openOrCreateIndex(indexPath string) (idx bleve.Index, fresh bool, err error) {
+	type result struct {
+		idx   bleve.Index
+		fresh bool
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		opened, openErr := bleve.Open(indexPath)
+		if openErr == nil {
+			done <- result{idx: opened, fresh: false}
+			return
+		}
+		// Open failed (e.g. path does not exist) — try to create fresh.
+		created, createErr := bleve.New(indexPath, buildIndexMapping())
+		done <- result{idx: created, fresh: true, err: createErr}
+	}()
+
+	select {
+	case r := <-done:
+		return r.idx, r.fresh, r.err
+	case <-time.After(indexOpenTimeout):
+		return nil, false, ErrIndexLocked
+	}
+}
+
 type bleveEngine struct {
 	store   *storage.Store
 	idx     bleve.Index
@@ -23,9 +67,6 @@ type bleveEngine struct {
 
 // NewBleveEngine creates or opens a Bleve index at indexPath and indexes current data.
 func NewBleveEngine(store *storage.Store, indexPath string) (Searcher, error) {
-	var idx bleve.Index
-	var err error
-
 	// Validate and sanitize the index path for security
 	// Use permissive validation for testing (when path is in temp directory)
 	pathHandler := validation.NewSecurePathHandler()
@@ -48,15 +89,11 @@ func NewBleveEngine(store *storage.Store, indexPath string) (Searcher, error) {
 	// Try open first; only reindex from scratch if we had to create a new index
 	// or the existing one is empty. Incremental updates during feed refresh
 	// (via UpdateListener / BatchIndexer) keep the index in sync afterwards.
-	freshIndex := false
-	idx, err = bleve.Open(indexPath)
+	// The open is bounded by a timeout so a lock held by another fwrd
+	// process surfaces as ErrIndexLocked instead of hanging forever.
+	idx, freshIndex, err := openOrCreateIndex(indexPath)
 	if err != nil {
-		idxMapping := buildIndexMapping()
-		idx, err = bleve.New(indexPath, idxMapping)
-		if err != nil {
-			return nil, err
-		}
-		freshIndex = true
+		return nil, err
 	}
 
 	be := &bleveEngine{store: store, idx: idx}
