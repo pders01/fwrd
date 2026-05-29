@@ -94,3 +94,13 @@ toggle_read = "m"
 open_media = "o"
 back = "esc"
 help = "?"
+
+[web]
+# Reading font for the web view (fwrd serve). Uses the OS system font
+# library — nothing is bundled or fetched. Presets:
+#   "serif" (default) — system serif, e.g. New York / Georgia
+#   "sans"            — system sans
+#   "mono"            — system monospace
+# Or set a raw CSS font-family list to use verbatim, e.g.:
+#   font = 'Iosevka, ui-monospace, monospace'
+font = "serif"
