@@ -1,5 +1,6 @@
 {{define "title"}}{{if .Feed.Title}}{{.Feed.Title}}{{else}}Feed{{end}}{{end}}
 {{define "content"}}
+{{template "searchbar" ""}}
 <nav class="crumbs"><a href="/">Feeds</a> / {{if .Feed.Title}}{{.Feed.Title}}{{else}}{{.Feed.URL}}{{end}}</nav>
 <div class="page-head">
 <h1>{{if .Feed.Title}}{{.Feed.Title}}{{else}}{{.Feed.URL}}{{end}}</h1>
