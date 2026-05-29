@@ -22,11 +22,12 @@ import (
 // the caller doesn't already own: the store, manager, and searcher are
 // passed in and closed by the caller, mirroring how runTUI manages them.
 type Server struct {
-	store    *storage.Store
-	manager  *feed.Manager
-	searcher search.Searcher
-	cfg      *config.Config
-	tmpl     *templates
+	store       *storage.Store
+	manager     *feed.Manager
+	searcher    search.Searcher
+	cfg         *config.Config
+	tmpl        *templates
+	readingFont string // resolved CSS font-family for reading text
 
 	// writeMu serializes operations that notify the search index. The
 	// DataListener/DeleteListener contract requires that notifications not
@@ -43,7 +44,18 @@ func NewServer(store *storage.Store, manager *feed.Manager, searcher search.Sear
 	if err != nil {
 		return nil, err
 	}
-	return &Server{store: store, manager: manager, searcher: searcher, cfg: cfg, tmpl: tmpl}, nil
+	font := ""
+	if cfg != nil {
+		font = cfg.Web.Font
+	}
+	return &Server{
+		store:       store,
+		manager:     manager,
+		searcher:    searcher,
+		cfg:         cfg,
+		tmpl:        tmpl,
+		readingFont: resolveFont(font),
+	}, nil
 }
 
 // Handler builds the route table. Go 1.22 ServeMux method+path patterns

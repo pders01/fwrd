@@ -93,5 +93,11 @@ func (s *Server) render(w http.ResponseWriter, name string, data any) {
 
 func (s *Server) handleCSS(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	// Inject the configured reading font as a CSS variable ahead of the
+	// static stylesheet, which references var(--reading-font) with its own
+	// fallback. UI chrome keeps a fixed system sans stack.
+	if s.readingFont != "" {
+		_, _ = w.Write([]byte(":root{--reading-font:" + s.readingFont + ";--ui-font:" + systemSans + "}\n"))
+	}
 	_, _ = w.Write(s.tmpl.css)
 }

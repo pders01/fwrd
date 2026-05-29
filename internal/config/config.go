@@ -32,6 +32,16 @@ type Config struct {
 	UI       UIConfig       `mapstructure:"ui"`
 	Media    MediaConfig    `mapstructure:"media"`
 	Keys     KeyConfig      `mapstructure:"keys"`
+	Web      WebConfig      `mapstructure:"web"`
+}
+
+type WebConfig struct {
+	// Font selects the reading font for the web view. Accepts a preset
+	// that maps to the OS's own system font stack — "serif" (default,
+	// e.g. New York / Georgia), "sans", or "mono" — or any raw CSS
+	// font-family list to use verbatim. No web fonts are bundled or
+	// fetched; rendering always uses the system font library.
+	Font string `mapstructure:"font"`
 }
 
 type DatabaseConfig struct {
@@ -169,6 +179,9 @@ func defaultConfig() *Config {
 				ThemeToggle: "t",
 				Back:        "esc",
 			},
+		},
+		Web: WebConfig{
+			Font: "serif",
 		},
 	}
 }
@@ -327,6 +340,7 @@ func Save(config *Config, path string) error {
 	v.Set("ui", config.UI)
 	v.Set("media", config.Media)
 	v.Set("keys", config.Keys)
+	v.Set("web", config.Web)
 
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
