@@ -30,31 +30,42 @@ const indexOpenTimeout = 5 * time.Second
 // openOrCreateIndex opens an existing index or creates a new one, bounded
 // by indexOpenTimeout. On a lock held by another process bleve.Open blocks
 // forever; the timeout converts that hang into ErrIndexLocked. The blocked
-// goroutine is abandoned (the buffered channel lets it exit if the lock
-// later frees), which is acceptable on this error path since the caller
-// either exits or falls back to the basic engine.
+// goroutine is then abandoned, but if the lock later frees and the open
+// finally succeeds, the goroutine closes the now-orphaned index instead of
+// leaking the file descriptor and mmap — done is unbuffered, so the send
+// only wins when the caller is still waiting; otherwise giveUp is closed
+// and the late result is cleaned up.
 func openOrCreateIndex(indexPath string) (idx bleve.Index, fresh bool, err error) {
 	type result struct {
 		idx   bleve.Index
 		fresh bool
 		err   error
 	}
-	done := make(chan result, 1)
+	done := make(chan result)
+	giveUp := make(chan struct{})
 	go func() {
-		opened, openErr := bleve.Open(indexPath)
-		if openErr == nil {
-			done <- result{idx: opened, fresh: false}
-			return
+		var r result
+		if opened, openErr := bleve.Open(indexPath); openErr == nil {
+			r = result{idx: opened, fresh: false}
+		} else {
+			// Open failed (e.g. path does not exist) — try to create fresh.
+			created, createErr := bleve.New(indexPath, buildIndexMapping())
+			r = result{idx: created, fresh: true, err: createErr}
 		}
-		// Open failed (e.g. path does not exist) — try to create fresh.
-		created, createErr := bleve.New(indexPath, buildIndexMapping())
-		done <- result{idx: created, fresh: true, err: createErr}
+		select {
+		case done <- r:
+		case <-giveUp:
+			if r.idx != nil {
+				_ = r.idx.Close()
+			}
+		}
 	}()
 
 	select {
 	case r := <-done:
 		return r.idx, r.fresh, r.err
 	case <-time.After(indexOpenTimeout):
+		close(giveUp)
 		return nil, false, ErrIndexLocked
 	}
 }

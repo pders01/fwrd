@@ -2,6 +2,7 @@ package search
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -95,6 +96,13 @@ func TestBleveEngineIndexesFeedLargerThanChunkSize(t *testing.T) {
 	}
 	require.NoError(t, err)
 	require.NotNil(t, eng)
+	// Close the index before t.TempDir cleanup runs, or RemoveAll races the
+	// still-open bleve directory ("directory not empty").
+	t.Cleanup(func() {
+		if c, ok := eng.(io.Closer); ok {
+			_ = c.Close()
+		}
+	})
 
 	// Sentinel hit-count check: every article carries the unique token
 	// "unicornsentinel". A correctly indexed feed returns the requested
