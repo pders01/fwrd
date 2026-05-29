@@ -97,6 +97,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /search", s.handleSearch)
 	mux.HandleFunc("GET /static/style.css", s.handleCSS)
 	mux.HandleFunc("GET /static/app.js", s.handleJS)
+	mux.HandleFunc("GET /favicon.svg", s.handleFavicon)
+	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
 	mux.HandleFunc("GET /opml/export", s.handleOPMLExport)
 
 	mux.HandleFunc("POST /feeds", s.handleAddFeed)

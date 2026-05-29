@@ -12,7 +12,7 @@ import (
 	"github.com/pders01/fwrd/internal/storage"
 )
 
-//go:embed templates/*.html templates/style.css templates/app.js
+//go:embed templates/*.html templates/style.css templates/app.js templates/favicon.svg
 var assets embed.FS
 
 // pages are the content templates; each is parsed together with layout.html
@@ -39,9 +39,10 @@ func getSanitizer() *bluemonday.Policy {
 }
 
 type templates struct {
-	sets map[string]*template.Template
-	css  []byte
-	js   []byte
+	sets    map[string]*template.Template
+	css     []byte
+	js      []byte
+	favicon []byte
 }
 
 func funcMap() template.FuncMap {
@@ -79,7 +80,11 @@ func loadTemplates() (*templates, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &templates{sets: sets, css: css, js: js}, nil
+	favicon, err := assets.ReadFile("templates/favicon.svg")
+	if err != nil {
+		return nil, err
+	}
+	return &templates{sets: sets, css: css, js: js, favicon: favicon}, nil
 }
 
 // articleBody picks the richest available HTML for an article: full
@@ -124,4 +129,14 @@ func (s *Server) handleCSS(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleJS(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	_, _ = w.Write(s.tmpl.js)
+}
+
+// handleFavicon serves the SVG icon. It backs both /favicon.svg (referenced
+// by layout.html's <link>) and the bare /favicon.ico browsers request by
+// default — modern browsers honor the SVG link and never hit .ico, but
+// serving it there too avoids a stray 404 in the logs.
+func (s *Server) handleFavicon(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "max-age=86400")
+	_, _ = w.Write(s.tmpl.favicon)
 }
