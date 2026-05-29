@@ -4,7 +4,7 @@ A fast, terminal-based RSS feed aggregator with full-text search capabilities, b
 
 ## Features
 
-- **Dual Interface**: Interactive TUI (Bubble Tea) + Command-line interface (Cobra)
+- **Triple Interface**: Interactive TUI (Bubble Tea) + Command-line interface (Cobra) + read-only web view (`fwrd serve`)
 - **Full‑text search**: Bleve‑powered search across feeds and articles with debounced input
 - **Comprehensive CLI**: Complete feed management from command line (add, list, delete, refresh)
 - **Smart caching**: Honors ETag and Last-Modified; handles 304/Retry-After responses
@@ -75,6 +75,22 @@ Download the appropriate binary for your platform from the [latest release](http
 ./fwrd --help
 ./fwrd feed --help
 ```
+
+### Web Mode
+
+Serve a read-only web view of stored feeds and articles. Unlike the TUI —
+which converts HTML to terminal markdown — the web view renders article
+content as sanitized HTML, the form it was authored in.
+
+```bash
+./fwrd serve                       # http://127.0.0.1:8080
+./fwrd serve --addr 127.0.0.1:9000 # custom bind address
+```
+
+The server holds the database open for its lifetime, so it cannot run
+against the same `--db` as a concurrent TUI (BoltDB is single-process).
+Refresh feeds from the CLI (`fwrd feed refresh`, e.g. via cron) and the web
+view reflects the new articles on its next request.
 
 ### Keyboard Shortcuts (default)
 

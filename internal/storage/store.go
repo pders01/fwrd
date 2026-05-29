@@ -253,6 +253,31 @@ func (s *Store) GetArticles(feedID string, limit int) ([]*Article, error) {
 	return s.GetArticlesWithCursor(feedID, limit, "")
 }
 
+// GetArticle fetches a single article by ID. Articles are keyed by ID in
+// the articles bucket, so this is a direct point lookup. Returns an error
+// if no article with that ID exists.
+func (s *Store) GetArticle(id string) (*Article, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("store not initialized")
+	}
+	var article Article
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(articlesBucket)
+		if b == nil {
+			return fmt.Errorf("article not found")
+		}
+		data := b.Get([]byte(id))
+		if data == nil {
+			return fmt.Errorf("article not found")
+		}
+		return json.Unmarshal(data, &article)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &article, nil
+}
+
 // GetArticlesWithCursor provides cursor-based pagination for efficient large dataset traversal.
 // cursor should be the article ID of the last article from the previous page, or empty for the first page.
 func (s *Store) GetArticlesWithCursor(feedID string, limit int, cursor string) ([]*Article, error) {

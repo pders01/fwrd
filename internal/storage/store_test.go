@@ -180,6 +180,34 @@ func TestStore_SaveAndGetArticles(t *testing.T) {
 	}
 }
 
+func TestStore_GetArticle(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	want := &Article{
+		ID:      "feed1:http://example.com/a",
+		FeedID:  "feed1",
+		Title:   "Single",
+		Content: "<p>body</p>",
+		URL:     "http://example.com/a",
+	}
+	if err := store.SaveArticles([]*Article{want}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	got, err := store.GetArticle(want.ID)
+	if err != nil {
+		t.Fatalf("GetArticle: %v", err)
+	}
+	if got.Title != want.Title || got.Content != want.Content {
+		t.Errorf("got %+v, want title=%q content=%q", got, want.Title, want.Content)
+	}
+
+	if _, err := store.GetArticle("missing"); err == nil {
+		t.Error("expected error for missing article, got nil")
+	}
+}
+
 func TestStore_MarkArticleRead(t *testing.T) {
 	store, cleanup := setupTestStore(t)
 	defer cleanup()
