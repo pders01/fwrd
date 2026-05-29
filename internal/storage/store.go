@@ -434,7 +434,11 @@ func (s *Store) getArticlesGlobalOptimized(tx *bolt.Tx, ab *bolt.Bucket, limit i
 	return nil
 }
 
-func (s *Store) MarkArticleRead(id string, read bool) error {
+// mutateArticle loads the article by id, applies fn, and writes it back in a
+// single transaction. The secondary date index and search index are left
+// untouched, so callers that change an indexed field must update those
+// themselves; the read/star toggles key no index.
+func (s *Store) mutateArticle(id string, fn func(*Article)) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(articlesBucket)
 		data := b.Get([]byte(id))
@@ -447,7 +451,7 @@ func (s *Store) MarkArticleRead(id string, read bool) error {
 			return err
 		}
 
-		article.Read = read
+		fn(&article)
 
 		data, err := json.Marshal(article)
 		if err != nil {
@@ -458,32 +462,14 @@ func (s *Store) MarkArticleRead(id string, read bool) error {
 	})
 }
 
-// MarkArticleStarred flips an article's Starred flag. It mirrors
-// MarkArticleRead: the article document is rewritten in place and the
-// secondary indexes and search index are untouched, since neither keys on
-// star state.
+func (s *Store) MarkArticleRead(id string, read bool) error {
+	return s.mutateArticle(id, func(a *Article) { a.Read = read })
+}
+
+// MarkArticleStarred flips an article's Starred flag. Like MarkArticleRead it
+// rewrites the document in place; no index keys on read/star state.
 func (s *Store) MarkArticleStarred(id string, starred bool) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(articlesBucket)
-		data := b.Get([]byte(id))
-		if data == nil {
-			return fmt.Errorf("article not found")
-		}
-
-		var article Article
-		if err := json.Unmarshal(data, &article); err != nil {
-			return err
-		}
-
-		article.Starred = starred
-
-		data, err := json.Marshal(article)
-		if err != nil {
-			return err
-		}
-
-		return b.Put([]byte(id), data)
-	})
+	return s.mutateArticle(id, func(a *Article) { a.Starred = starred })
 }
 
 func (s *Store) DeleteFeed(id string) error {
