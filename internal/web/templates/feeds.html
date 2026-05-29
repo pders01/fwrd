@@ -8,35 +8,51 @@
 <form action="/refresh" method="post"><button type="submit">Refresh all</button></form>
 </div>
 
+<div class="feed-toolbar">
 <form action="/feeds" method="post" class="add-feed">
 <input type="url" name="url" placeholder="https://example.com/feed.xml" required aria-label="Feed URL">
 <button type="submit">Add feed</button>
 </form>
 
+<div class="toolbar-ctrls js-only">
+<input type="search" id="feed-filter" class="feed-filter" placeholder="Filter feeds…" autocomplete="off" aria-label="Filter feeds">
+<select id="feed-sort" class="feed-sort" aria-label="Sort feeds">
+<option value="title">A–Z</option>
+<option value="unread">Most unread</option>
+<option value="updated">Recently updated</option>
+</select>
+</div>
+
 <div class="opml-bar">
 <a href="/opml/export" class="link">Export OPML</a>
 <form action="/opml/import" method="post" enctype="multipart/form-data" class="opml-import">
-<input type="file" name="file" accept=".opml,.xml,text/xml,application/xml,text/x-opml" required aria-label="OPML file">
-<button type="submit" class="link">Import OPML</button>
+<label class="file-label">Choose OPML<input type="file" name="file" accept=".opml,.xml,text/xml,application/xml,text/x-opml" required aria-label="OPML file"></label>
+<button type="submit" class="link">Import</button>
 </form>
+</div>
 </div>
 
 {{if .Feeds}}
-<ul class="feed-list">
+<ul class="feed-list" id="feed-list">
 {{range .Feeds}}
-<li>
+<li class="feed-item" data-unread="{{.Unread}}" data-updated="{{.Feed.LastFetched.Unix}}">
 <div class="feed-row">
-<a class="feed-title" href="/feeds/{{.Feed.ID}}">{{if .Feed.Title}}{{.Feed.Title}}{{else}}{{.Feed.URL}}{{end}}</a>
-{{if gt .Unread 0}}<span class="badge">{{.Unread}}</span>{{end}}
+<a class="feed-title" href="/feeds/{{.Feed.ID}}">{{.Label}}</a>
+{{if gt .Unread 0}}<span class="badge">{{.Unread}} unread</span>{{end}}
 <span class="feed-actions">
 <form action="/feeds/{{.Feed.ID}}/refresh" method="post"><button type="submit" class="link">refresh</button></form>
 <form action="/feeds/{{.Feed.ID}}/delete" method="post" onsubmit="return confirm('Delete this feed and its articles?')"><button type="submit" class="link danger">delete</button></form>
 </span>
 </div>
-{{if .Feed.Description}}<span class="muted">{{.Feed.Description}}</span>{{end}}
+<div class="row-meta muted">
+{{if and .Source (ne .Source .Label)}}<span class="feed-host">{{.Source}}</span>{{end}}
+<span>{{.Total}} article{{if ne .Total 1}}s{{end}}</span>
+{{if not .Feed.LastFetched.IsZero}}<span>updated {{date .Feed.LastFetched}}</span>{{else}}<span>never fetched</span>{{end}}
+</div>
 </li>
 {{end}}
 </ul>
+<p class="muted" id="feed-no-match" hidden>No feeds match your filter.</p>
 {{else}}
 <p class="muted">No feeds yet. Add one above, or via <code>fwrd feed add &lt;url&gt;</code>.</p>
 {{end}}

@@ -72,3 +72,60 @@
 
   document.addEventListener("submit", onSubmit);
 })();
+
+// Feed-management page: client-side filter and sort. The list is fully
+// rendered server-side and title-sorted, so with JavaScript off the page is
+// a complete, usable feed list; this only narrows and reorders what is
+// already present. Marking <body> .has-js reveals the (otherwise hidden)
+// filter/sort controls.
+(function () {
+  "use strict";
+  var list = document.getElementById("feed-list");
+  if (!list) return;
+  document.body.classList.add("has-js");
+
+  var items = Array.prototype.slice.call(list.querySelectorAll(".feed-item"));
+  var filter = document.getElementById("feed-filter");
+  var sorter = document.getElementById("feed-sort");
+  var noMatch = document.getElementById("feed-no-match");
+
+  function searchText(li) {
+    var t = li.querySelector(".feed-title");
+    var h = li.querySelector(".feed-host");
+    return ((t ? t.textContent : "") + " " + (h ? h.textContent : "")).toLowerCase();
+  }
+
+  function applyFilter() {
+    var q = (filter ? filter.value : "").trim().toLowerCase();
+    var visible = 0;
+    items.forEach(function (li) {
+      var show = q === "" || searchText(li).indexOf(q) !== -1;
+      li.hidden = !show;
+      if (show) visible++;
+    });
+    if (noMatch) noMatch.hidden = visible !== 0;
+  }
+
+  function num(li, attr) {
+    return parseInt(li.getAttribute(attr), 10) || 0;
+  }
+
+  function applySort() {
+    var mode = sorter ? sorter.value : "title";
+    var sorted = items.slice().sort(function (a, b) {
+      if (mode === "unread") return num(b, "data-unread") - num(a, "data-unread");
+      if (mode === "updated") return num(b, "data-updated") - num(a, "data-updated");
+      var ta = a.querySelector(".feed-title"),
+        tb = b.querySelector(".feed-title");
+      return (ta ? ta.textContent : "").localeCompare(tb ? tb.textContent : "");
+    });
+    // Re-append in sorted order; appendChild moves existing nodes, so the
+    // list is reordered without a rebuild.
+    sorted.forEach(function (li) {
+      list.appendChild(li);
+    });
+  }
+
+  if (filter) filter.addEventListener("input", applyFilter);
+  if (sorter) sorter.addEventListener("change", applySort);
+})();

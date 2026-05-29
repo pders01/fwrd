@@ -255,27 +255,64 @@ button.danger { color: #c0392b; }
 button.link.danger { color: #c0392b; }
 button[aria-pressed="true"] { font-weight: 700; }
 form.inline { display: inline; }
-.add-feed { display: flex; gap: 0.5rem; margin: 1rem 0 1rem; }
-.add-feed input {
-  flex: 1;
-  padding: 0.4rem 0.7rem;
+/* feed-management toolbar: add-feed, filter/sort, and OPML in one block,
+   separated from the list by a hairline rule to match the broadsheet. */
+.feed-toolbar { margin: 1rem 0 1.5rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--rule); }
+/* add-feed and filter/sort share one grid track so the two input rows align
+   on both edges; the right column is fixed so Add feed and Sort match width. */
+.add-feed, .toolbar-ctrls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 9rem;
+  gap: 0.6rem;
+  align-items: center;
+  margin: 0 0 0.6rem;
+}
+.add-feed input, .feed-filter {
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.95rem;
+}
+.add-feed button { width: 100%; }
+.feed-filter:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+/* filter/sort are JS-only — the list is fully rendered and label-sorted
+   server-side, so these enhance rather than gate access. */
+.js-only { display: none; }
+body.has-js .toolbar-ctrls.js-only { display: grid; }
+.feed-sort {
+  width: 100%;
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
   color: var(--fg);
 }
-.opml-bar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin: 0 0 1.5rem; font-size: 0.9rem; }
+.opml-bar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin: 0.9rem 0 0; font-size: 0.85rem; color: var(--muted); }
 .opml-import { display: inline-flex; align-items: center; gap: 0.5rem; }
+/* the native file input renders unaligned; a label styled as a link drives
+   it instead, keeping the OPML row visually consistent. */
+.file-label { cursor: pointer; color: var(--accent); text-decoration: underline; }
+.file-label input[type="file"] { display: none; }
 .feed-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .feed-title { flex: 0 1 auto; }
+.feed-host { font-weight: 600; }
 .feed-actions { display: inline-flex; gap: 0.75rem; margin-left: auto; }
 .badge {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 600;
-  padding: 0.1rem 0.45rem;
+  padding: 0.05rem 0.45rem;
   border-radius: 999px;
-  background: var(--accent);
-  color: var(--bg);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+  letter-spacing: 0.01em;
 }
 .row-meta { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.15rem; flex-wrap: wrap; }
 .row-meta .byline { display: inline; }
