@@ -35,6 +35,7 @@ func Warnings(cfg *Config) []string {
 		"delete_feed":  cfg.Keys.Bindings.DeleteFeed,
 		"refresh":      cfg.Keys.Bindings.Refresh,
 		"toggle_read":  cfg.Keys.Bindings.ToggleRead,
+		"toggle_star":  cfg.Keys.Bindings.ToggleStar,
 		"open_media":   cfg.Keys.Bindings.OpenMedia,
 		"theme_toggle": cfg.Keys.Bindings.ThemeToggle,
 		"back":         cfg.Keys.Bindings.Back,
