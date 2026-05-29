@@ -32,10 +32,12 @@ func resolveFont(font string) string {
 // sanitizeFontValue strips characters that would let a custom font value
 // escape its CSS custom-property declaration. The config is user-owned, so
 // this guards against accidental breakage rather than a hostile source.
+// "/" and "*" go too, so a stray "/* */" can't open a comment that swallows
+// the rest of the declaration.
 func sanitizeFontValue(s string) string {
 	cleaned := strings.Map(func(r rune) rune {
 		switch r {
-		case '{', '}', ';', '<', '>':
+		case '{', '}', ';', '<', '>', '/', '*', '\\':
 			return -1
 		default:
 			return r
