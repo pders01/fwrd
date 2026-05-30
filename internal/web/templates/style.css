@@ -280,6 +280,10 @@ button.link {
   color: var(--accent);
   text-decoration: underline;
 }
+/* a.link matches button.link: the generic `a { color: var(--fg) }` would
+   otherwise render a link-styled anchor (e.g. "Export OPML") in body ink,
+   inconsistent with the adjacent Import button and Choose-OPML control. */
+a.link { color: var(--accent); text-decoration: underline; }
 button.danger { color: #c0392b; }
 button.link.danger { color: #c0392b; }
 
