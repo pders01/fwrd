@@ -58,18 +58,44 @@ func topicOptions() topics.Options {
 	return o
 }
 
-// handleFront renders the newspaper front page: a masthead, one lead story
-// (the most recent article across all feeds), and topical section blocks
-// derived from the corpus. Topics are recomputed per request — the corpus
-// is bounded and clustering is cheap — so read/star state is always fresh.
-func (s *Server) handleFront(w http.ResponseWriter, _ *http.Request) {
+// frontView returns the front-page topic model and feed-name map, rebuilding
+// them only when the store has changed since the last build. Topic clustering
+// over the corpus plus an all-feeds decode is ~40ms on a large database; both
+// are pure functions of data that only changes on a write, so memoizing them
+// against store.WriteGen() makes repeat page loads effectively free while
+// staying current after any refresh, add, delete, or read/star toggle.
+func (s *Server) frontView() (*topics.Model, map[string]string) {
+	gen := s.store.WriteGen()
+
+	s.frontMu.Lock()
+	defer s.frontMu.Unlock()
+	if s.frontValid && s.frontGen == gen {
+		return s.frontModel, s.frontNames
+	}
+
 	arts, err := s.store.GetArticles("", frontCorpus)
 	if err != nil {
-		http.Error(w, "failed to load articles: "+err.Error(), http.StatusInternalServerError)
-		return
+		// On error, serve a stale cache if we have one rather than a blank
+		// page; otherwise fall back to an empty model.
+		if s.frontValid {
+			return s.frontModel, s.frontNames
+		}
+		return topics.Build(nil, topicOptions()), map[string]string{}
 	}
-	names := s.feedNames()
+
 	model := topics.Build(arts, topicOptions())
+	names := s.buildFeedNames()
+
+	s.frontModel, s.frontNames, s.frontGen, s.frontValid = model, names, gen, true
+	return model, names
+}
+
+// handleFront renders the newspaper front page: a masthead, one lead story
+// (the most recent article across all feeds), and topical section blocks
+// derived from the corpus. The topic model is memoized (see frontView) and
+// rebuilt whenever the store changes, so read/star state stays fresh.
+func (s *Server) handleFront(w http.ResponseWriter, _ *http.Request) {
+	model, names := s.frontView()
 
 	data := frontData{Now: time.Now(), HasContent: model.Lead != nil}
 	if model.Lead != nil {
@@ -108,18 +134,12 @@ func (s *Server) handleFront(w http.ResponseWriter, _ *http.Request) {
 // page resolves to the same topic here.
 func (s *Server) handleTopic(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
-	arts, err := s.store.GetArticles("", frontCorpus)
-	if err != nil {
-		http.Error(w, "failed to load articles: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	model := topics.Build(arts, topicOptions())
+	model, names := s.frontView()
 	t := model.BySlug(slug)
 	if t == nil {
 		http.NotFound(w, r)
 		return
 	}
-	names := s.feedNames()
 	data := topicData{Label: t.Label, Slug: t.Slug}
 	for _, a := range t.Articles {
 		data.Articles = append(data.Articles, headlineView{Article: a, Feed: names[a.FeedID]})
@@ -127,9 +147,10 @@ func (s *Server) handleTopic(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "topic.html", data)
 }
 
-// feedNames maps feed ID to a display label (title, or host of the URL
-// when untitled), for article bylines.
-func (s *Server) feedNames() map[string]string {
+// buildFeedNames maps feed ID to a display label (title, or host of the URL
+// when untitled), for article bylines. Called only via frontView, which
+// caches the result; do not call it per request directly.
+func (s *Server) buildFeedNames() map[string]string {
 	feeds, err := s.store.GetAllFeeds()
 	if err != nil {
 		return map[string]string{}
