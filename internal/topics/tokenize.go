@@ -131,6 +131,9 @@ january february march april may june july august september october november dec
 mon tue wed thu fri sat sun jan feb mar apr jun jul aug sep sept oct nov dec
 points score scored comments scheduled maintenance posted published author
 completed resolved investigating monitoring identified degraded operational incident outage status
+release released releases releasing version versions reply replies announce announced announces announcement announcing
+launch launched launches launching introducing introduces introduction available availability beta alpha preview snapshot initial
+access accessing accessed building understanding getting making writing creating adding removing fixing improving
 `)
 	m := make(map[string]bool, len(words))
 	for _, w := range words {
