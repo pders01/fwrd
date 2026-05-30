@@ -34,6 +34,7 @@ import (
 	"github.com/pders01/fwrd/internal/tui"
 	"github.com/pders01/fwrd/internal/validation"
 	"github.com/pders01/fwrd/internal/web"
+	"github.com/pders01/fwrd/internal/web/webtls"
 )
 
 // logger is the CLI's operational logger: styled, leveled output on stderr
@@ -80,11 +81,19 @@ var (
 	serveMDNSName  string
 	serveMDNSIPs   []string
 	serveMDNSIface string
+	serveTLS       bool
+	serveTLSMode   string
+	serveTLSCert   string
+	serveTLSKey    string
 	svcAddr        string
 	svcMDNS        bool
 	svcMDNSName    string
 	svcMDNSIPs     []string
 	svcMDNSIface   string
+	svcTLS         bool
+	svcTLSMode     string
+	svcTLSCert     string
+	svcTLSKey      string
 	netIface       string
 	netAliasIPs    []string
 	netPort        int
@@ -123,6 +132,10 @@ func init() {
 	serveCmd.Flags().StringVar(&serveMDNSName, "mdns-name", "fwrd", "mDNS hostname label; advertised as <name>.local")
 	serveCmd.Flags().StringArrayVar(&serveMDNSIPs, "mdns-ip", nil, "advertise <name>.local for these alias IP(s) from `fwrd net up`, each scoped to its subnet (repeatable); default: all LAN interfaces")
 	serveCmd.Flags().StringVar(&serveMDNSIface, "mdns-iface", "", "comma-separated interfaces to advertise on (e.g. en0,en9); default: auto-detected LAN interfaces")
+	serveCmd.Flags().BoolVar(&serveTLS, "tls", true, "serve over HTTPS (auto self-signed cert); --tls=false for plain HTTP")
+	serveCmd.Flags().StringVar(&serveTLSMode, "tls-mode", "", "TLS cert source: self-signed (default) | local-ca | file")
+	serveCmd.Flags().StringVar(&serveTLSCert, "tls-cert", "", "path to a TLS certificate (PEM); requires --tls-key (implies file mode)")
+	serveCmd.Flags().StringVar(&serveTLSKey, "tls-key", "", "path to the TLS private key (PEM); requires --tls-cert")
 
 	// net flags: the alias-IP + firewall redirect that exposes fwrd.local on
 	// port 80 without colliding with a host process already on :80.
@@ -148,6 +161,10 @@ func init() {
 	serviceInstallCmd.Flags().StringVar(&svcMDNSName, "mdns-name", "fwrd", "mDNS hostname label; advertised as <name>.local")
 	serviceInstallCmd.Flags().StringArrayVar(&svcMDNSIPs, "mdns-ip", nil, "advertise these alias IP(s) from `fwrd net up`, each scoped to its subnet (repeatable); for bare http://<name>.local on port 80")
 	serviceInstallCmd.Flags().StringVar(&svcMDNSIface, "mdns-iface", "", "comma-separated interfaces to advertise on; default: auto-detected LAN interfaces")
+	serviceInstallCmd.Flags().BoolVar(&svcTLS, "tls", true, "serve over HTTPS (auto self-signed cert); --tls=false for plain HTTP")
+	serviceInstallCmd.Flags().StringVar(&svcTLSMode, "tls-mode", "", "TLS cert source: self-signed (default) | local-ca | file")
+	serviceInstallCmd.Flags().StringVar(&svcTLSCert, "tls-cert", "", "path to a TLS certificate (PEM); requires --tls-key")
+	serviceInstallCmd.Flags().StringVar(&svcTLSKey, "tls-key", "", "path to the TLS private key (PEM); requires --tls-cert")
 	serviceCmd.AddCommand(serviceInstallCmd)
 	serviceCmd.AddCommand(serviceUninstallCmd)
 
@@ -499,7 +516,7 @@ func buildSearcher(store *storage.Store, cfg *config.Config) (search.Searcher, e
 	return search.NewEngine(store), nil
 }
 
-func runServe(_ *cobra.Command, _ []string) {
+func runServe(cmd *cobra.Command, _ []string) {
 	if debugFlag {
 		debuglog.SetupWithBool(true)
 	}
@@ -538,20 +555,43 @@ func runServe(_ *cobra.Command, _ []string) {
 			return err
 		}
 
+		// Resolve TLS before announcing anything: a cert problem should fail
+		// fast like a bind failure, not after we've logged "serving".
+		scheme := "http"
+		if tlsEnabled := resolveTLSEnabled(cmd, cfg); tlsEnabled {
+			src, err := webtls.NewSource(
+				firstNonEmpty(serveTLSMode, cfg.Web.TLS.Mode),
+				firstNonEmpty(cfg.Web.TLS.Dir, defaultTLSDir()),
+				firstNonEmpty(serveTLSCert, cfg.Web.TLS.CertFile),
+				firstNonEmpty(serveTLSKey, cfg.Web.TLS.KeyFile),
+				tlsHosts(),
+			)
+			if err != nil {
+				return err
+			}
+			tcfg, err := src.TLSConfig()
+			if err != nil {
+				return fmt.Errorf("tls: %w", err)
+			}
+			srv.UseTLS(tcfg)
+			scheme = "https"
+			logger.Info("tls enabled", "source", src.Describe())
+		}
+
 		if !isLoopbackBind(serveAddr) && !srv.AuthEnabled() {
 			logger.Warn("serving on a non-loopback address without authentication; "+
 				"anyone who can reach it can read and modify your feeds",
 				"fix", "set [web.auth] in your config, or front it with a reverse proxy "+
-					"handling auth/TLS (README: \"Exposing the web view\")")
+					"handling auth (README: \"Exposing the web view\")")
 		}
 
 		if serveMDNS {
-			if adv := startMDNS(serveAddr); adv != nil {
+			if adv := startMDNS(serveAddr, scheme); adv != nil {
 				defer func() { _ = adv.Close() }()
 			}
 		}
 
-		logger.Info("serving", "url", "http://"+serveAddr)
+		logger.Info("serving", "url", scheme+"://"+serveAddr)
 		if err := srv.Serve(ln); err != nil {
 			return fmt.Errorf("web server error: %w", err)
 		}
@@ -583,6 +623,10 @@ func runServiceInstall(_ *cobra.Command, _ []string) {
 		MDNSName:  svcMDNSName,
 		MDNSIPs:   svcMDNSIPs,
 		MDNSIface: svcMDNSIface,
+		TLS:       svcTLS,
+		TLSMode:   svcTLSMode,
+		TLSCert:   svcTLSCert,
+		TLSKey:    svcTLSKey,
 		Config:    cfgFile,
 		DB:        dbPath,
 	})
@@ -597,8 +641,12 @@ func runServiceInstall(_ *cobra.Command, _ []string) {
 	}
 	logger.Info("service installed and started", "path", path)
 	if svcMDNS {
+		scheme := "https"
+		if !svcTLS {
+			scheme = "http"
+		}
 		if _, port, perr := net.SplitHostPort(svcAddr); perr == nil {
-			logger.Info("reachable on the LAN", "url", "http://"+svcMDNSName+".local:"+port)
+			logger.Info("reachable on the LAN", "url", scheme+"://"+svcMDNSName+".local:"+port)
 		}
 	}
 }
@@ -762,7 +810,7 @@ func splitCSV(s string) []string {
 // startMDNS advertises the web view over mDNS as <mdns-name>.local. A failure
 // is non-fatal — the server still runs, just without the .local alias — so it
 // logs and returns nil rather than aborting serve.
-func startMDNS(addr string) *mdns.Advertiser {
+func startMDNS(addr, scheme string) *mdns.Advertiser {
 	_, portStr, err := net.SplitHostPort(addr)
 	if err != nil {
 		logger.Warn("mDNS disabled: cannot parse serve address", "addr", addr, "err", err)
@@ -806,8 +854,61 @@ func startMDNS(addr string) *mdns.Advertiser {
 		logger.Warn("mDNS disabled", "err", err)
 		return nil
 	}
-	logger.Info("mDNS advertising", "url", "http://"+serveMDNSName+".local:"+portStr, "on", strings.Join(adv.Targets, " "))
+	logger.Info("mDNS advertising", "url", scheme+"://"+serveMDNSName+".local:"+portStr, "on", strings.Join(adv.Targets, " "))
 	return adv
+}
+
+// resolveTLSEnabled decides whether serve runs HTTPS. The --tls flag wins when
+// explicitly set; otherwise [web.tls].enabled is honoured; otherwise TLS is on
+// (HTTPS-by-default).
+func resolveTLSEnabled(cmd *cobra.Command, cfg *config.Config) bool {
+	if cmd != nil && cmd.Flags().Changed("tls") {
+		return serveTLS
+	}
+	if cfg != nil && cfg.Web.TLS.Enabled != nil {
+		return *cfg.Web.TLS.Enabled
+	}
+	return true
+}
+
+// tlsHosts assembles the SAN list the generated certificate must cover: the
+// loopback names, the host's name, the mDNS .local name, every advertised
+// alias IP, and a concrete (non-wildcard) bind host.
+func tlsHosts() []string {
+	hosts := []string{"localhost", "127.0.0.1", "::1"}
+	if h, err := os.Hostname(); err == nil && h != "" {
+		hosts = append(hosts, h)
+	}
+	if serveMDNSName != "" {
+		hosts = append(hosts, serveMDNSName+".local")
+	}
+	hosts = append(hosts, serveMDNSIPs...)
+	if host, _, err := net.SplitHostPort(serveAddr); err == nil {
+		switch host {
+		case "", "0.0.0.0", "::":
+			// wildcard bind: nothing concrete to pin
+		default:
+			hosts = append(hosts, host)
+		}
+	}
+	return hosts
+}
+
+// defaultTLSDir is the fallback certificate directory when config does not set
+// one (mirrors config's ~/.fwrd/tls default for ad-hoc invocations).
+func defaultTLSDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".fwrd", "tls")
+}
+
+// firstNonEmpty returns the first non-empty string, or "".
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // isLoopbackBind reports whether addr binds only the loopback interface,

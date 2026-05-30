@@ -12,6 +12,10 @@ type Options struct {
 	MDNSName  string   // --mdns-name label
 	MDNSIPs   []string // optional --mdns-ip values (alias IPs from `fwrd net up`)
 	MDNSIface string   // optional --mdns-iface restriction
+	TLS       bool     // serve over HTTPS; emits --tls=false when disabled
+	TLSMode   string   // optional --tls-mode (self-signed|local-ca|file)
+	TLSCert   string   // optional --tls-cert path (bring-your-own)
+	TLSKey    string   // optional --tls-key path (bring-your-own)
 	Config    string   // optional --config path to forward
 	DB        string   // optional --db path to forward
 }

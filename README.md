@@ -7,7 +7,7 @@ A fast, terminal-based RSS feed aggregator with full-text search capabilities, b
 - **Triple Interface**: Interactive TUI (Bubble Tea) + Command-line interface (Cobra) + web view (`fwrd serve`)
 - **Newspaper web view**: The web front page is a newspaper — a lead story plus emergent topic sections clustered from recent articles; feeds are managed at `/feeds`
 - **Auto light/dark**: Every front-end follows the system light/dark setting — the web view via CSS, the TUI by detecting the terminal/OS appearance (override with `[ui] theme`)
-- **Zero-config LAN access**: `serve --mdns` advertises the web view at `http://fwrd.local:8080` over mDNS; `fwrd service install` runs it as a systemd/launchd background service; `fwrd net up` exposes it at a bare `http://fwrd.local` (port 80) via a dedicated alias IP + firewall redirect, without colliding with the host's own port 80
+- **Zero-config LAN access**: `serve --mdns` advertises the web view at `https://fwrd.local:8080` over mDNS; `fwrd service install` runs it as a systemd/launchd background service; `fwrd net up` exposes it at a bare `http://fwrd.local` (port 80) via a dedicated alias IP + firewall redirect, without colliding with the host's own port 80
 - **Full‑text search**: Bleve‑powered search across feeds and articles with debounced input
 - **Comprehensive CLI**: Complete feed management from command line (add, list, delete, refresh)
 - **Smart caching**: Honors ETag and Last-Modified; handles 304/Retry-After responses
@@ -96,9 +96,10 @@ converts HTML to terminal markdown — the web view renders article content
 as sanitized HTML, the form it was authored in.
 
 ```bash
-./fwrd serve                          # http://127.0.0.1:8080
+./fwrd serve                          # https://127.0.0.1:8080 (self-signed)
 ./fwrd serve --addr 127.0.0.1:9000    # custom bind address
-./fwrd serve --addr 0.0.0.0:8080 --mdns  # LAN-reachable at http://fwrd.local:8080
+./fwrd serve --tls=false              # plain HTTP
+./fwrd serve --addr 0.0.0.0:8080 --mdns  # LAN-reachable at https://fwrd.local:8080
 ```
 
 Near-parity with the TUI/CLI:
@@ -147,19 +148,53 @@ Two ways to protect it:
   password = "a-long-random-secret"
   ```
 
-  Basic Auth sends credentials base64-encoded, not encrypted, so only use
-  it behind TLS (a reverse proxy, or a tunnel like Tailscale/WireGuard).
+  Basic Auth sends credentials base64-encoded, not encrypted — but `serve`
+  speaks HTTPS by default (below), so on the built-in server they travel
+  encrypted. Behind a plain-HTTP reverse proxy, terminate TLS there.
 
 - **Reverse proxy.** Front fwrd with nginx/Caddy/Traefik handling TLS and
   authentication, and keep fwrd bound to `127.0.0.1`. This is the
   recommended setup for anything beyond a trusted LAN.
 
+#### HTTPS / TLS
+
+`serve` runs over **HTTPS by default** with an auto-generated certificate;
+there is nothing to configure for encryption. Cleartext requests to the same
+port are answered with a `308` redirect to `https://`, so old `http://` links
+and the `fwrd net` bare-`:80` flow keep working. Use `--tls=false` for plain
+HTTP.
+
+The certificate comes from one of three sources (`--tls-mode`, or `[web.tls]`):
+
+- **`self-signed`** (default) — a self-signed leaf, regenerated automatically
+  when the advertised host set changes. Zero setup, but browsers show a
+  one-time "not private" warning. Persisted under `~/.fwrd/tls`.
+- **`local-ca`** — a local CA plus a leaf it signs. Warning-free **once you
+  trust the printed CA** (`~/.fwrd/tls/ca.pem`) on each device that visits:
+  macOS `security add-trusted-cert -d -r trustRoot -k ~/Library/Keychains/login.keychain-db ca.pem`;
+  iOS/Android install it as a profile/credential.
+- **`file`** — bring your own: `--tls-cert cert.pem --tls-key key.pem` (setting
+  these selects the file source regardless of mode).
+
+```toml
+[web.tls]
+enabled = true          # false → plain HTTP
+mode    = "self-signed" # or "local-ca" / "file"
+# cert_file = "/path/cert.pem"   # file mode
+# key_file  = "/path/key.pem"
+# dir       = "~/.fwrd/tls"      # where generated certs live
+```
+
+The generated certificate's SANs cover `localhost`, `127.0.0.1`/`::1`, the host
+name, `<mdns-name>.local`, every `--mdns-ip`, and a concrete `--addr` host.
+
 #### Reach it at `fwrd.local` (mDNS)
 
 `--mdns` advertises the web view on the local network over multicast DNS, so
-any device on the same LAN can reach it at `http://fwrd.local:8080` — no DNS,
+any device on the same LAN can reach it at `https://fwrd.local:8080` — no DNS,
 hosts file, or static IP. Change the label with `--mdns-name <name>`
-(advertised as `<name>.local`).
+(advertised as `<name>.local`). (mDNS still advertises an `_http._tcp` record;
+only the URL scheme differs.)
 
 mDNS is link-local and the advertised address is a LAN interface, so `--mdns`
 only makes sense with a non-loopback bind (`--addr 0.0.0.0:8080`); a

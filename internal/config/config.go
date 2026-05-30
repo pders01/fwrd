@@ -46,6 +46,26 @@ type WebConfig struct {
 	// off by default (empty username), which suits the localhost-only
 	// default bind. Set it before exposing the server beyond loopback.
 	Auth WebAuthConfig `mapstructure:"auth"`
+	// TLS controls HTTPS for the web view. HTTPS is on by default with an
+	// auto-generated self-signed certificate; see WebTLSConfig.
+	TLS WebTLSConfig `mapstructure:"tls"`
+}
+
+// WebTLSConfig configures HTTPS for the web view. The `serve` flags
+// (--tls/--tls-mode/--tls-cert/--tls-key) override these at runtime.
+type WebTLSConfig struct {
+	// Enabled toggles HTTPS. A nil pointer means "unset" and defaults to
+	// true (HTTPS-by-default); set it to false to serve plain HTTP.
+	Enabled *bool `mapstructure:"enabled"`
+	// Mode selects the certificate source: "self-signed" (default),
+	// "local-ca", or "file" (which requires CertFile/KeyFile).
+	Mode string `mapstructure:"mode"`
+	// CertFile and KeyFile supply a bring-your-own certificate; setting them
+	// selects the file source regardless of Mode.
+	CertFile string `mapstructure:"cert_file"`
+	KeyFile  string `mapstructure:"key_file"`
+	// Dir is where generated certificates are persisted (default ~/.fwrd/tls).
+	Dir string `mapstructure:"dir"`
 }
 
 // WebAuthConfig holds optional HTTP Basic Auth credentials for the web
@@ -196,6 +216,12 @@ func defaultConfig() *Config {
 		},
 		Web: WebConfig{
 			Font: "serif",
+			TLS: WebTLSConfig{
+				// "self-signed" + ~/.fwrd/tls mirror webtls' own defaults; kept
+				// as literals here so config does not import the web subtree.
+				Mode: "self-signed",
+				Dir:  filepath.Join(homeDir, ".fwrd", "tls"),
+			},
 		},
 	}
 }
