@@ -64,7 +64,7 @@ func topicOptions() topics.Options {
 // are pure functions of data that only changes on a write, so memoizing them
 // against store.WriteGen() makes repeat page loads effectively free while
 // staying current after any refresh, add, delete, or read/star toggle.
-func (s *Server) frontView() (*topics.Model, map[string]string) {
+func (s *Server) frontView() (model *topics.Model, names map[string]string) {
 	gen := s.store.WriteGen()
 
 	s.frontMu.Lock()
@@ -83,8 +83,8 @@ func (s *Server) frontView() (*topics.Model, map[string]string) {
 		return topics.Build(nil, topicOptions()), map[string]string{}
 	}
 
-	model := topics.Build(arts, topicOptions())
-	names := s.buildFeedNames()
+	model = topics.Build(arts, topicOptions())
+	names = s.buildFeedNames()
 
 	s.frontModel, s.frontNames, s.frontGen, s.frontValid = model, names, gen, true
 	return model, names
