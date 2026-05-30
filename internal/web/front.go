@@ -1,6 +1,7 @@
 package web
 
 import (
+	"html"
 	"net/http"
 	"net/url"
 	"strings"
@@ -211,6 +212,10 @@ func containsArticle(arts []*storage.Article, id string) bool {
 // the lead story's deck.
 func excerpt(s string, n int) string {
 	plain := stripTags(s)
+	// Decode HTML entities the feed authored into its content (&mdash;, &amp;,
+	// &#39;) so the deck reads as prose, not markup. stripTags only removes
+	// <tags>; without this the lead story shows a literal "&mdash;".
+	plain = html.UnescapeString(plain)
 	plain = strings.Join(strings.Fields(plain), " ") // collapse whitespace
 	if len(plain) <= n {
 		return plain
