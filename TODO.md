@@ -32,6 +32,65 @@ often holds it on this machine):
 
 ## Recent Additions
 
+### **Web UX review pass (front/article/search/feeds/topics)** — COMPLETED
+
+A journey-by-journey UX walkthrough of the web view (driven live in a Helium
+browser over CDP), landing eight atomic fixes — two to the topic engine, six to
+the web surface:
+
+- **Topic clustering noise** — single-term TF-IDF promoted shared *verbs* into
+  junk sections: "Released" grouped NixOS/SteamOS/Ubuntu on the word alone;
+  "Version", "Reply", and gerunds ("Accessing") did the same. Added the
+  release/announce/launch/introduce families, version stages
+  (beta/alpha/preview/snapshot), and common title gerunds to the stopword list.
+  On the 132-feed corpus every junk section disappears; what remains are real
+  subjects (rust, linux, inference, claude, quantum, llm, …).
+- **Singular/plural splits** — a term and its plural seeded *separate* sections
+  (agent vs agents). `tokenize` now folds a regular trailing-"s" plural to its
+  singular before counting. Conservative by design: "-ss/-us/-is/-as/-es" are
+  left intact so non-plurals (status, analysis) and Greek/Latin "-es" words
+  ("kubernetes" → not "kubernete") are never mangled. Derivational variants
+  (russia vs russian) remain split — a rule broad enough to merge them mangles
+  common words (human → huma), and a curated synonym map is not worth the upkeep.
+- **Lead-deck entities** — the hero story's deck rendered a literal "&mdash;"
+  (and "&#39;", "&amp;"): `excerpt` stripped tags but not entities. Now runs
+  `html.UnescapeString`; still XSS-safe because the deck re-escapes on render.
+- **Search results had no scent** — bare titles, no source/date/count, so eight
+  near-identical "This Week in Rust N" were indistinguishable. Hydrate each hit
+  from storage (the index stores a thin article) and render the same
+  source-and-date byline the front and topic pages use, plus a match count.
+- **Degenerate feed labels** — one feed's stored title is literally "04", which
+  `feedLabel` showed verbatim (and sorted to the top). All-digit/whitespace
+  titles now fall back to the URL host (qemu.org); short real titles ("Go")
+  survive.
+- **"updated" → "fetched"** — the feed meta row labelled `LastFetched` as
+  "updated", implying a content-freshness the value (last successful *fetch*)
+  doesn't carry.
+- **Article meta dangling separator** — the meta line wrapped its actions onto a
+  new line with an orphaned "·". Root cause: a `<form>` start tag auto-closes an
+  open `<p>`, so the action forms were never inside `.meta`. Made it a `<div>`
+  and render the "·" separators via a flex layout between items.
+- **Export OPML under-styled** — the link carried `class="link"` but no `a.link`
+  rule existed, so the generic `a { color: var(--fg) }` rendered it in body ink
+  while the adjacent Import/Choose-OPML controls showed the accent. Added the
+  `a.link` rule.
+
+**Deferred (intentional):** article reader prev/next nav (needs ordering context
+in the handler); the lead-deck "Tags: ai" run-on (source-authored content);
+flash banner placement above the masthead (conventional). The russia/russian
+derivational split (see above).
+
+Code: `internal/topics/tokenize.go`, `internal/web/{front,handlers}.go`,
+`internal/web/templates/{search,feeds,article,style.css}`. Tested in
+`topics_test.go` (`TestSingularFoldsRegularPlurals`) and `front_test.go`
+(`TestExcerptDecodesEntities`, `TestFeedLabelFallsBackOnDegenerateTitle`).
+
+**Tooling:** the review was driven by a new zero-dependency CDP harness,
+[`rft/helium` (`helium-cdp`)](https://github.com/pders01) — screenshots + DOM
+eval straight to a local Helium browser, sidestepping `chrome-devtools-mcp`
+(which launches Chrome stable and only attaches to Helium via a `--browserUrl`
+config that cannot hot-reload mid-session).
+
 ### **Graceful FE error handling + HTTP e2e suite** — COMPLETED
 
 Every state-changing web action funneled failures through `http.Error`, which
