@@ -53,7 +53,7 @@
 <div class="row-meta muted">
 {{if and .Source (ne .Source .Label)}}<span class="feed-host">{{.Source}}</span>{{end}}
 <span>{{.Total}} article{{if ne .Total 1}}s{{end}}</span>
-{{if not .Feed.LastFetched.IsZero}}<span>updated {{date .Feed.LastFetched}}</span>{{else}}<span>never fetched</span>{{end}}
+{{if not .Feed.LastFetched.IsZero}}<span>fetched {{date .Feed.LastFetched}}</span>{{else}}<span>never fetched</span>{{end}}
 {{if .Feed.LastError}}<span class="meta-error" title="{{.Feed.LastError}}">last refresh failed{{if not .Feed.LastErrorAt.IsZero}} {{date .Feed.LastErrorAt}}{{end}}</span>{{end}}
 </div>
 </li>
