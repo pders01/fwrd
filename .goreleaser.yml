@@ -7,12 +7,27 @@ before:
     - go mod tidy
 
 builds:
-  - id: unix
+  # darwin requires cgo: dotlocal's mdns talks to the system mDNSResponder
+  # through the dns_sd.h SDK header. Built on a macOS runner (see release.yml)
+  # where Apple clang cross-builds both arches.
+  - id: darwin
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    main: ./cmd/rss/main.go
+    binary: fwrd
+    ldflags:
+      - -s -w -X main.Version={{.Version}}
+
+  - id: linux
     env:
       - CGO_ENABLED=0
     goos:
       - linux
-      - darwin
     goarch:
       - amd64
       - arm64

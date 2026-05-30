@@ -10,7 +10,10 @@ permissions:
 
 jobs:
   goreleaser:
-    runs-on: ubuntu-latest
+    # macOS runner so the darwin binaries can be built with cgo (dotlocal's
+    # mdns uses the dns_sd.h SDK header on macOS). Apple clang cross-builds
+    # both darwin arches; linux/windows stay pure-Go (CGO_ENABLED=0).
+    runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
