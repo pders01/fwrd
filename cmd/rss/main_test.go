@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -188,5 +189,28 @@ func TestIsVersionedPkgPath(t *testing.T) {
 		if got := isVersionedPkgPath(c.path); got != c.want {
 			t.Errorf("isVersionedPkgPath(%q) = %v, want %v", c.path, got, c.want)
 		}
+	}
+}
+
+func TestNetPorts(t *testing.T) {
+	cases := []struct {
+		name  string
+		port  int
+		https bool
+		want  []int
+	}{
+		{"https adds 443", 80, true, []int{80, 443}},
+		{"no https keeps base only", 80, false, []int{80}},
+		{"https dedups when base is 443", 443, true, []int{443}},
+		{"custom base with https", 8080, true, []int{8080, 443}},
+		{"custom base no https", 8080, false, []int{8080}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := netPorts(c.port, c.https)
+			if !slices.Equal(got, c.want) {
+				t.Errorf("netPorts(%d, %v) = %v, want %v", c.port, c.https, got, c.want)
+			}
+		})
 	}
 }

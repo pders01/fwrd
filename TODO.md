@@ -68,12 +68,15 @@ concrete `--addr` host. `serve`/mDNS log URLs switch to the active scheme.
 - dotlocal v0.3.0 advertises mDNS as `_http._tcp` only (no service-type
   param), so the SRV label stays `http` even though the URL is `https` —
   cosmetic; name resolution and the URL are unaffected.
-- `fwrd net` (bare `:80`) needs `--tls=false`: the alias redirect maps only
-  `:80`→serve-port, so an HTTPS cleartext `308` to `https://fwrd.local`
-  (`:443`) dead-ends. **Scoped follow-up:** dotlocal `port80` now redirects a
-  port *set* (`{80, 443}`) onto one app port (branch `feat/port80-multi-port`,
-  → v0.4.0); wiring `fwrd net` to map `:443` and drop `--tls=false` is specced
-  under "Next up" below.
+- ~~`fwrd net` (bare `:80`) needs `--tls=false`~~ **RESOLVED.** `net up` (on
+  dotlocal v0.4.0) now maps the port *set* `{80, 443}` of the alias onto the
+  serve port, so bare `https://fwrd.local` (`:443`) serves and a cleartext
+  `http://fwrd.local` 308-upgrades to it — no `--tls=false`. `--https=false`
+  (net) + `--tls=false` (serve) restores the cleartext-only `:80` mode.
+- **Host Mac itself still can't reach the bare name** (applies to `:443` too):
+  pf `rdr` only catches traffic on a physical interface and macOS skips
+  loopback (`set skip on lo0`). LAN peers get the bare name; on the host use
+  `https://fwrd.local:<serve-port>`. Won't-fix (see the port-80 entry below).
 
 Code: `internal/web/webtls/webtls.go`, `internal/web/tlsmux.go`,
 `internal/web/server.go`, `internal/config/config.go`, `cmd/rss/main.go`,
@@ -445,56 +448,25 @@ Code: `internal/storage/models.go`, `internal/feed/manager.go`,
 
 ## Next up
 
-### **Wire `fwrd net` to redirect `:443` (bare `https://fwrd.local`)** — SCOPED
+### **Wire `fwrd net` to redirect `:443` (bare `https://fwrd.local`)** — COMPLETED
 
-dotlocal `port80` now redirects a *set* of public ports onto one app port
-(branch `feat/port80-multi-port`, to be released as **v0.4.0**). Wire fwrd to
-use it so the bare name serves HTTPS, removing the `--tls=false` requirement.
+dotlocal **v0.4.0** (`Options.Ports`) is released; fwrd now uses it. `net up`
+maps the port set `{80, 443}` of the alias onto the serve port: bare
+`https://fwrd.local` serves and `http://fwrd.local` 308-upgrades to it — the
+`--tls=false` requirement is gone. A `net up --https` bool flag (default true)
+toggles the `:443` mapping; `--https=false` + serve `--tls=false` restores the
+cleartext-only `:80` mode. Port-set assembly is the pure `netPorts(port, https)`
+helper (`cmd/rss/main.go`), unit-tested in `main_test.go` (`TestNetPorts`:
+dedup when base is 443, https on/off, custom base). `net up`/`net status` logs
+list all mapped ports and switch the printed URL scheme to the active one.
 
-**Prerequisite (outward-facing, owner's call):** merge dotlocal
-`feat/port80-multi-port` → `main`, tag + push **v0.4.0**. For local dev before
-the tag, add a temporary `replace github.com/pders01/dotlocal => ../../net/dotlocal`
-to fwrd's `go.mod` (remove before committing the real bump). The mDNS and
-`port80.Up` exported signatures are **unchanged** — only `Options.Ports` is new,
-so this is purely additive on the fwrd side.
+Code: `go.mod` (dotlocal v0.3.0 → v0.4.0), `cmd/rss/main.go`, `README.md`.
 
-**Changes:**
-
-- **`go.mod`** — bump `github.com/pders01/dotlocal` v0.3.0 → v0.4.0.
-- **`cmd/rss/main.go`**
-  - `runNetUp` (~L703): pass `Ports` to `port80.Options`. Add a
-    `net up --https` bool flag (default **true**, matching HTTPS-by-default
-    serve): true → `Ports = dedup{netPort, 443}`; false → `Ports = {netPort}`.
-    Extract the port-set assembly into a small pure helper (e.g.
-    `netPorts(port int, https bool) []int`) and unit-test it (dedup, 443
-    inclusion, https=false).
-  - Update the "port-80 redirect installed" log to list **all** mapped ports,
-    not just `st.Port`.
-  - Update the "now start the server" hint — drop any `--tls=false`; serve is
-    HTTPS by default. Update the "reach it" URL to `https://<name>.local`
-    (bare, via :443) when `--https`, else `http://<name>.local`. When `--https`,
-    add a one-line hint that warning-free needs the local CA trusted
-    (`--tls-mode local-ca`; see the HTTPS/TLS README section).
-- **`README.md`** — rework the "Serving on port 80 (`fwrd net`)" section: remove
-  the `--tls=false` requirement block and the `--tls=false` in both examples;
-  document that `net up` now maps `{80, 443}` so `https://fwrd.local` works bare
-  and `http://fwrd.local` upgrades to it; keep a note that `--https=false`
-  (net) + `--tls=false` (serve) restores the cleartext-only `:80` mode. Update
-  the feature bullet (top of README) `http://fwrd.local` → `https://fwrd.local`.
-- **`TODO.md`** — move this entry's outcome into the HTTPS Recent-Additions
-  entry's known-limitations (mark the `:443` item resolved); keep the host-Mac
-  `pf skip lo0` caveat (it applies to `:443` too — the host itself still can't
-  reach the bare name).
-
-**Verify:** `go build ./...`, `go test ./...`, lint. Manual (root, owner-run):
-`sudo fwrd net up --alias-ip <ip>` → confirm pf/nft has both `:80` and `:443`
-rdr rules → `fwrd serve --addr 0.0.0.0:8080 --mdns --mdns-ip <ip>` (HTTPS) →
-from a **separate** LAN device: `https://fwrd.local` serves; `http://fwrd.local`
-308s to it. (The host Mac itself still can't reach the bare name — pf skips
-`lo0`; unchanged.)
-
-**Commit convention:** Conventional Commits, `-`-bullet bodies, no prose
-paragraph (project rule). Branch off `main`; do not push or release.
+**Still owner-run (manual, root, separate LAN device):** `sudo fwrd net up
+--alias-ip <ip>` → confirm pf/nft has both `:80` and `:443` rdr rules → `fwrd
+serve --addr 0.0.0.0:8080 --mdns --mdns-ip <ip>` → from another LAN device:
+`https://fwrd.local` serves, `http://fwrd.local` 308s to it. (Host Mac itself
+still can't reach the bare name — pf skips `lo0`; unchanged.)
 
 ---
 

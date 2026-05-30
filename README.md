@@ -7,7 +7,7 @@ A fast, terminal-based RSS feed aggregator with full-text search capabilities, b
 - **Triple Interface**: Interactive TUI (Bubble Tea) + Command-line interface (Cobra) + web view (`fwrd serve`)
 - **Newspaper web view**: The web front page is a newspaper — a lead story plus emergent topic sections clustered from recent articles; feeds are managed at `/feeds`
 - **Auto light/dark**: Every front-end follows the system light/dark setting — the web view via CSS, the TUI by detecting the terminal/OS appearance (override with `[ui] theme`)
-- **Zero-config LAN access**: `serve --mdns` advertises the web view at `https://fwrd.local:8080` over mDNS; `fwrd service install` runs it as a systemd/launchd background service; `fwrd net up` exposes it at a bare `http://fwrd.local` (port 80) via a dedicated alias IP + firewall redirect, without colliding with the host's own port 80
+- **Zero-config LAN access**: `serve --mdns` advertises the web view at `https://fwrd.local:8080` over mDNS; `fwrd service install` runs it as a systemd/launchd background service; `fwrd net up` exposes it at a bare `https://fwrd.local` (ports 80+443) via a dedicated alias IP + firewall redirect, without colliding with the host's own privileged ports
 - **Full‑text search**: Bleve‑powered search across feeds and articles with debounced input
 - **Comprehensive CLI**: Complete feed management from command line (add, list, delete, refresh)
 - **Smart caching**: Honors ETag and Last-Modified; handles 304/Retry-After responses
@@ -162,7 +162,7 @@ Two ways to protect it:
 there is nothing to configure for encryption. A cleartext request to the serve
 port is answered with a `308` redirect to `https://` on the **same host:port**,
 so existing `http://host:PORT` bookmarks keep working. Use `--tls=false` for
-plain HTTP (required with `fwrd net` — see the note in that section).
+plain HTTP.
 
 The certificate comes from one of three sources (`--tls-mode`, or `[web.tls]`):
 
@@ -264,35 +264,38 @@ times and then gives up: on Linux the unit enters `failed`
 
 #### Serving on port 80 (`fwrd net`)
 
-To reach the web view at a bare `http://fwrd.local` (no `:8080`), fwrd needs to
-answer on port 80 — a privileged port that a host process (nginx, Docker, …)
-may already hold. `fwrd net` sidesteps both problems without binding 80 in the
-server itself:
+To reach the web view at a bare `https://fwrd.local` (no `:8080`), fwrd needs to
+answer on ports 443 and 80 — privileged ports that a host process (nginx,
+Docker, …) may already hold. `fwrd net` sidesteps both problems without binding
+them in the server itself:
 
 ```bash
 sudo fwrd net up --alias-ip 192.168.1.240
-# then, as your normal user:
-fwrd serve --addr 0.0.0.0:8080 --mdns --mdns-ip 192.168.1.240 --tls=false
-# reachable from any LAN device at:  http://fwrd.local
+# then, as your normal user (serve is HTTPS by default):
+fwrd serve --addr 0.0.0.0:8080 --mdns --mdns-ip 192.168.1.240
+# reachable from any LAN device at:  https://fwrd.local
+#   (http://fwrd.local auto-upgrades to it)
 sudo fwrd net down            # remove the alias IP + redirect
 fwrd net status               # show the active binding, if any
 ```
 
+`net up` maps **both `:80` and `:443`** of the alias onto the serve port, so the
+bare `https://fwrd.local` works and a cleartext `http://fwrd.local` 308-upgrades
+to it. The browser warning is one-time per device; for a warning-free name,
+trust the local CA once (`fwrd serve --tls-mode local-ca`, see the HTTPS section
+above).
+
 On a multi-homed host (several LANs at once), repeat `--alias-ip` once per LAN
-to get `http://fwrd.local` on each, and advertise them all:
+to get `https://fwrd.local` on each, and advertise them all:
 
 ```bash
 sudo fwrd net up --alias-ip 192.168.1.240 --alias-ip 192.168.178.240
-fwrd serve --addr 0.0.0.0:8080 --mdns --mdns-ip 192.168.1.240 --mdns-ip 192.168.178.240 --tls=false
+fwrd serve --addr 0.0.0.0:8080 --mdns --mdns-ip 192.168.1.240 --mdns-ip 192.168.178.240
 ```
 
-> **Pair `fwrd net` with `--tls=false`.** The redirect maps the alias's port 80
-> to the unprivileged serve port only. With HTTPS on, a request to
-> `http://fwrd.local` is bounced to `https://fwrd.local` (port 443), which the
-> redirect does not map — so the bare-`:80` URL would dead-end. Serving plain
-> HTTP on the alias keeps `http://fwrd.local` working; reach for a reverse
-> proxy if you want HTTPS on the bare name. (HTTPS on `:443` via the alias is a
-> candidate follow-up.)
+> **Cleartext-only mode.** To skip HTTPS entirely, pass `--https=false` to
+> `net up` (maps `:80` alone) and `--tls=false` to `serve` (plain HTTP) — then
+> the bare name is `http://fwrd.local` with no TLS and no warning.
 
 `--iface` is auto-detected from each alias IP's subnet (the IP already says
 which network it's on), so you just pick an unused IP on each LAN; pass
