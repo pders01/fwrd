@@ -663,10 +663,19 @@ func runNetDown(_ *cobra.Command, _ []string) {
 
 func runNetStatus(_ *cobra.Command, _ []string) {
 	st, err := port80.Status(netName)
-	if err != nil {
+	if errors.Is(err, port80.ErrNoBinding) {
 		// No binding is a normal state, not a failure.
 		logger.Info("no active port-80 binding", "hint", "sudo fwrd net up --alias-ip <ip>")
 		return
+	}
+	if errors.Is(err, os.ErrPermission) {
+		// The state file is root-owned; a non-root read can't see it, so don't
+		// misreport an active binding as absent.
+		logger.Info("port-80 state is root-owned; re-run with sudo to read it", "run", "sudo fwrd net status")
+		return
+	}
+	if err != nil {
+		logger.Fatal("net status failed", "err", err)
 	}
 	for _, a := range st.Aliases {
 		logger.Info("active port-80 binding",
