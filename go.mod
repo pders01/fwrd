@@ -14,7 +14,6 @@ require (
 	github.com/charmbracelet/log v1.0.0
 	github.com/fsnotify/fsnotify v1.10.0
 	github.com/go-viper/mapstructure/v2 v2.2.1
-	github.com/hashicorp/mdns v1.0.6
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/mmcdole/gofeed v1.3.0
 	github.com/pelletier/go-toml/v2 v2.2.3
@@ -25,6 +24,8 @@ require (
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/term v0.37.0
 )
+
+require github.com/hashicorp/mdns v1.0.6 // indirect
 
 require (
 	github.com/JohannesKaufmann/dom v0.2.0 // indirect
@@ -80,6 +81,7 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
+	github.com/pders01/dotlocal v0.1.0
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sagikazarmark/locafero v0.7.0 // indirect
