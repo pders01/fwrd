@@ -4,20 +4,29 @@ This document tracks remaining improvement opportunities and optional enhancemen
 
 ## Current Status
 
-**Overall Test Coverage: 52.7%** (18 test files for 28 Go source files - 64.3% file coverage)
+**38 test files across 63 Go source files.** Per-package statement coverage
+below (excludes `test/integration`, which needs port 8080 free — OrbStack
+often holds it on this machine):
 
-**Core modules have excellent coverage (89-90%):**
-- **Validation**: 89.7% (comprehensive path, URL, and security validation tests)
-- **Feed Management**: 90.2% (complete RSS/Atom parsing, fetching, and manager tests)
-- **Configuration**: 89.5% (config loading, defaults, and path handling tests)
-- **Debug Logging**: 82.2% (structured logging and level management tests)
-- **Media**: 80.5% (type detection and launcher functionality tests)
-- **Search**: 66.6% (Bleve engine and search functionality tests)
-- **Storage**: 64.9% (database operations and indexing tests)
+**Core modules well-covered (76–94%):**
+- **OPML**: 94.1%
+- **Configuration**: 90.6% (config loading, defaults, TLS defaults)
+- **Validation**: 89.7% (path, URL, and security validation)
+- **Feed Management**: 88.5% (RSS/Atom parsing, fetching, manager)
+- **Media**: 80.5% (type detection and launcher)
+- **Topics**: 80.1% (TF-IDF clustering)
+- **Debug Logging**: 77.9%
+- **Storage**: 77.6% (database operations and indexing)
+- **Web TLS (`webtls`)**: 76.1% (cert sources, generation, mode switch)
+
+**Mid-range:**
+- **Lua plugins**: 75.2% · **Search**: 71.4% · **Web**: 70.3% ·
+  **Plugins**: 55.6%
 
 **Main testing gaps:**
-- **TUI**: 25.2% (limited UI component testing - main opportunity)
-- **CMD**: 16.1% (basic CLI command tests - mainly integration-tested)
+- **Service**: 34.2% (install/uninstall shell out; only pure render tested)
+- **TUI**: 32.7% (limited UI component testing — main opportunity)
+- **CMD**: 18.7% (CLI commands — mainly integration-tested)
 
 ---
 
@@ -42,10 +51,11 @@ The web view now serves over **HTTPS by default** with no setup. A new
 HTTPS-by-default without breakage: it peeks the first byte of each connection
 (TLS ClientHello `0x16` → wrapped in `tls.Server`; anything else stays plain),
 and the handler 308-redirects cleartext (`r.TLS == nil`) to `https://` on the
-**same port**. So existing `http://fwrd.local:PORT` bookmarks and the
-`fwrd net` bare-`:80` cleartext redirect keep working, auto-upgraded. Relies on
-`net/http` special-casing `*tls.Conn` to populate `r.TLS`. A short peek
-deadline guards against a client that connects without sending.
+**same host:port**. So existing `http://host:PORT` bookmarks keep working,
+auto-upgraded. (The `fwrd net` bare-`:80` flow is the exception — the 308 goes
+to `:443`, which the alias redirect does not map; see Known limitations.)
+Relies on `net/http` special-casing `*tls.Conn` to populate `r.TLS`. A short
+peek deadline guards against a client that connects without sending.
 
 Flags `--tls` / `--tls-mode` / `--tls-cert` / `--tls-key` (flag > `[web.tls]` >
 default), forwarded through `service install`. SANs cover `localhost`,
@@ -60,8 +70,10 @@ concrete `--addr` host. `serve`/mDNS log URLs switch to the active scheme.
   cosmetic; name resolution and the URL are unaffected.
 - `fwrd net` (bare `:80`) needs `--tls=false`: the alias redirect maps only
   `:80`→serve-port, so an HTTPS cleartext `308` to `https://fwrd.local`
-  (`:443`) dead-ends. Candidate follow-up: a `:443`→serve-port redirect in
-  `fwrd net` so the bare name can serve HTTPS.
+  (`:443`) dead-ends. **Follow-up in progress:** dotlocal `port80` is being
+  extended to redirect a port *set* (`{80, 443}`) onto one app port (see
+  dotlocal's TODO.md); once released, `fwrd net` will map `:443` too and drop
+  the `--tls=false` requirement.
 
 Code: `internal/web/webtls/webtls.go`, `internal/web/tlsmux.go`,
 `internal/web/server.go`, `internal/config/config.go`, `cmd/rss/main.go`,
