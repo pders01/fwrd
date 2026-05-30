@@ -15,6 +15,12 @@ func serveArgs(o *Options) []string {
 	}
 	if o.MDNS {
 		args = append(args, "--mdns", "--mdns-name", o.MDNSName)
+		for _, ip := range o.MDNSIPs {
+			args = append(args, "--mdns-ip", ip)
+		}
+		if o.MDNSIface != "" {
+			args = append(args, "--mdns-iface", o.MDNSIface)
+		}
 	}
 	return args
 }

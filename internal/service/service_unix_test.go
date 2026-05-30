@@ -33,3 +33,23 @@ func TestServeArgs_MinimalOmitsOptional(t *testing.T) {
 		t.Errorf("serveArgs minimal:\n got %q\nwant %q", got, want)
 	}
 }
+
+func TestServeArgs_ForwardsMDNSIPsAndIface(t *testing.T) {
+	got := serveArgs(&Options{
+		Addr:      "0.0.0.0:5336",
+		MDNS:      true,
+		MDNSName:  "fwrd",
+		MDNSIPs:   []string{"192.168.1.240", "192.168.178.240"},
+		MDNSIface: "en0,en9",
+	})
+	want := []string{
+		"serve", "--addr", "0.0.0.0:5336",
+		"--mdns", "--mdns-name", "fwrd",
+		"--mdns-ip", "192.168.1.240",
+		"--mdns-ip", "192.168.178.240",
+		"--mdns-iface", "en0,en9",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("serveArgs with mdns-ip/iface:\n got %q\nwant %q", got, want)
+	}
+}
