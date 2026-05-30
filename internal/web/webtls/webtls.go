@@ -15,6 +15,7 @@
 package webtls
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -149,8 +150,8 @@ func (s *generatedSource) ensure() error {
 }
 
 // leafValid reports whether the persisted leaf can be reused: it parses, its
-// key is present, it is comfortably before expiry, and its SANs match the
-// requested host set exactly.
+// key is present, it is comfortably before expiry, its origin still matches the
+// requested mode, and its SANs match the requested host set exactly.
 func (s *generatedSource) leafValid() bool {
 	leaf, err := loadCert(s.certPath())
 	if err != nil {
@@ -160,6 +161,12 @@ func (s *generatedSource) leafValid() bool {
 		return false
 	}
 	if time.Now().Add(renewWindow).After(leaf.NotAfter) {
+		return false
+	}
+	// A mode switch must force regeneration. A self-signed leaf carries a
+	// matching issuer and subject; a CA-signed leaf does not. If that no
+	// longer matches the requested mode, the on-disk leaf is stale.
+	if selfSigned := bytes.Equal(leaf.RawIssuer, leaf.RawSubject); selfSigned == s.withCA {
 		return false
 	}
 	dns, ips := splitHosts(s.hosts)
