@@ -7,6 +7,28 @@ import (
 	"github.com/pders01/fwrd/internal/storage"
 )
 
+func TestSingularFoldsRegularPlurals(t *testing.T) {
+	cases := map[string]string{
+		// regular plurals fold to singular
+		"models": "model", "agents": "agent", "tokens": "token", "plugins": "plugin",
+		"operators": "operator", "pods": "pod", "clusters": "cluster",
+		"chips": "chip", "cars": "car",
+		// non-plurals and irregular -es/-ss/-us/-is/-as endings are left intact.
+		// vowel+s acronyms (gpus/cpus/apis) collide with the -us/-is guard and
+		// stay unfolded — an accepted miss to protect status/virus/analysis.
+		"kubernetes": "kubernetes", "series": "series", "status": "status",
+		"analysis": "analysis", "bias": "bias", "class": "class",
+		"gpus": "gpus", "cpus": "cpus", "apis": "apis",
+		// already singular, unchanged
+		"model": "model", "russia": "russia", "russian": "russian",
+	}
+	for in, want := range cases {
+		if got := singular(in); got != want {
+			t.Errorf("singular(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func art(id, title, desc string, day int) *storage.Article {
 	return &storage.Article{
 		ID:          id,
