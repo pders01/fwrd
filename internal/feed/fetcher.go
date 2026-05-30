@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/pders01/fwrd/internal/audit"
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/storage"
 )
@@ -37,6 +38,9 @@ func (f *Fetcher) Fetch(feed *storage.Feed) (*http.Response, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("creating request: %w", err)
 	}
+	// Tag the request so the audit RoundTripper (if installed) attributes it
+	// to feed fetching rather than a plugin call.
+	req = req.WithContext(audit.WithSource(req.Context(), "feed"))
 
 	req.Header.Set("User-Agent", f.userAgent)
 	req.Header.Set("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml")

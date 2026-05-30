@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pders01/fwrd/internal/audit"
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/search"
@@ -49,6 +50,10 @@ type Server struct {
 	// single-port TLS mux and Handler redirect cleartext requests to https.
 	// nil leaves the server as plain HTTP.
 	tlsConfig *tls.Config
+
+	// audit, when non-nil, records every inbound request (method, path,
+	// status, client IP, TLS, auth user) as a JSON line. nil disables it.
+	audit *audit.Logger
 
 	// writeMu serializes operations that notify the search index. The
 	// DataListener/DeleteListener contract requires that notifications not
@@ -94,6 +99,10 @@ func (s *Server) AuthEnabled() bool { return s.authUser != "" }
 // TLS mux and cleartext requests are redirected to https.
 func (s *Server) UseTLS(cfg *tls.Config) { s.tlsConfig = cfg }
 
+// UseAudit enables inbound request auditing to l. Call it before Serve. A nil
+// l leaves auditing off.
+func (s *Server) UseAudit(l *audit.Logger) { s.audit = l }
+
 // Handler builds the route table. Go 1.22 ServeMux method+path patterns
 // keep this dependency-free — no router library needed. Mutating routes
 // are POST-only and run behind the same-origin guard.
@@ -131,7 +140,76 @@ func (s *Server) Handler() http.Handler {
 	if s.tlsConfig != nil {
 		h = s.redirectToHTTPS(h)
 	}
+
+	// Auditing wraps everything, including the TLS redirect and the auth
+	// challenge, so the log records cleartext 308s and rejected (401/403)
+	// requests, not just those that reach a handler.
+	if s.audit != nil {
+		h = s.auditLog(h)
+	}
 	return h
+}
+
+// auditLog records every inbound request as a JSON line: method, request URI,
+// final status, byte count, duration, client IP, Host, TLS, and the Basic-Auth
+// username (never the password). It wraps the ResponseWriter to capture the
+// status the handler chain ultimately wrote.
+func (s *Server) auditLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(sw, r)
+		user, _, _ := r.BasicAuth()
+		s.audit.Log(&audit.Record{
+			Dir:        audit.In,
+			Method:     r.Method,
+			URL:        r.URL.RequestURI(),
+			Status:     sw.status,
+			Bytes:      sw.bytes,
+			DurationMS: time.Since(start).Milliseconds(),
+			ClientIP:   clientIP(r),
+			Host:       r.Host,
+			TLS:        r.TLS != nil,
+			User:       user,
+		})
+	})
+}
+
+// statusWriter wraps http.ResponseWriter to remember the status code and the
+// number of body bytes written, which a plain ResponseWriter does not expose
+// after the fact. status defaults to 200 for handlers that Write without an
+// explicit WriteHeader.
+type statusWriter struct {
+	http.ResponseWriter
+	status      int
+	bytes       int64
+	wroteHeader bool
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	if !w.wroteHeader {
+		w.status = code
+		w.wroteHeader = true
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusWriter) Write(b []byte) (int, error) {
+	w.wroteHeader = true // an implicit 200 is now committed
+	n, err := w.ResponseWriter.Write(b)
+	w.bytes += int64(n)
+	return n, err
+}
+
+// clientIP returns the request's remote address with the port stripped. fwrd
+// does not trust X-Forwarded-For (no proxy in the default deployment), so the
+// transport-level peer address is the honest source.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // redirectToHTTPS upgrades cleartext requests — which reach the server through

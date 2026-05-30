@@ -23,6 +23,7 @@ import (
 	charmlog "github.com/charmbracelet/log"
 	"github.com/pders01/dotlocal/mdns"
 	"github.com/pders01/dotlocal/port80"
+	"github.com/pders01/fwrd/internal/audit"
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/feed"
@@ -86,6 +87,7 @@ var (
 	serveTLSMode   string
 	serveTLSCert   string
 	serveTLSKey    string
+	serveAudit     bool
 	svcAddr        string
 	svcMDNS        bool
 	svcMDNSName    string
@@ -138,6 +140,7 @@ func init() {
 	serveCmd.Flags().StringVar(&serveTLSMode, "tls-mode", "", "TLS cert source: self-signed (default) | local-ca | file")
 	serveCmd.Flags().StringVar(&serveTLSCert, "tls-cert", "", "path to a TLS certificate (PEM); requires --tls-key (implies file mode)")
 	serveCmd.Flags().StringVar(&serveTLSKey, "tls-key", "", "path to the TLS private key (PEM); requires --tls-cert")
+	serveCmd.Flags().BoolVar(&serveAudit, "audit", false, "log every inbound and outbound HTTP request as JSON lines to ~/.fwrd/audit.log (or [web.audit] path)")
 
 	// net flags: the alias-IP + firewall redirect that exposes fwrd.local on
 	// port 80 without colliding with a host process already on :80.
@@ -550,6 +553,22 @@ func runServe(cmd *cobra.Command, _ []string) {
 			return fmt.Errorf("failed to build web server: %w", err)
 		}
 
+		// Audit log: records every inbound request and — via the shared
+		// client's RoundTripper — every outbound feed/plugin fetch. Off
+		// unless --audit or [web.audit] enabled. Open before binding so a bad
+		// path fails fast like a TLS or bind error.
+		if resolveAuditEnabled(cmd, cfg) {
+			auditPath := firstNonEmpty(cfg.Web.Audit.Path, defaultAuditPath())
+			al, aerr := audit.Open(auditPath)
+			if aerr != nil {
+				return fmt.Errorf("audit log: %w", aerr)
+			}
+			defer al.Close()
+			manager.UseAuditLogger(al)
+			srv.UseAudit(al)
+			logger.Info("audit log enabled", "path", auditPath)
+		}
+
 		// Bind before announcing anything: if the port is taken, fail fast with
 		// a clear error rather than logging "serving" and advertising an mDNS
 		// name for a server that never came up.
@@ -935,6 +954,23 @@ func tlsHosts() []string {
 func defaultTLSDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".fwrd", "tls")
+}
+
+// resolveAuditEnabled decides whether request auditing is on: an explicit
+// --audit flag wins, otherwise the [web.audit] config value, otherwise off.
+func resolveAuditEnabled(cmd *cobra.Command, cfg *config.Config) bool {
+	if cmd != nil && cmd.Flags().Changed("audit") {
+		return serveAudit
+	}
+	if cfg != nil {
+		return cfg.Web.Audit.Enabled
+	}
+	return false
+}
+
+func defaultAuditPath() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".fwrd", "audit.log")
 }
 
 // firstNonEmpty returns the first non-empty string, or "".
