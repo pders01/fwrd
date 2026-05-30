@@ -304,6 +304,11 @@ summary.as-button {
 summary.as-button:hover { border-color: var(--accent); }
 button[aria-pressed="true"] { font-weight: 700; }
 form.inline { display: inline; }
+/* Article meta line (date · Original · mark read · star). Flex so the
+   "·" separators (inserted between items, never before the first) stay
+   glued to their item and don't dangle at a wrap point. */
+.meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 0.5rem; }
+.meta > * + *::before { content: "·"; margin-right: 0.5rem; }
 /* feed-management toolbar: add-feed, filter/sort, and OPML in one block,
    separated from the list by a hairline rule to match the broadsheet. */
 .feed-toolbar { margin: 1rem 0 1.5rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--rule); }
