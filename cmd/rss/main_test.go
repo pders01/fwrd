@@ -168,3 +168,25 @@ func TestExpandTildePath(t *testing.T) {
 		})
 	}
 }
+
+func TestIsVersionedPkgPath(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"/opt/homebrew/Caskroom/fwrd/1.65.0+ci.1/fwrd", true},
+		{"/usr/local/Cellar/fwrd/1.65.0/bin/fwrd", true},
+		{"/home/linuxbrew/.linuxbrew/Cellar/fwrd/1.0/bin/fwrd", true},
+		{"/opt/homebrew/bin/fwrd", false},
+		{"/usr/local/bin/fwrd", false},
+		{"/Users/me/go/bin/fwrd", false},
+		{"fwrd", false},
+		// "Cellar"/"Caskroom" only match a whole path segment, not a substring.
+		{"/Users/me/Caskroomish/fwrd", false},
+	}
+	for _, c := range cases {
+		if got := isVersionedPkgPath(c.path); got != c.want {
+			t.Errorf("isVersionedPkgPath(%q) = %v, want %v", c.path, got, c.want)
+		}
+	}
+}
