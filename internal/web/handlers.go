@@ -72,35 +72,25 @@ func (s *Server) handleFeeds(w http.ResponseWriter, _ *http.Request) {
 		}
 		return strings.ToLower(li) < strings.ToLower(lj)
 	})
+	// One transaction yields every feed's counts via index KeyN (no article
+	// JSON decoded), replacing a per-feed decode-and-sort of the whole corpus.
+	stats, err := s.store.FeedStats()
+	if err != nil {
+		http.Error(w, "failed to load feed stats: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	views := make([]feedView, 0, len(feeds))
 	for _, f := range feeds {
-		unread, total := s.feedCounts(f.ID)
+		st := stats[f.ID]
 		views = append(views, feedView{
 			Feed:   f,
 			Label:  feedLabel(f),
 			Source: feedSource(f),
-			Unread: unread,
-			Total:  total,
+			Unread: st.Unread,
+			Total:  st.Total,
 		})
 	}
 	s.render(w, "feeds.html", indexData{Feeds: views})
-}
-
-// feedCounts returns the unread and total article counts for a feed in a
-// single scan. Feeds are bounded in size so this stays cheap. Errors
-// collapse to zero — a count is not worth failing a page render over.
-func (s *Server) feedCounts(feedID string) (unread, total int) {
-	articles, err := s.store.GetArticles(feedID, 0)
-	if err != nil {
-		return 0, 0
-	}
-	total = len(articles)
-	for _, a := range articles {
-		if !a.Read {
-			unread++
-		}
-	}
-	return unread, total
 }
 
 func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {

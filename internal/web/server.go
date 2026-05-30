@@ -26,6 +26,7 @@ import (
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/storage"
+	"github.com/pders01/fwrd/internal/topics"
 )
 
 // shutdownGrace bounds how long a graceful shutdown waits for in-flight
@@ -60,6 +61,15 @@ type Server struct {
 	// arrive concurrently; net/http runs each request in its own goroutine,
 	// so without this two mutating requests could race the bleve batch.
 	writeMu sync.Mutex
+
+	// frontCache memoizes the front-page topic model and feed-name map. Both
+	// are pure functions of the corpus, which only changes on a store write;
+	// the cache is rebuilt when store.WriteGen() advances past frontGen.
+	frontMu    sync.Mutex
+	frontGen   uint64
+	frontValid bool
+	frontModel *topics.Model
+	frontNames map[string]string
 }
 
 // NewServer wires handlers over the given backends. manager drives feed
