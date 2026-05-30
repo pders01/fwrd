@@ -1,7 +1,7 @@
 {{define "title"}}{{if .Article.Title}}{{.Article.Title}}{{else}}Article{{end}}{{end}}
 {{define "content"}}
 {{template "masthead" ""}}
-<main>
+<main class="reading">
 <nav class="crumbs">
 <a href="/">Front page</a>
 {{if .Feed}} / <a href="/feeds/{{.Feed.ID}}">{{if .Feed.Title}}{{.Feed.Title}}{{else}}{{.Feed.URL}}{{end}}</a>{{end}}
