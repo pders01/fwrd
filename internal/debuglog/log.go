@@ -101,6 +101,16 @@ func Setup(level LogLevel, filePath ...string) error {
 	return nil
 }
 
+// DefaultPath returns the default debug-log file location, ~/.fwrd/fwrd.log.
+// It does not create the file. Used by `fwrd logs` to tail the app's own log.
+func DefaultPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".fwrd", "fwrd.log"), nil
+}
+
 // SetupWithBool provides backward compatibility with the old Setup(bool) signature
 func SetupWithBool(enabled bool) {
 	if enabled {
