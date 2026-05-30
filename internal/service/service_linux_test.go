@@ -21,7 +21,7 @@ func TestUnitContent(t *testing.T) {
 	if !strings.Contains(got, wantExec) {
 		t.Errorf("unit missing ExecStart line %q in:\n%s", wantExec, got)
 	}
-	for _, want := range []string{"[Unit]", "[Service]", "Restart=on-failure", "WantedBy=default.target"} {
+	for _, want := range []string{"[Unit]", "[Service]", "Restart=on-failure", "StartLimitBurst=5", "WantedBy=default.target"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("unit missing %q", want)
 		}

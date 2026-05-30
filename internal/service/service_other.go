@@ -10,3 +10,5 @@ var errUnsupported = errors.New("fwrd service is only supported on Linux (system
 func Install(*Options) (string, error) { return "", errUnsupported }
 
 func Uninstall() (string, error) { return "", errUnsupported }
+
+func LogCommand(bool, int) (name string, args []string, err error) { return "", nil, errUnsupported }

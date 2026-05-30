@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/template"
 )
@@ -116,6 +117,22 @@ func logDir() (string, error) {
 		return "", fmt.Errorf("locating home dir: %w", err)
 	}
 	return filepath.Join(home, ".fwrd"), nil
+}
+
+// LogCommand returns the command that streams the LaunchAgent's stdout/stderr
+// logs (the agent redirects both to files under ~/.fwrd). follow maps to
+// `tail -f`, lines to `-n`.
+func LogCommand(follow bool, lines int) (name string, args []string, err error) {
+	dir, err := logDir()
+	if err != nil {
+		return "", nil, err
+	}
+	args = []string{"-n", strconv.Itoa(lines)}
+	if follow {
+		args = append(args, "-f")
+	}
+	args = append(args, filepath.Join(dir, "serve.out.log"), filepath.Join(dir, "serve.err.log"))
+	return "tail", args, nil
 }
 
 // plistContent renders the LaunchAgent. It is pure: the caller resolves and
