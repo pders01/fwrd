@@ -375,10 +375,14 @@ meta-row line (`last refresh failed <when>`), both with the full error in a
 `title=` tooltip. Regression-tested in `manager_test.go`
 (`TestRefreshFeed_RecordsAndClearsError`).
 
-TUI badge is still open as an optional follow-up.
+The TUI feed list now mirrors the badge: a failing feed shows a red
+`✗ fetch failed` marker on its title and a `last refresh failed <when>: <msg>`
+description line (`feedItem.Title`/`Description` in `internal/tui/app.go`,
+regression-tested in `app_test.go`).
 
 Code: `internal/storage/models.go`, `internal/feed/manager.go`,
-`internal/web/templates/feeds.html`, `internal/web/templates/style.css`.
+`internal/web/templates/feeds.html`, `internal/web/templates/style.css`,
+`internal/tui/app.go`.
 
 ---
 

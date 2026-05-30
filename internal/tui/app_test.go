@@ -2,6 +2,7 @@ package tui
 
 import (
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -392,4 +393,30 @@ func TestKeyboardShortcuts(t *testing.T) {
 			assert.True(t, tt.expected(app), "keyboard shortcut should work as expected")
 		})
 	}
+}
+
+func TestFeedItem_FetchErrorBadge(t *testing.T) {
+	t.Run("no error renders plain title and description", func(t *testing.T) {
+		i := feedItem{feed: &storage.Feed{Title: "Example", Description: "desc"}}
+		assert.Equal(t, "Example", i.Title())
+		assert.Equal(t, "desc", i.Description())
+	})
+
+	t.Run("error marks the title", func(t *testing.T) {
+		i := feedItem{feed: &storage.Feed{Title: "Example", LastError: "dial tcp: timeout"}}
+		assert.Contains(t, i.Title(), "Example")
+		assert.Contains(t, i.Title(), "fetch failed")
+	})
+
+	t.Run("error surfaces message in the description", func(t *testing.T) {
+		i := feedItem{feed: &storage.Feed{
+			Description: "desc",
+			LastError:   "dial tcp: timeout",
+			LastErrorAt: time.Date(2026, 5, 30, 9, 41, 0, 0, time.UTC),
+		}}
+		desc := i.Description()
+		assert.Contains(t, desc, "last refresh failed")
+		assert.Contains(t, desc, "dial tcp: timeout")
+		assert.NotContains(t, desc, "desc")
+	})
 }
