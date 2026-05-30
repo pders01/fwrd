@@ -884,8 +884,25 @@ type feedItem struct {
 	feed *storage.Feed
 }
 
-func (i feedItem) Title() string       { return i.feed.Title }
-func (i feedItem) Description() string { return i.feed.Description }
+func (i feedItem) Title() string {
+	if i.feed.LastError != "" {
+		return i.feed.Title + " " + StatusErrorStyle.Render("✗ fetch failed")
+	}
+	return i.feed.Title
+}
+
+func (i feedItem) Description() string {
+	if i.feed.LastError == "" {
+		return i.feed.Description
+	}
+	line := "last refresh failed"
+	if !i.feed.LastErrorAt.IsZero() {
+		line += " " + i.feed.LastErrorAt.Format("Jan 2, 15:04")
+	}
+	line += ": " + truncateEnd(i.feed.LastError, defaultMaxDescriptionLength)
+	return ErrorMessageStyle.Render(line)
+}
+
 func (i feedItem) FilterValue() string { return i.feed.Title }
 
 type articleItem struct {
