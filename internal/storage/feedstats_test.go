@@ -156,8 +156,8 @@ func TestUnreadIndex_RebuildOnOpen(t *testing.T) {
 		art("a2", "f1", true),
 		art("b1", "f2", false),
 	})
-	if err := store.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	if closeErr := store.Close(); closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
 	}
 
 	// Wipe the unread index and the build flag to mimic a pre-index DB.
@@ -167,8 +167,8 @@ func TestUnreadIndex_RebuildOnOpen(t *testing.T) {
 	}
 	err = db.Update(func(tx *bolt.Tx) error {
 		if tx.Bucket(articlesUnreadByFeedBucket) != nil {
-			if err := tx.DeleteBucket(articlesUnreadByFeedBucket); err != nil {
-				return err
+			if delErr := tx.DeleteBucket(articlesUnreadByFeedBucket); delErr != nil {
+				return delErr
 			}
 		}
 		return tx.Bucket(metaBucket).Delete(unreadIndexFlag)

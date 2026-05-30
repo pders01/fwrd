@@ -86,13 +86,13 @@ func BenchmarkFeedPage(b *testing.B) {
 		b.Fatalf("feed stats: %v", err)
 	}
 	var biggest string
-	var max int
+	var largest int
 	for _, f := range feeds {
-		if t := stats[f.ID].Total; t > max {
-			max, biggest = t, f.ID
+		if t := stats[f.ID].Total; t > largest {
+			largest, biggest = t, f.ID
 		}
 	}
-	b.ReportMetric(float64(max), "feed_articles")
+	b.ReportMetric(float64(largest), "feed_articles")
 	for b.Loop() {
 		_, err := s.store.GetArticlesWithCursor(biggest, 50, "")
 		if err != nil {
