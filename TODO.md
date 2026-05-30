@@ -32,6 +32,36 @@ often holds it on this machine):
 
 ## Recent Additions
 
+### **Graceful FE error handling + HTTP e2e suite** — COMPLETED
+
+Every state-changing web action funneled failures through `http.Error`, which
+replaced the whole UI with a raw text page. One feed's `500` made **refresh-all
+dump `failed to refresh feeds: … HTTP error: 500`** as a full page, discarding
+the rest of the batch.
+
+- **One-shot flash (`internal/web/flash.go`)** — a cookie-backed notice set on
+  the POST and read-and-cleared once on the next render. An embedded
+  `pageBase` carries `.Flash` onto every page view model so `layout.html`
+  renders it uniformly (auto-escaped, no-JS — survives the PRG redirect).
+- **refresh-all** — per-feed failures are now **success**, not a page error
+  (they are already persisted and badged on `/feeds`); summarized as
+  *"Refreshed N feed(s), M failed — see the Feeds page."* Only a catastrophic
+  list-feeds error is page-worthy. Verified live: `POST /refresh` over the
+  132-feed DB returns `303` + a flash, not a `502`.
+- **refresh-single, add-feed** (unreachable + empty URL), **OPML import** (bad
+  upload, missing file, parse error), and **delete** redirect back with an
+  inline error or success notice instead of a raw 4xx/5xx page. Add/OPML/delete
+  now land on `/feeds` (where the controls and results live). OPML import
+  counts added / skipped / failed.
+- **HTTP e2e suite (`internal/web/e2e_test.go`)** — drives every state-changing
+  action through failure over a mode-switchable backend (`ok`/`500`/`hang`),
+  asserting a graceful redirect + flash, **never** a raw error page, plus the
+  flash round-trip (rendered once, then cleared). This suite is how the five
+  unhandled states were enumerated in the first place.
+
+Code: `internal/web/{flash,handlers,front}.go`,
+`internal/web/templates/{layout.html,style.css}`. Tested in `e2e_test.go`.
+
 ### **Web performance: O(1) feed counts + front-page cache** — COMPLETED
 
 Profiling a real **169 MB / 8.7k-article** database (benchmarks point at a DB
