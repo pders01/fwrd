@@ -11,6 +11,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -172,19 +173,40 @@ func sameOrigin(r *http.Request) bool {
 	return u.Host == r.Host
 }
 
-// ListenAndServe runs the server on addr with sane timeouts. Read/write
-// timeouts guard against slow-loris-style clients even on a personal box.
-// WriteTimeout is generous because a synchronous feed refresh makes
-// network calls within the request.
+// Listen binds addr and returns the listener, surfacing a bind failure (e.g.
+// the port is already in use) immediately so the caller can fail fast before
+// announcing the server as up or advertising it over mDNS.
+func (s *Server) Listen(addr string) (net.Listener, error) {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("cannot bind %s: %w", addr, err)
+	}
+	return ln, nil
+}
+
+// ListenAndServe binds addr and serves on it. It is shorthand for Listen
+// followed by Serve; callers that need to act between a successful bind and
+// accepting connections (logging, mDNS) should use Listen + Serve directly.
+func (s *Server) ListenAndServe(addr string) error {
+	ln, err := s.Listen(addr)
+	if err != nil {
+		return err
+	}
+	return s.Serve(ln)
+}
+
+// Serve runs the server on an already-bound listener with sane timeouts.
+// Read/write timeouts guard against slow-loris-style clients even on a
+// personal box. WriteTimeout is generous because a synchronous feed refresh
+// makes network calls within the request.
 //
 // On SIGINT/SIGTERM it shuts down gracefully: it stops accepting new
 // connections and drains in-flight requests for up to shutdownGrace before
 // returning, so the caller's deferred store/index Close runs and releases
 // the BoltDB and Bleve locks cleanly instead of relying on the OS to reap
 // them. Returns nil on a clean shutdown.
-func (s *Server) ListenAndServe(addr string) error {
+func (s *Server) Serve(ln net.Listener) error {
 	srv := &http.Server{
-		Addr:              addr,
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
@@ -197,7 +219,7 @@ func (s *Server) ListenAndServe(addr string) error {
 
 	serveErr := make(chan error, 1)
 	go func() {
-		serveErr <- srv.ListenAndServe()
+		serveErr <- srv.Serve(ln)
 	}()
 
 	select {
