@@ -32,6 +32,43 @@ often holds it on this machine):
 
 ## Recent Additions
 
+### **Web performance: O(1) feed counts + front-page cache** — COMPLETED
+
+Profiling a real **169 MB / 8.7k-article** database (benchmarks point at a DB
+copy via `FWRD_BENCH_DB`; they skip otherwise) found two page loads re-scanning
+the whole corpus on every request:
+
+- **`/feeds` counts: ~480 ms → ~0.3 ms.** `feedCounts` decoded *and sorted*
+  every article of every feed (197 MB allocated) just to tally unread/total.
+  A new **`articles_unread_by_feed`** index (one sub-bucket of unread IDs per
+  feed) lets `Store.FeedStats()` read both counts via `Bucket.Stats().KeyN` in
+  one transaction, decoding **no** article JSON. Total comes from the existing
+  `articles_by_feed` index the same way. The index is maintained in
+  `SaveArticles` (membership = `!Read`, idempotent), `mutateArticle` (on a Read
+  flip), and `DeleteFeed`, and **back-filled once on Open** for existing DBs
+  (metaBucket flag gates the rescan).
+- **`/` and `/topic/{slug}`: ~40 ms → ~0 ms on a cache hit.** The TF-IDF topic
+  model + feed-name map were rebuilt per request. `Server.frontView` now
+  memoizes both, keyed on a new **`Store.WriteGen()`** counter (bumped on every
+  mutation), so the model rebuilds only after a write — read/star state stays
+  fresh, repeat loads are free. A transient load error serves the stale cache
+  rather than a blank page.
+
+**Migration note:** the first `serve`/TUI start on the **new binary** opens the
+existing DB and back-fills the unread index once (~0.5 s scan on this DB), then
+sets the flag so later opens pay nothing.
+
+**Pre-existing follow-up (not a regression):** feed **refresh** re-saves parsed
+articles, resetting `Read` to false for items still present in the feed XML
+(the unread index faithfully mirrors this — the old decode-count did too). A
+fix would preserve stored `Read`/`Starred` state on re-save in `SaveArticles`.
+
+Code: `internal/storage/store.go`, `internal/web/{front,handlers,server}.go`.
+Tested in `internal/storage/feedstats_test.go` (counts, transitions, on-open
+rebuild, write-gen, gated decode-parity) and `internal/web/front_cache_test.go`
+(cache reuse + write invalidation); benchmarks in `count_bench_test.go` /
+`perf_bench_test.go`.
+
 ### **Request audit log (`internal/audit`)** — COMPLETED
 
 `serve --audit` records **every HTTP request through fwrd**, both directions,
@@ -312,9 +349,10 @@ the article content rather than the feed roster.
 - The catch-all `Latest` is large (~70% of a 132-feed corpus). Single-term
   clustering leaves a long tail; multi-term topic labels, co-occurrence
   seeding, or per-feed-category hints could section more of it.
-- Topics recompute per request over the top `frontCorpus` (400) articles.
-  Fine at this scale; revisit with a cache keyed on corpus signature if the
-  corpus grows large.
+- ~~Topics recompute per request over the top `frontCorpus` (400)
+  articles.~~ **RESOLVED** — the front-page topic model and feed-name map are
+  now memoized in `Server.frontView`, keyed on `Store.WriteGen()`. See the
+  performance entry below.
 
 ---
 
