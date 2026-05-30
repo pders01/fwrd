@@ -38,8 +38,8 @@ A round of usability fixes from real-world use:
   touched), `nftables` on Linux (own `fwrd` table). The redirect precedes the
   socket lookup, so it works even when the host binds `0.0.0.0:80`. mDNS
   advertises each alias scoped to its subnet (`mdns.AdvertiseScoped` +
-  repeatable `serve --mdns-ip`). Root-only; state in `~/.fwrd/port80.json`;
-  not reboot-persistent.
+  repeatable `serve --mdns-ip`, also forwarded by `service install`). Root-only;
+  state in the root-owned `/var/run/dotlocal/<name>.json`; not reboot-persistent.
 - **Responsive web layout** — added a `@media (max-width: 40rem)` block: the
   masthead search drops to a full-width line, the two-up add-feed/sort toolbars
   collapse to one column, and `.page-head` wraps so action buttons never get
@@ -47,6 +47,9 @@ A round of usability fixes from real-world use:
 - **Centered reader column** — the article reader now narrows its whole `<main>`
   (`main.reading`, `--readw`) so crumbs + headline + body share one centered
   column under the full-width masthead, instead of hugging the left edge.
+- **Scroll preservation** — returning from an article to the front page keeps
+  the prior scroll position; the bfcache `pageshow` handler no longer yanks
+  focus to the top search field (skips refocus when scrolled; `preventScroll`).
 - **Fail-fast serve** — `serve` binds the port *before* logging "serving" or
   advertising mDNS, so an in-use port fails immediately with a clear hint
   (`web.Server.Listen`/`Serve` split) rather than a misleading "serving" line.
@@ -57,14 +60,27 @@ A round of usability fixes from real-world use:
   the background service's output with `--service` (journalctl on Linux, the
   LaunchAgent's `serve.*.log` on macOS); `-f`/`-n` for follow/line-count.
 
-The mDNS + port-80 machinery was then **extracted into a standalone, reusable
-library**, `github.com/pders01/dotlocal` (packages `mdns`, `port80`, and a
-top-level `Run`), for any app using the same `go:embed`'d local-service
-pattern; fwrd's `internal/mdns` and `internal/netbind` were deleted in favour
-of it (consumed via a `replace` directive during local dev).
+The mDNS + port-80 machinery was **extracted into a standalone, reusable
+library**, [`github.com/pders01/dotlocal`](https://github.com/pders01/dotlocal)
+(packages `mdns`, `port80`, top-level `Run`), for any app using the same
+`go:embed`'d local-service pattern; fwrd's `internal/mdns` and `internal/netbind`
+were deleted in favour of it. fwrd now depends on the published **v0.3.0**.
+
+`<name>.local` resolves across **every LAN** on a multi-homed host: Linux via a
+self-hosted responder, **macOS via the system mDNSResponder** (`dns_sd` C API —
+a self-hosted responder does not interoperate with Bonjour). macOS builds of
+fwrd therefore require **cgo** (`CGO_ENABLED=1`).
+
+**Known limitation (won't-fix):** on the **host Mac itself**, bare
+`http://fwrd.local` (port 80) does not work — pf `rdr` only catches traffic
+arriving on a physical interface, and macOS skips loopback (`set skip on lo0`).
+Use `http://fwrd.local:5336` (or whatever `--addr` port) on the host; every
+other LAN device gets the bare `:80` URL. True host uniformity would require a
+root daemon binding `:80` on the alias IP (a different service model) and is not
+pursued.
 
 Code: `cmd/rss/main.go`, `internal/web/server.go`,
-`internal/web/templates/{style.css,article.html}`, `internal/service/`,
+`internal/web/templates/{style.css,article.html,app.js}`, `internal/service/`,
 `internal/debuglog/log.go`; library at `github.com/pders01/dotlocal`.
 
 
