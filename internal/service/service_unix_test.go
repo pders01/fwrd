@@ -14,6 +14,7 @@ func TestServeArgs(t *testing.T) {
 		Config:   "/tmp/c.toml",
 		MDNS:     true,
 		MDNSName: "fwrd",
+		TLS:      true, // default install: HTTPS on, no --tls flag emitted
 	})
 	want := []string{
 		"serve", "--addr", "0.0.0.0:8080",
@@ -27,7 +28,7 @@ func TestServeArgs(t *testing.T) {
 }
 
 func TestServeArgs_MinimalOmitsOptional(t *testing.T) {
-	got := serveArgs(&Options{Addr: "127.0.0.1:8080"})
+	got := serveArgs(&Options{Addr: "127.0.0.1:8080", TLS: true})
 	want := []string{"serve", "--addr", "127.0.0.1:8080"}
 	if !slices.Equal(got, want) {
 		t.Errorf("serveArgs minimal:\n got %q\nwant %q", got, want)
@@ -41,6 +42,7 @@ func TestServeArgs_ForwardsMDNSIPsAndIface(t *testing.T) {
 		MDNSName:  "fwrd",
 		MDNSIPs:   []string{"192.168.1.240", "192.168.178.240"},
 		MDNSIface: "en0,en9",
+		TLS:       true,
 	})
 	want := []string{
 		"serve", "--addr", "0.0.0.0:5336",
@@ -51,5 +53,32 @@ func TestServeArgs_ForwardsMDNSIPsAndIface(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("serveArgs with mdns-ip/iface:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestServeArgs_TLSDisabledEmitsFlag(t *testing.T) {
+	got := serveArgs(&Options{Addr: "127.0.0.1:8080", TLS: false})
+	want := []string{"serve", "--addr", "127.0.0.1:8080", "--tls=false"}
+	if !slices.Equal(got, want) {
+		t.Errorf("serveArgs tls off:\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestServeArgs_ForwardsTLSModeAndFiles(t *testing.T) {
+	got := serveArgs(&Options{
+		Addr:    "0.0.0.0:8443",
+		TLS:     true,
+		TLSMode: "file",
+		TLSCert: "/tmp/cert.pem",
+		TLSKey:  "/tmp/key.pem",
+	})
+	want := []string{
+		"serve", "--addr", "0.0.0.0:8443",
+		"--tls-mode", "file",
+		"--tls-cert", "/tmp/cert.pem",
+		"--tls-key", "/tmp/key.pem",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("serveArgs tls mode/files:\n got %q\nwant %q", got, want)
 	}
 }

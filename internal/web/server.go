@@ -9,6 +9,7 @@ package web
 import (
 	"context"
 	"crypto/subtle"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -43,6 +44,11 @@ type Server struct {
 	readingFont string // resolved CSS font-family for reading text
 	authUser    string // HTTP Basic Auth username; empty disables auth
 	authPass    string // HTTP Basic Auth password
+
+	// tlsConfig, when non-nil, makes Serve front the listener with a
+	// single-port TLS mux and Handler redirect cleartext requests to https.
+	// nil leaves the server as plain HTTP.
+	tlsConfig *tls.Config
 
 	// writeMu serializes operations that notify the search index. The
 	// DataListener/DeleteListener contract requires that notifications not
@@ -83,6 +89,11 @@ func NewServer(store *storage.Store, manager *feed.Manager, searcher search.Sear
 // non-loopback bind.
 func (s *Server) AuthEnabled() bool { return s.authUser != "" }
 
+// UseTLS enables HTTPS using cfg. Call it before Serve. A nil cfg leaves the
+// server as plain HTTP. When set, Serve fronts the listener with a single-port
+// TLS mux and cleartext requests are redirected to https.
+func (s *Server) UseTLS(cfg *tls.Config) { s.tlsConfig = cfg }
+
 // Handler builds the route table. Go 1.22 ServeMux method+path patterns
 // keep this dependency-free — no router library needed. Mutating routes
 // are POST-only and run behind the same-origin guard.
@@ -112,7 +123,29 @@ func (s *Server) Handler() http.Handler {
 
 	// basicAuth is outermost so unauthenticated requests never reach a
 	// handler; the same-origin guard then gates the mutating routes.
-	return s.basicAuth(s.sameOriginGuard(mux))
+	h := s.basicAuth(s.sameOriginGuard(mux))
+
+	// With TLS on, the redirect is the true outermost layer so even an auth
+	// challenge happens over https — cleartext requests arrive via the
+	// single-port mux and are bounced to https before anything else runs.
+	if s.tlsConfig != nil {
+		h = s.redirectToHTTPS(h)
+	}
+	return h
+}
+
+// redirectToHTTPS upgrades cleartext requests — which reach the server through
+// the single-port TLS mux as plain connections (r.TLS == nil) — to https with
+// a 308, preserving method, path, and query. TLS requests pass straight
+// through. r.Host carries the bind port, so the redirect target keeps it.
+func (s *Server) redirectToHTTPS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.TLS == nil {
+			http.Redirect(w, r, "https://"+r.Host+r.URL.RequestURI(), http.StatusPermanentRedirect)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // basicAuth gates every request behind HTTP Basic Auth when credentials
@@ -206,6 +239,12 @@ func (s *Server) ListenAndServe(addr string) error {
 // the BoltDB and Bleve locks cleanly instead of relying on the OS to reap
 // them. Returns nil on a clean shutdown.
 func (s *Server) Serve(ln net.Listener) error {
+	// When TLS is enabled, front the bound listener with the single-port mux
+	// so the same port answers HTTPS and redirects cleartext to https.
+	if s.tlsConfig != nil {
+		ln = newTLSMux(ln, s.tlsConfig)
+	}
+
 	srv := &http.Server{
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,

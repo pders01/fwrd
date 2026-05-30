@@ -68,6 +68,18 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Keys.Bindings.Quit != "q" {
 		t.Errorf("Keys.Bindings.Quit = %s, want 'q'", cfg.Keys.Bindings.Quit)
 	}
+
+	// Test web TLS defaults: HTTPS-by-default (Enabled unset → treated as on)
+	// with the self-signed source and a ~/.fwrd/tls cert directory.
+	if cfg.Web.TLS.Enabled != nil {
+		t.Errorf("Web.TLS.Enabled = %v, want nil (defaults to on)", *cfg.Web.TLS.Enabled)
+	}
+	if cfg.Web.TLS.Mode != "self-signed" {
+		t.Errorf("Web.TLS.Mode = %q, want 'self-signed'", cfg.Web.TLS.Mode)
+	}
+	if cfg.Web.TLS.Dir == "" {
+		t.Error("Web.TLS.Dir should default to a non-empty path")
+	}
 }
 
 func TestLoad_DefaultConfig(t *testing.T) {

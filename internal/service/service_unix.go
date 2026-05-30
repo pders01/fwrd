@@ -22,5 +22,18 @@ func serveArgs(o *Options) []string {
 			args = append(args, "--mdns-iface", o.MDNSIface)
 		}
 	}
+	// HTTPS is the serve default, so only the disabled case needs a flag.
+	if !o.TLS {
+		args = append(args, "--tls=false")
+	}
+	if o.TLSMode != "" {
+		args = append(args, "--tls-mode", o.TLSMode)
+	}
+	if o.TLSCert != "" {
+		args = append(args, "--tls-cert", o.TLSCert)
+	}
+	if o.TLSKey != "" {
+		args = append(args, "--tls-key", o.TLSKey)
+	}
 	return args
 }
