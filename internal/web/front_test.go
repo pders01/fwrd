@@ -113,6 +113,25 @@ func TestExcerptTrims(t *testing.T) {
 	}
 }
 
+func TestFeedLabelFallsBackOnDegenerateTitle(t *testing.T) {
+	cases := []struct {
+		name string
+		feed storage.Feed
+		want string
+	}{
+		{"all-digit title falls back to host", storage.Feed{Title: "04", URL: "https://qemu.org/feed.xml"}, "qemu.org"},
+		{"whitespace title falls back to host", storage.Feed{Title: "  ", URL: "https://example.com/rss"}, "example.com"},
+		{"short non-digit title kept", storage.Feed{Title: "Go", URL: "https://go.dev/blog/feed.atom"}, "Go"},
+		{"normal title kept", storage.Feed{Title: "Phoronix", URL: "https://phoronix.com/rss.php"}, "Phoronix"},
+		{"digit title, unparseable URL keeps title", storage.Feed{Title: "04", URL: "not a url"}, "04"},
+	}
+	for _, c := range cases {
+		if got := feedLabel(&c.feed); got != c.want {
+			t.Errorf("%s: feedLabel = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
 func TestExcerptDecodesEntities(t *testing.T) {
 	in := "<p>everybody who&#39;s for it is too for it. &mdash; Daniel Jalkut &amp; friends</p>"
 	got := excerpt(in, 200)
