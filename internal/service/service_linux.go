@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/template"
 )
@@ -19,6 +20,11 @@ Description=fwrd RSS web view
 Documentation=https://github.com/pders01/fwrd
 After=network-online.target
 Wants=network-online.target
+# Give up (unit enters "failed") after 5 starts in 60s so a persistent failure
+# such as an in-use port surfaces in "systemctl --user status fwrd" instead of
+# restart-looping forever. With RestartSec=5 that's ~20s of retries.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 ExecStart={{.Exec}}
@@ -84,6 +90,17 @@ func Uninstall() (string, error) {
 		return path, fmt.Errorf("removing unit: %w", err)
 	}
 	return path, nil
+}
+
+// LogCommand returns the command that streams the systemd user service's logs
+// from the journal (the unit logs to journald, not a file). follow maps to
+// `-f`, lines to `-n`.
+func LogCommand(follow bool, lines int) (name string, args []string, err error) {
+	args = []string{"--user", "-u", unitName, "-n", strconv.Itoa(lines)}
+	if follow {
+		args = append(args, "-f")
+	}
+	return "journalctl", args, nil
 }
 
 func unitContent(o *Options) (string, error) {
