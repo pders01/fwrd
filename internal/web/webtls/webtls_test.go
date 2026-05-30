@@ -47,8 +47,8 @@ func TestSelfSigned_CoversHostsAndPersists(t *testing.T) {
 	}
 
 	// Files were written and are reused on the next call (same serial).
-	if _, err := os.Stat(filepath.Join(dir, "cert.pem")); err != nil {
-		t.Errorf("cert.pem not persisted: %v", err)
+	if _, statErr := os.Stat(filepath.Join(dir, "cert.pem")); statErr != nil {
+		t.Errorf("cert.pem not persisted: %v", statErr)
 	}
 	again := leafFromConfig(t, s)
 	if again.SerialNumber.Cmp(leaf.SerialNumber) != 0 {
@@ -127,8 +127,8 @@ func TestModeSwitch_RegeneratesLeaf(t *testing.T) {
 	if caLeaf.Issuer.CommonName != "fwrd local CA" {
 		t.Errorf("leaf issuer = %q, want 'fwrd local CA'", caLeaf.Issuer.CommonName)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "ca.pem")); err != nil {
-		t.Errorf("ca.pem should exist after switching to local-ca: %v", err)
+	if _, statErr := os.Stat(filepath.Join(dir, "ca.pem")); statErr != nil {
+		t.Errorf("ca.pem should exist after switching to local-ca: %v", statErr)
 	}
 
 	// Switch back to self-signed: leaf must become self-issued again.

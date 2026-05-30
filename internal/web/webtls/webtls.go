@@ -90,7 +90,7 @@ func (s *fileSource) TLSConfig() (*tls.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading TLS keypair: %w", err)
 	}
-	return serverConfig(cert), nil
+	return serverConfig(&cert), nil
 }
 
 func (s *fileSource) Describe() string { return "file (" + s.certFile + ")" }
@@ -119,7 +119,7 @@ func (s *generatedSource) TLSConfig() (*tls.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading generated keypair: %w", err)
 	}
-	return serverConfig(cert), nil
+	return serverConfig(&cert), nil
 }
 
 func (s *generatedSource) Describe() string {
@@ -249,9 +249,9 @@ func (s *generatedSource) generateLeaf(caCert *x509.Certificate, caKey *ecdsa.Pr
 	return writeKey(s.keyPath(), key)
 }
 
-func serverConfig(cert tls.Certificate) *tls.Config {
+func serverConfig(cert *tls.Certificate) *tls.Config {
 	return &tls.Config{
-		Certificates: []tls.Certificate{cert},
+		Certificates: []tls.Certificate{*cert},
 		MinVersion:   tls.VersionTLS12,
 	}
 }
