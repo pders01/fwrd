@@ -112,3 +112,16 @@ func TestExcerptTrims(t *testing.T) {
 		t.Errorf("expected ellipsis on trimmed excerpt: %q", got)
 	}
 }
+
+func TestExcerptDecodesEntities(t *testing.T) {
+	in := "<p>everybody who&#39;s for it is too for it. &mdash; Daniel Jalkut &amp; friends</p>"
+	got := excerpt(in, 200)
+	if strings.Contains(got, "&mdash;") || strings.Contains(got, "&#39;") || strings.Contains(got, "&amp;") {
+		t.Errorf("excerpt left raw HTML entities: %q", got)
+	}
+	for _, want := range []string{"—", "who's", "Jalkut & friends"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("excerpt %q missing decoded %q", got, want)
+		}
+	}
+}
