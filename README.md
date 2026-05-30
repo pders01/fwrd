@@ -334,6 +334,38 @@ macOS only.
 `--service` streams the service's output — `journalctl --user -u fwrd` on
 Linux, the LaunchAgent's `~/.fwrd/serve.*.log` files on macOS.
 
+#### Audit log
+
+`serve --audit` records **every HTTP request that passes through fwrd** as a
+JSON-lines log at `~/.fwrd/audit.log` — both directions:
+
+- **inbound** — requests served to the web UI (`dir:"in"`): method, request
+  URI, status, response bytes, duration, client IP, Host, whether it was TLS,
+  and the Basic-Auth username (never the password);
+- **outbound** — requests fwrd makes (`dir:"out"`): feed fetches
+  (`source:"feed"`) and Lua-plugin `http.get` calls (`source:"plugin"`), with
+  the URL, status, and any transport error.
+
+```bash
+fwrd serve --audit                 # enable for this run
+tail -f ~/.fwrd/audit.log | jq .   # one JSON object per line
+```
+
+It is **off by default** — it records every browse and every feed fetch, which
+has privacy and disk-growth cost. Enable it persistently, or relocate the file,
+via config:
+
+```toml
+[web.audit]
+enabled = true
+path    = "~/.fwrd/audit.log"   # default
+```
+
+The flag overrides the config (`--audit` forces on). The log is append-only and
+not rotated; manage growth with `logrotate` or by truncating it. fwrd records
+the transport-level peer address as the client IP and does **not** trust
+`X-Forwarded-For`; behind a reverse proxy the IP is the proxy's.
+
 #### OPML on the command line
 
 ```bash

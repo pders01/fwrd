@@ -49,6 +49,20 @@ type WebConfig struct {
 	// TLS controls HTTPS for the web view. HTTPS is on by default with an
 	// auto-generated self-signed certificate; see WebTLSConfig.
 	TLS WebTLSConfig `mapstructure:"tls"`
+	// Audit optionally records every inbound and outbound HTTP request to a
+	// JSON-lines log. Off by default; see WebAuditConfig.
+	Audit WebAuditConfig `mapstructure:"audit"`
+}
+
+// WebAuditConfig configures the request audit log. The `serve --audit` flag
+// overrides Enabled at runtime.
+type WebAuditConfig struct {
+	// Enabled turns the audit log on. Off by default — it records every
+	// browse and every feed fetch, which has privacy and disk-growth cost.
+	Enabled bool `mapstructure:"enabled"`
+	// Path is the audit log file (default ~/.fwrd/audit.log). Append-only,
+	// one JSON object per line.
+	Path string `mapstructure:"path"`
 }
 
 // WebTLSConfig configures HTTPS for the web view. The `serve` flags
@@ -221,6 +235,11 @@ func defaultConfig() *Config {
 				// as literals here so config does not import the web subtree.
 				Mode: "self-signed",
 				Dir:  filepath.Join(homeDir, ".fwrd", "tls"),
+			},
+			Audit: WebAuditConfig{
+				// Disabled by default; only the path is seeded so enabling it
+				// via flag or `[web.audit] enabled` needs no path.
+				Path: filepath.Join(homeDir, ".fwrd", "audit.log"),
 			},
 		},
 	}

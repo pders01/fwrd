@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/pders01/fwrd/internal/audit"
 	lua "github.com/yuin/gopher-lua"
 )
 
@@ -38,6 +39,9 @@ func registerHTTP(L *lua.LState, client *http.Client) {
 		if ctx == nil {
 			ctx = context.Background()
 		}
+		// Tag for the audit RoundTripper so plugin calls are distinguished
+		// from core feed fetches on the shared client.
+		ctx = audit.WithSource(ctx, "plugin")
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 		if err != nil {
 			return pushHTTPErr(L, err)

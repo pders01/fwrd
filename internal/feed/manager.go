@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pders01/fwrd/internal/audit"
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/plugins"
 	"github.com/pders01/fwrd/internal/storage"
@@ -69,6 +70,21 @@ func (m *Manager) SetForceRefresh(force bool) {
 // it after AddFeed has begun running is not safe.
 func (m *Manager) PluginRegistry() *plugins.Registry {
 	return m.pluginRegistry
+}
+
+// UseAuditLogger installs an audit RoundTripper on the shared feed/plugin
+// HTTP client so every outbound request — core feed fetches and plugin
+// http.get alike — is recorded. A nil logger or absent fetcher is a no-op.
+// Call it once at startup, before any fetch runs.
+func (m *Manager) UseAuditLogger(l *audit.Logger) {
+	if m.fetcher == nil || l == nil {
+		return
+	}
+	base := m.fetcher.client.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	m.fetcher.client.Transport = &audit.RoundTripper{Base: base, Log: l}
 }
 
 // PluginHTTPClient returns the HTTP client plugins should use for
