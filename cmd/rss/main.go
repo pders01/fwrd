@@ -70,27 +70,28 @@ func loadLuaPlugins(m *feed.Manager) {
 var Version = "dev"
 
 var (
-	cfgFile       string
-	dbPath        string
-	debugFlag     bool
-	quiet         bool
-	forceRefresh  bool
-	serveAddr     string
-	serveMDNS     bool
-	serveMDNSName string
-	serveMDNSIP   string
-	svcAddr       string
-	svcMDNS       bool
-	svcMDNSName   string
-	netIface      string
-	netAliasIP    string
-	netPort       int
-	netToPort     int
-	netPrefix     int
-	netMask       string
-	logsFollow    bool
-	logsLines     int
-	logsService   bool
+	cfgFile        string
+	dbPath         string
+	debugFlag      bool
+	quiet          bool
+	forceRefresh   bool
+	serveAddr      string
+	serveMDNS      bool
+	serveMDNSName  string
+	serveMDNSIP    string
+	serveMDNSIface string
+	svcAddr        string
+	svcMDNS        bool
+	svcMDNSName    string
+	netIface       string
+	netAliasIP     string
+	netPort        int
+	netToPort      int
+	netPrefix      int
+	netMask        string
+	logsFollow     bool
+	logsLines      int
+	logsService    bool
 )
 
 var rootCmd = &cobra.Command{
@@ -118,7 +119,8 @@ func init() {
 	serveCmd.Flags().StringVar(&serveAddr, "addr", "127.0.0.1:8080", "address to bind the web server")
 	serveCmd.Flags().BoolVar(&serveMDNS, "mdns", false, "advertise the web view on the LAN over mDNS (e.g. http://fwrd.local:PORT)")
 	serveCmd.Flags().StringVar(&serveMDNSName, "mdns-name", "fwrd", "mDNS hostname label; advertised as <name>.local")
-	serveCmd.Flags().StringVar(&serveMDNSIP, "mdns-ip", "", "advertise <name>.local for only this IP (e.g. the alias IP from `fwrd net up`); default: all LAN IPv4s")
+	serveCmd.Flags().StringVar(&serveMDNSIP, "mdns-ip", "", "advertise <name>.local for only this IP (e.g. the alias IP from `fwrd net up`); pins to one subnet")
+	serveCmd.Flags().StringVar(&serveMDNSIface, "mdns-iface", "", "comma-separated interfaces to advertise on (e.g. en0,en9); default: auto-detected LAN interfaces")
 
 	// net flags: the alias-IP + firewall redirect that exposes fwrd.local on
 	// port 80 without colliding with a host process already on :80.
@@ -700,6 +702,17 @@ func runLogs(_ *cobra.Command, _ []string) {
 	}
 }
 
+// splitCSV splits a comma-separated flag value into trimmed, non-empty parts.
+func splitCSV(s string) []string {
+	var out []string
+	for p := range strings.SplitSeq(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // startMDNS advertises the web view over mDNS as <mdns-name>.local. A failure
 // is non-fatal — the server still runs, just without the .local alias — so it
 // logs and returns nil rather than aborting serve.
@@ -732,13 +745,15 @@ func startMDNS(addr string) *mdns.Advertiser {
 		}
 		adv, err = mdns.AdvertiseOn(serveMDNSName, port, []net.IP{ip})
 	} else {
-		adv, err = mdns.Advertise(serveMDNSName, port)
+		// One scoped responder per interface, so <name>.local resolves to the
+		// reachable address on whichever LAN a client sits on (multi-homed host).
+		adv, err = mdns.AdvertiseAll(serveMDNSName, port, splitCSV(serveMDNSIface))
 	}
 	if err != nil {
 		logger.Warn("mDNS disabled", "err", err)
 		return nil
 	}
-	logger.Info("mDNS advertising", "url", "http://"+serveMDNSName+".local:"+portStr)
+	logger.Info("mDNS advertising", "url", "http://"+serveMDNSName+".local:"+portStr, "on", strings.Join(adv.Targets, " "))
 	return adv
 }
 
