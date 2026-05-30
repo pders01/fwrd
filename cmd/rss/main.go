@@ -7,9 +7,11 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -22,6 +24,7 @@ import (
 	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/mdns"
+	"github.com/pders01/fwrd/internal/netbind"
 	"github.com/pders01/fwrd/internal/opml"
 	"github.com/pders01/fwrd/internal/plugins"
 	pluginlua "github.com/pders01/fwrd/internal/plugins/lua"
@@ -75,9 +78,19 @@ var (
 	serveAddr     string
 	serveMDNS     bool
 	serveMDNSName string
+	serveMDNSIP   string
 	svcAddr       string
 	svcMDNS       bool
 	svcMDNSName   string
+	netIface      string
+	netAliasIP    string
+	netPort       int
+	netToPort     int
+	netPrefix     int
+	netMask       string
+	logsFollow    bool
+	logsLines     int
+	logsService   bool
 )
 
 var rootCmd = &cobra.Command{
@@ -105,6 +118,24 @@ func init() {
 	serveCmd.Flags().StringVar(&serveAddr, "addr", "127.0.0.1:8080", "address to bind the web server")
 	serveCmd.Flags().BoolVar(&serveMDNS, "mdns", false, "advertise the web view on the LAN over mDNS (e.g. http://fwrd.local:PORT)")
 	serveCmd.Flags().StringVar(&serveMDNSName, "mdns-name", "fwrd", "mDNS hostname label; advertised as <name>.local")
+	serveCmd.Flags().StringVar(&serveMDNSIP, "mdns-ip", "", "advertise <name>.local for only this IP (e.g. the alias IP from `fwrd net up`); default: all LAN IPv4s")
+
+	// net flags: the alias-IP + firewall redirect that exposes fwrd.local on
+	// port 80 without colliding with a host process already on :80.
+	netUpCmd.Flags().StringVar(&netIface, "iface", "", "LAN interface to attach the alias IP to (e.g. en0 or eth0)")
+	netUpCmd.Flags().StringVar(&netAliasIP, "alias-ip", "", "dedicated, currently-unused LAN IP to give fwrd")
+	netUpCmd.Flags().IntVar(&netPort, "port", 80, "public port to redirect from")
+	netUpCmd.Flags().IntVar(&netToPort, "to-port", 8080, "fwrd's unprivileged port to redirect to")
+	netUpCmd.Flags().IntVar(&netPrefix, "prefix", 24, "CIDR prefix length for the alias IP (Linux)")
+	netUpCmd.Flags().StringVar(&netMask, "mask", "255.255.255.0", "netmask for the alias IP (macOS)")
+	netCmd.AddCommand(netUpCmd)
+	netCmd.AddCommand(netDownCmd)
+	netCmd.AddCommand(netStatusCmd)
+
+	// logs flags
+	logsCmd.Flags().BoolVarP(&logsFollow, "follow", "f", false, "stream new log lines as they are written")
+	logsCmd.Flags().IntVarP(&logsLines, "lines", "n", 200, "number of trailing lines to show")
+	logsCmd.Flags().BoolVar(&logsService, "service", false, "show the background service's logs instead of fwrd's debug log")
 
 	// service flags: default to a LAN bind + mDNS, since a background
 	// service exists to be reachable from other devices as fwrd.local.
@@ -121,6 +152,8 @@ func init() {
 	rootCmd.AddCommand(pluginsCmd)
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(serviceCmd)
+	rootCmd.AddCommand(netCmd)
+	rootCmd.AddCommand(logsCmd)
 }
 
 var serveCmd = &cobra.Command{
@@ -153,6 +186,50 @@ var serviceUninstallCmd = &cobra.Command{
 	Use:   "uninstall",
 	Short: "Stop and remove the fwrd web service",
 	Run:   runServiceUninstall,
+}
+
+var netCmd = &cobra.Command{
+	Use:   "net",
+	Short: "Expose fwrd at http://fwrd.local on port 80 (alias IP + firewall redirect)",
+	Long: `net makes the web view reachable at http://<name>.local (port 80) without
+binding a privileged port and without colliding with any server the host
+already runs on port 80.
+
+It gives fwrd its own LAN IP (an alias on your network interface) and installs
+a firewall redirect — pf on macOS, nftables on Linux — from that IP's port 80
+to fwrd's unprivileged port. fwrd then advertises <name>.local pointing at the
+alias IP (serve --mdns-ip).
+
+Because it changes interface and firewall state, "net up"/"net down" need root
+(sudo). The binding is not reboot-persistent; re-run "fwrd net up" afterward.`,
+}
+
+var netUpCmd = &cobra.Command{
+	Use:   "up",
+	Short: "Assign the alias IP and install the port-80 redirect (needs sudo)",
+	Run:   runNetUp,
+}
+
+var netDownCmd = &cobra.Command{
+	Use:   "down",
+	Short: "Remove the alias IP and redirect installed by `net up` (needs sudo)",
+	Run:   runNetDown,
+}
+
+var netStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show the active port-80 binding, if any",
+	Run:   runNetStatus,
+}
+
+var logsCmd = &cobra.Command{
+	Use:   "logs",
+	Short: "Tail fwrd's logs (debug log, or the background service with --service)",
+	Long: `logs is a convenience wrapper around the underlying log tools. By default
+it tails fwrd's own debug log (~/.fwrd/fwrd.log). With --service it shows the
+background service's output instead: journalctl on Linux, the LaunchAgent's
+~/.fwrd/serve.*.log files on macOS.`,
+	Run: runLogs,
 }
 
 var versionCmd = &cobra.Command{
@@ -447,6 +524,14 @@ func runServe(_ *cobra.Command, _ []string) {
 			return fmt.Errorf("failed to build web server: %w", err)
 		}
 
+		// Bind before announcing anything: if the port is taken, fail fast with
+		// a clear error rather than logging "serving" and advertising an mDNS
+		// name for a server that never came up.
+		ln, err := srv.Listen(serveAddr)
+		if err != nil {
+			return err
+		}
+
 		if !isLoopbackBind(serveAddr) && !srv.AuthEnabled() {
 			logger.Warn("serving on a non-loopback address without authentication; "+
 				"anyone who can reach it can read and modify your feeds",
@@ -461,7 +546,7 @@ func runServe(_ *cobra.Command, _ []string) {
 		}
 
 		logger.Info("serving", "url", "http://"+serveAddr)
-		if err := srv.ListenAndServe(serveAddr); err != nil {
+		if err := srv.Serve(ln); err != nil {
 			return fmt.Errorf("web server error: %w", err)
 		}
 		return nil
@@ -513,6 +598,96 @@ func runServiceUninstall(_ *cobra.Command, _ []string) {
 	logger.Info("service removed", "path", path)
 }
 
+func runNetUp(_ *cobra.Command, _ []string) {
+	if !netbind.Supported() {
+		logger.Fatal("fwrd net is only supported on Linux and macOS")
+	}
+	st, err := netbind.Up(&netbind.Options{
+		Iface:   netIface,
+		AliasIP: netAliasIP,
+		Port:    netPort,
+		ToPort:  netToPort,
+		Prefix:  netPrefix,
+		Mask:    netMask,
+	})
+	if err != nil {
+		logger.Fatal("net up failed", "err", err)
+	}
+	logger.Info("port-80 redirect installed",
+		"alias", st.AliasIP, "iface", st.Iface, "redirect", fmt.Sprintf(":%d → :%d", st.Port, st.ToPort), "backend", st.Backend)
+	// The redirect targets the loopback port, so fwrd must accept off-box
+	// traffic: bind 0.0.0.0 and advertise the alias IP only.
+	logger.Info("now start the server",
+		"run", fmt.Sprintf("fwrd serve --addr 0.0.0.0:%d --mdns --mdns-name %s --mdns-ip %s", st.ToPort, serveMDNSName, st.AliasIP))
+	logger.Info("then reach it from any LAN device", "url", "http://"+serveMDNSName+".local")
+	logger.Info("undo with", "run", "sudo fwrd net down")
+}
+
+func runNetDown(_ *cobra.Command, _ []string) {
+	st, err := netbind.Down()
+	if err != nil {
+		logger.Fatal("net down failed", "err", err)
+	}
+	logger.Info("port-80 redirect removed", "alias", st.AliasIP, "iface", st.Iface, "backend", st.Backend)
+}
+
+func runNetStatus(_ *cobra.Command, _ []string) {
+	st, err := netbind.Status()
+	if err != nil {
+		// No binding is a normal state, not a failure.
+		logger.Info("no active port-80 binding", "hint", "sudo fwrd net up --iface <if> --alias-ip <ip>")
+		return
+	}
+	logger.Info("active port-80 binding",
+		"alias", st.AliasIP, "iface", st.Iface, "redirect", fmt.Sprintf(":%d → :%d", st.Port, st.ToPort),
+		"backend", st.Backend, "url", "http://"+serveMDNSName+".local")
+}
+
+func runLogs(_ *cobra.Command, _ []string) {
+	var name string
+	var args []string
+
+	if logsService {
+		n, a, err := service.LogCommand(logsFollow, logsLines)
+		if err != nil {
+			logger.Fatal("cannot locate the service logs", "err", err)
+		}
+		name, args = n, a
+	} else {
+		path, err := debuglog.DefaultPath()
+		if err != nil {
+			logger.Fatal("cannot locate the log file", "err", err)
+		}
+		if _, serr := os.Stat(path); errors.Is(serr, os.ErrNotExist) {
+			logger.Info("no debug log yet", "path", path,
+				"hint", "run fwrd with --debug to create it, or `fwrd logs --service` for the background service")
+			return
+		}
+		name = "tail"
+		args = []string{"-n", strconv.Itoa(logsLines)}
+		if logsFollow {
+			args = append(args, "-f")
+		}
+		args = append(args, path)
+	}
+
+	bin, err := exec.LookPath(name)
+	if err != nil {
+		logger.Fatal("required tool not found on PATH", "tool", name, "err", err)
+	}
+	c := exec.Command(bin, args...)
+	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := c.Run(); err != nil {
+		// Pass through the wrapped tool's exit code (e.g. tail on a missing file)
+		// rather than masking it behind our own.
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			os.Exit(ee.ExitCode())
+		}
+		logger.Fatal("logs command failed", "err", err)
+	}
+}
+
 // startMDNS advertises the web view over mDNS as <mdns-name>.local. A failure
 // is non-fatal — the server still runs, just without the .local alias — so it
 // logs and returns nil rather than aborting serve.
@@ -527,12 +702,26 @@ func startMDNS(addr string) *mdns.Advertiser {
 		logger.Warn("mDNS disabled: invalid port", "port", portStr, "err", err)
 		return nil
 	}
-	if isLoopbackBind(addr) {
+	if isLoopbackBind(addr) && serveMDNSIP == "" {
 		logger.Warn("mDNS advertises a LAN address but the server is bound to loopback; "+
 			"clients resolving the .local name cannot reach it",
 			"fix", "bind a non-loopback address, e.g. --addr 0.0.0.0:"+portStr)
 	}
-	adv, err := mdns.Advertise(serveMDNSName, port)
+
+	var adv *mdns.Advertiser
+	if serveMDNSIP != "" {
+		// Pin the A record to one address — the dedicated alias IP behind a
+		// `fwrd net` redirect — so clients resolve the name to the redirect
+		// target rather than every LAN interface.
+		ip := net.ParseIP(serveMDNSIP)
+		if ip == nil {
+			logger.Warn("mDNS disabled: invalid --mdns-ip", "ip", serveMDNSIP)
+			return nil
+		}
+		adv, err = mdns.AdvertiseOn(serveMDNSName, port, []net.IP{ip})
+	} else {
+		adv, err = mdns.Advertise(serveMDNSName, port)
+	}
 	if err != nil {
 		logger.Warn("mDNS disabled", "err", err)
 		return nil
@@ -572,6 +761,12 @@ func exitWithError(err error) {
 	if errors.Is(err, search.ErrIndexLocked) {
 		fmt.Fprintln(os.Stderr, "Error: the search index is locked by another fwrd process.")
 		fmt.Fprintln(os.Stderr, "Hint: close the other instance, or pass --db to use a different file (the index follows it).")
+		os.Exit(1)
+	}
+	if errors.Is(err, syscall.EADDRINUSE) {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintln(os.Stderr, "Hint: another process is already on that port. Pick a free one with --addr, "+
+			"or expose port 80 without a conflict via `fwrd net up` (see README: \"Serving on port 80\").")
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stderr, "Error: %v\n", err)
