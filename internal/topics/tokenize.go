@@ -20,6 +20,13 @@ func tokenize(text string) map[string]int {
 		if len(w) < 3 || stopwords[w] {
 			return
 		}
+		// Fold a regular plural to its singular so "model"/"models" cluster as
+		// one topic instead of two. Re-check length and stopwords on the stem
+		// (e.g. a stemmed form could become a stopword).
+		w = singular(w)
+		if len(w) < 3 || stopwords[w] {
+			return
+		}
 		counts[w]++
 	}
 	for _, r := range strings.ToLower(text) {
@@ -44,6 +51,37 @@ func tokenize(text string) map[string]int {
 		}
 	}
 	return counts
+}
+
+// singular folds a regular English plural to its singular by dropping a
+// single trailing "s", so plural/singular forms of a term cluster together
+// (model/models, agent/agents, gpu/gpus). It is deliberately conservative:
+// only a plain trailing "s" is stripped, and "-ss/-us/-is/-as/-es" endings
+// are left intact. That guard avoids mangling non-plurals — "status",
+// "analysis", "bias", "class", and Greek/Latin "-es" words like "kubernetes"
+// and "series" would otherwise stem to nonsense (and "kubernetes" → "kubernete"
+// would split, not merge). Words shorter than 5 runes are left untouched, as
+// the saving is small and the over-stem risk higher.
+//
+// Derivational variants (russia vs russian, plural "-es"/"-ies") are out of
+// scope: a general rule that catches them also mangles common words
+// (human → huma), so they would need a curated synonym map instead.
+func singular(w string) string {
+	// Stem only when the singular keeps at least 3 runes (the token floor);
+	// a 4-rune plural like "pods"/"gpus" folds, "is"/"as" cannot.
+	if len(w) < 4 || !strings.HasSuffix(w, "s") {
+		return w
+	}
+	switch {
+	case strings.HasSuffix(w, "ss"),
+		strings.HasSuffix(w, "us"),
+		strings.HasSuffix(w, "is"),
+		strings.HasSuffix(w, "as"),
+		strings.HasSuffix(w, "es"):
+		return w
+	default:
+		return w[:len(w)-1]
+	}
 }
 
 func hasLetter(s string) bool {
