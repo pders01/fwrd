@@ -212,9 +212,21 @@ sudo fwrd net down            # remove the alias IP + redirect
 fwrd net status               # show the active binding, if any
 ```
 
-`--iface` is auto-detected from the alias IP's subnet (the IP already says
-which network it's on), so on a multi-homed host you just pick the alias IP on
-the right LAN; pass `--iface` to override.
+On a multi-homed host (several LANs at once), repeat `--alias-ip` once per LAN
+to get `http://fwrd.local` on each, and advertise them all:
+
+```bash
+sudo fwrd net up --alias-ip 192.168.1.240 --alias-ip 192.168.178.240
+fwrd serve --addr 0.0.0.0:8080 --mdns --mdns-ip 192.168.1.240 --mdns-ip 192.168.178.240
+```
+
+`--iface` is auto-detected from each alias IP's subnet (the IP already says
+which network it's on), so you just pick an unused IP on each LAN; pass
+`--iface` to override.
+
+This networking (mDNS + the port-80 alias/redirect) lives in a standalone,
+reusable library — [`github.com/pders01/dotlocal`](https://github.com/pders01/dotlocal) —
+for any app built on the same `go:embed`'d local-service pattern.
 
 `net up` gives fwrd its **own** LAN IP (an alias on your interface) and installs
 a firewall redirect from that IP's port 80 to fwrd's unprivileged port — `pf`

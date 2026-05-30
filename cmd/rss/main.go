@@ -20,11 +20,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	charmlog "github.com/charmbracelet/log"
+	"github.com/pders01/dotlocal/mdns"
+	"github.com/pders01/dotlocal/port80"
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/feed"
-	"github.com/pders01/fwrd/internal/mdns"
-	"github.com/pders01/fwrd/internal/netbind"
 	"github.com/pders01/fwrd/internal/opml"
 	"github.com/pders01/fwrd/internal/plugins"
 	pluginlua "github.com/pders01/fwrd/internal/plugins/lua"
@@ -78,13 +78,13 @@ var (
 	serveAddr      string
 	serveMDNS      bool
 	serveMDNSName  string
-	serveMDNSIP    string
+	serveMDNSIPs   []string
 	serveMDNSIface string
 	svcAddr        string
 	svcMDNS        bool
 	svcMDNSName    string
 	netIface       string
-	netAliasIP     string
+	netAliasIPs    []string
 	netPort        int
 	netToPort      int
 	netPrefix      int
@@ -119,13 +119,13 @@ func init() {
 	serveCmd.Flags().StringVar(&serveAddr, "addr", "127.0.0.1:8080", "address to bind the web server")
 	serveCmd.Flags().BoolVar(&serveMDNS, "mdns", false, "advertise the web view on the LAN over mDNS (e.g. http://fwrd.local:PORT)")
 	serveCmd.Flags().StringVar(&serveMDNSName, "mdns-name", "fwrd", "mDNS hostname label; advertised as <name>.local")
-	serveCmd.Flags().StringVar(&serveMDNSIP, "mdns-ip", "", "advertise <name>.local for only this IP (e.g. the alias IP from `fwrd net up`); pins to one subnet")
+	serveCmd.Flags().StringArrayVar(&serveMDNSIPs, "mdns-ip", nil, "advertise <name>.local for these alias IP(s) from `fwrd net up`, each scoped to its subnet (repeatable); default: all LAN interfaces")
 	serveCmd.Flags().StringVar(&serveMDNSIface, "mdns-iface", "", "comma-separated interfaces to advertise on (e.g. en0,en9); default: auto-detected LAN interfaces")
 
 	// net flags: the alias-IP + firewall redirect that exposes fwrd.local on
 	// port 80 without colliding with a host process already on :80.
-	netUpCmd.Flags().StringVar(&netIface, "iface", "", "LAN interface for the alias IP (e.g. en0); default: auto-detected from --alias-ip's subnet")
-	netUpCmd.Flags().StringVar(&netAliasIP, "alias-ip", "", "dedicated, currently-unused LAN IP to give fwrd")
+	netUpCmd.Flags().StringVar(&netIface, "iface", "", "LAN interface for the alias IP(s) (e.g. en0); default: auto-detected from each --alias-ip's subnet")
+	netUpCmd.Flags().StringArrayVar(&netAliasIPs, "alias-ip", nil, "dedicated, currently-unused LAN IP to give fwrd; repeat once per LAN for port 80 on each")
 	netUpCmd.Flags().IntVar(&netPort, "port", 80, "public port to redirect from")
 	netUpCmd.Flags().IntVar(&netToPort, "to-port", 8080, "fwrd's unprivileged port to redirect to")
 	netUpCmd.Flags().IntVar(&netPrefix, "prefix", 24, "CIDR prefix length for the alias IP (Linux)")
@@ -600,61 +600,73 @@ func runServiceUninstall(_ *cobra.Command, _ []string) {
 	logger.Info("service removed", "path", path)
 }
 
+// netName is the fixed identifier for fwrd's port80 binding: it names the pf
+// sub-anchor / nftables table and the ~/.fwrd/port80.json state file.
+const netName = "fwrd"
+
 func runNetUp(_ *cobra.Command, _ []string) {
-	if !netbind.Supported() {
+	if !port80.Supported() {
 		logger.Fatal("fwrd net is only supported on Linux and macOS")
 	}
-	if netAliasIP == "" {
-		logger.Fatal("--alias-ip is required (a currently-unused IP on your LAN subnet)")
+	if len(netAliasIPs) == 0 {
+		logger.Fatal("--alias-ip is required (a currently-unused IP on your LAN subnet; repeat once per LAN)")
 	}
-	iface := netIface
-	if iface == "" {
-		detected, err := netbind.DetectIface(netAliasIP)
-		if err != nil {
-			logger.Fatal("could not auto-detect the interface", "err", err)
+	// Build one alias per --alias-ip, deriving its interface from the IP's
+	// subnet unless --iface pins them all.
+	aliases := make([]port80.Alias, 0, len(netAliasIPs))
+	for _, ip := range netAliasIPs {
+		iface := netIface
+		if iface == "" {
+			detected, err := port80.DetectIface(ip)
+			if err != nil {
+				logger.Fatal("could not auto-detect the interface", "alias", ip, "err", err)
+			}
+			iface = detected
+			logger.Info("auto-detected interface from the alias IP", "iface", iface, "alias", ip)
 		}
-		iface = detected
-		logger.Info("auto-detected interface from the alias IP", "iface", iface, "alias", netAliasIP)
+		aliases = append(aliases, port80.Alias{Iface: iface, AliasIP: ip, Prefix: netPrefix, Mask: netMask})
 	}
-	st, err := netbind.Up(&netbind.Options{
-		Iface:   iface,
-		AliasIP: netAliasIP,
-		Port:    netPort,
-		ToPort:  netToPort,
-		Prefix:  netPrefix,
-		Mask:    netMask,
-	})
+
+	st, err := port80.Up(port80.Options{Name: netName, Aliases: aliases, Port: netPort, ToPort: netToPort})
 	if err != nil {
 		logger.Fatal("net up failed", "err", err)
 	}
-	logger.Info("port-80 redirect installed",
-		"alias", st.AliasIP, "iface", st.Iface, "redirect", fmt.Sprintf(":%d → :%d", st.Port, st.ToPort), "backend", st.Backend)
+	for _, a := range st.Aliases {
+		logger.Info("port-80 redirect installed",
+			"alias", a.AliasIP, "iface", a.Iface, "redirect", fmt.Sprintf(":%d → :%d", st.Port, st.ToPort), "backend", st.Backend)
+	}
 	// The redirect targets the loopback port, so fwrd must accept off-box
-	// traffic: bind 0.0.0.0 and advertise the alias IP only.
+	// traffic: bind 0.0.0.0 and advertise the alias IPs (scoped per subnet).
+	var mdnsFlags strings.Builder
+	for _, a := range st.Aliases {
+		fmt.Fprintf(&mdnsFlags, " --mdns-ip %s", a.AliasIP)
+	}
 	logger.Info("now start the server",
-		"run", fmt.Sprintf("fwrd serve --addr 0.0.0.0:%d --mdns --mdns-name %s --mdns-ip %s", st.ToPort, serveMDNSName, st.AliasIP))
+		"run", fmt.Sprintf("fwrd serve --addr 0.0.0.0:%d --mdns --mdns-name %s%s", st.ToPort, serveMDNSName, mdnsFlags.String()))
 	logger.Info("then reach it from any LAN device", "url", "http://"+serveMDNSName+".local")
 	logger.Info("undo with", "run", "sudo fwrd net down")
 }
 
 func runNetDown(_ *cobra.Command, _ []string) {
-	st, err := netbind.Down()
+	st, err := port80.Down(netName)
 	if err != nil {
 		logger.Fatal("net down failed", "err", err)
 	}
-	logger.Info("port-80 redirect removed", "alias", st.AliasIP, "iface", st.Iface, "backend", st.Backend)
+	logger.Info("port-80 redirect removed", "aliases", len(st.Aliases), "backend", st.Backend)
 }
 
 func runNetStatus(_ *cobra.Command, _ []string) {
-	st, err := netbind.Status()
+	st, err := port80.Status(netName)
 	if err != nil {
 		// No binding is a normal state, not a failure.
-		logger.Info("no active port-80 binding", "hint", "sudo fwrd net up --iface <if> --alias-ip <ip>")
+		logger.Info("no active port-80 binding", "hint", "sudo fwrd net up --alias-ip <ip>")
 		return
 	}
-	logger.Info("active port-80 binding",
-		"alias", st.AliasIP, "iface", st.Iface, "redirect", fmt.Sprintf(":%d → :%d", st.Port, st.ToPort),
-		"backend", st.Backend, "url", "http://"+serveMDNSName+".local")
+	for _, a := range st.Aliases {
+		logger.Info("active port-80 binding",
+			"alias", a.AliasIP, "iface", a.Iface, "redirect", fmt.Sprintf(":%d → :%d", st.Port, st.ToPort),
+			"backend", st.Backend, "url", "http://"+serveMDNSName+".local")
+	}
 }
 
 func runLogs(_ *cobra.Command, _ []string) {
@@ -727,27 +739,34 @@ func startMDNS(addr string) *mdns.Advertiser {
 		logger.Warn("mDNS disabled: invalid port", "port", portStr, "err", err)
 		return nil
 	}
-	if isLoopbackBind(addr) && serveMDNSIP == "" {
+	if isLoopbackBind(addr) && len(serveMDNSIPs) == 0 {
 		logger.Warn("mDNS advertises a LAN address but the server is bound to loopback; "+
 			"clients resolving the .local name cannot reach it",
 			"fix", "bind a non-loopback address, e.g. --addr 0.0.0.0:"+portStr)
 	}
 
 	var adv *mdns.Advertiser
-	if serveMDNSIP != "" {
-		// Pin the A record to one address — the dedicated alias IP behind a
-		// `fwrd net` redirect — so clients resolve the name to the redirect
-		// target rather than every LAN interface.
-		ip := net.ParseIP(serveMDNSIP)
-		if ip == nil {
-			logger.Warn("mDNS disabled: invalid --mdns-ip", "ip", serveMDNSIP)
-			return nil
+	if len(serveMDNSIPs) > 0 {
+		// Advertise the dedicated alias IP(s) from `fwrd net up`, each scoped to
+		// its subnet, so clients resolve the name to the redirect target on
+		// whichever LAN they're on rather than to every interface.
+		ips := make([]net.IP, 0, len(serveMDNSIPs))
+		for _, s := range serveMDNSIPs {
+			ip := net.ParseIP(s)
+			if ip == nil {
+				logger.Warn("mDNS disabled: invalid --mdns-ip", "ip", s)
+				return nil
+			}
+			ips = append(ips, ip)
 		}
-		adv, err = mdns.AdvertiseOn(serveMDNSName, port, []net.IP{ip})
+		adv, err = mdns.AdvertiseScoped(serveMDNSName, port, ips, mdns.Options{Info: "fwrd web view"})
 	} else {
 		// One scoped responder per interface, so <name>.local resolves to the
 		// reachable address on whichever LAN a client sits on (multi-homed host).
-		adv, err = mdns.AdvertiseAll(serveMDNSName, port, splitCSV(serveMDNSIface))
+		adv, err = mdns.Advertise(serveMDNSName, port, mdns.Options{
+			Info:       "fwrd web view",
+			Interfaces: splitCSV(serveMDNSIface),
+		})
 	}
 	if err != nil {
 		logger.Warn("mDNS disabled", "err", err)

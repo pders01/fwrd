@@ -27,18 +27,19 @@ This document tracks remaining improvement opportunities and optional enhancemen
 
 A round of usability fixes from real-world use:
 
-- **`fwrd net up/down/status` (`internal/netbind`)** — expose the web view at a
-  bare `http://fwrd.local` (port 80) without binding a privileged port and
-  without colliding with a host process already on :80. It gives fwrd a
-  dedicated LAN alias IP and installs a PREROUTING/rdr redirect from that IP's
-  :80 to fwrd's unprivileged port — `pf` on macOS (loads into the
-  `com.apple/fwrd` sub-anchor that the stock `rdr-anchor "com.apple/*"` already
-  evaluates, so `/etc/pf.conf` is never touched), `nftables` on Linux (own
-  `fwrd` table). The redirect precedes the socket lookup, so it works even when the
-  host binds `0.0.0.0:80`. mDNS pins `fwrd.local` to the alias IP only via
-  `mdns.AdvertiseOn` + `serve --mdns-ip`. Root-only; state in `~/.fwrd/net.json`;
-  not reboot-persistent (documented). Platform-split with an unsupported stub;
-  pure render/state functions tested.
+- **`fwrd net up/down/status`** (backed by the extracted `dotlocal/port80`
+  library) — expose the web view at a bare `http://fwrd.local` (port 80)
+  without binding a privileged port and without colliding with a host process
+  already on :80. It gives fwrd a dedicated LAN alias IP **per LAN** (repeatable
+  `--alias-ip`, interface auto-detected from each IP's subnet) and installs a
+  PREROUTING/rdr redirect from that IP's :80 to fwrd's unprivileged port — `pf`
+  on macOS (loads into the `com.apple/fwrd` sub-anchor that the stock
+  `rdr-anchor "com.apple/*"` already evaluates, so `/etc/pf.conf` is never
+  touched), `nftables` on Linux (own `fwrd` table). The redirect precedes the
+  socket lookup, so it works even when the host binds `0.0.0.0:80`. mDNS
+  advertises each alias scoped to its subnet (`mdns.AdvertiseScoped` +
+  repeatable `serve --mdns-ip`). Root-only; state in `~/.fwrd/port80.json`;
+  not reboot-persistent.
 - **Responsive web layout** — added a `@media (max-width: 40rem)` block: the
   masthead search drops to a full-width line, the two-up add-feed/sort toolbars
   collapse to one column, and `.page-head` wraps so action buttons never get
@@ -56,9 +57,15 @@ A round of usability fixes from real-world use:
   the background service's output with `--service` (journalctl on Linux, the
   LaunchAgent's `serve.*.log` on macOS); `-f`/`-n` for follow/line-count.
 
-Code: `internal/netbind/`, `internal/mdns/mdns.go`, `internal/web/server.go`,
+The mDNS + port-80 machinery was then **extracted into a standalone, reusable
+library**, `github.com/pders01/dotlocal` (packages `mdns`, `port80`, and a
+top-level `Run`), for any app using the same `go:embed`'d local-service
+pattern; fwrd's `internal/mdns` and `internal/netbind` were deleted in favour
+of it (consumed via a `replace` directive during local dev).
+
+Code: `cmd/rss/main.go`, `internal/web/server.go`,
 `internal/web/templates/{style.css,article.html}`, `internal/service/`,
-`internal/debuglog/log.go`, `cmd/rss/main.go`.
+`internal/debuglog/log.go`; library at `github.com/pders01/dotlocal`.
 
 
 
