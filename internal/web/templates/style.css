@@ -239,7 +239,11 @@ ul.article-list li time { display: block; margin-top: 0.15rem; }
 ul.article-list li > a:hover { color: var(--accent); }
 ul.article-list li.read > a { color: var(--muted); font-weight: 400; }
 
-/* reader: constrain prose to a comfortable measure */
+/* reader: constrain prose to a comfortable measure. The reader page narrows
+   its whole <main> (main.reading) to --readw so the crumbs, headline, and
+   body share one centered column under the full-width masthead, rather than
+   hugging the left edge of the broadsheet (--maxw). */
+main.reading { max-width: var(--readw); }
 article.reader { max-width: var(--readw); }
 article .content { margin-top: 1.5rem; }
 article .content img { max-width: 100%; height: auto; border-radius: 6px; }
@@ -368,3 +372,28 @@ body.has-js .toolbar-ctrls.js-only { display: grid; }
 .row-meta .byline { display: inline; }
 .pager { margin-top: 1.5rem; }
 .pager a { font-weight: 600; color: var(--accent); }
+
+/* ========================= narrow viewports ======================== */
+/* Below ~40rem the broadsheet collapses to one column: the masthead search
+   drops to its own full-width line, two-up toolbars stack, and page heads
+   wrap so action buttons never get pushed off-screen. Everything above is
+   built mobile-tolerant (flex-wrap on the action/meta clusters); this block
+   handles the fixed-track grids and the space-between heads that aren't. */
+@media (max-width: 40rem) {
+  main { padding: 1rem 1rem 3rem; }
+  .masthead { flex-wrap: wrap; padding: 0.75rem 1rem; row-gap: 0.6rem; }
+  /* brand + Feeds on the top row; the search field wraps below, full width
+     (order > 0 sends it past the order-0 brand/nav). */
+  .masthead .mast-nav { margin-left: auto; }
+  .masthead .search { order: 1; flex-basis: 100%; }
+  /* two-up toolbars (input + fixed 9rem button) collapse to one column:
+     input over a full-width control. */
+  .add-feed,
+  body.has-js .toolbar-ctrls.js-only { grid-template-columns: 1fr; }
+  /* title + actions stack instead of colliding via space-between. */
+  .page-head { flex-wrap: wrap; }
+  .page-head h1 { flex-basis: 100%; }
+  /* let action/meta clusters wrap within the row rather than overflow it. */
+  .feed-row, .feed-actions, .row-meta { min-width: 0; }
+  .feed-actions { margin-left: 0; }
+}
