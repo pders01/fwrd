@@ -70,10 +70,10 @@ concrete `--addr` host. `serve`/mDNS log URLs switch to the active scheme.
   cosmetic; name resolution and the URL are unaffected.
 - `fwrd net` (bare `:80`) needs `--tls=false`: the alias redirect maps only
   `:80`→serve-port, so an HTTPS cleartext `308` to `https://fwrd.local`
-  (`:443`) dead-ends. **Follow-up in progress:** dotlocal `port80` is being
-  extended to redirect a port *set* (`{80, 443}`) onto one app port (see
-  dotlocal's TODO.md); once released, `fwrd net` will map `:443` too and drop
-  the `--tls=false` requirement.
+  (`:443`) dead-ends. **Scoped follow-up:** dotlocal `port80` now redirects a
+  port *set* (`{80, 443}`) onto one app port (branch `feat/port80-multi-port`,
+  → v0.4.0); wiring `fwrd net` to map `:443` and drop `--tls=false` is specced
+  under "Next up" below.
 
 Code: `internal/web/webtls/webtls.go`, `internal/web/tlsmux.go`,
 `internal/web/server.go`, `internal/config/config.go`, `cmd/rss/main.go`,
@@ -440,6 +440,61 @@ regression-tested in `app_test.go`).
 Code: `internal/storage/models.go`, `internal/feed/manager.go`,
 `internal/web/templates/feeds.html`, `internal/web/templates/style.css`,
 `internal/tui/app.go`.
+
+---
+
+## Next up
+
+### **Wire `fwrd net` to redirect `:443` (bare `https://fwrd.local`)** — SCOPED
+
+dotlocal `port80` now redirects a *set* of public ports onto one app port
+(branch `feat/port80-multi-port`, to be released as **v0.4.0**). Wire fwrd to
+use it so the bare name serves HTTPS, removing the `--tls=false` requirement.
+
+**Prerequisite (outward-facing, owner's call):** merge dotlocal
+`feat/port80-multi-port` → `main`, tag + push **v0.4.0**. For local dev before
+the tag, add a temporary `replace github.com/pders01/dotlocal => ../../net/dotlocal`
+to fwrd's `go.mod` (remove before committing the real bump). The mDNS and
+`port80.Up` exported signatures are **unchanged** — only `Options.Ports` is new,
+so this is purely additive on the fwrd side.
+
+**Changes:**
+
+- **`go.mod`** — bump `github.com/pders01/dotlocal` v0.3.0 → v0.4.0.
+- **`cmd/rss/main.go`**
+  - `runNetUp` (~L703): pass `Ports` to `port80.Options`. Add a
+    `net up --https` bool flag (default **true**, matching HTTPS-by-default
+    serve): true → `Ports = dedup{netPort, 443}`; false → `Ports = {netPort}`.
+    Extract the port-set assembly into a small pure helper (e.g.
+    `netPorts(port int, https bool) []int`) and unit-test it (dedup, 443
+    inclusion, https=false).
+  - Update the "port-80 redirect installed" log to list **all** mapped ports,
+    not just `st.Port`.
+  - Update the "now start the server" hint — drop any `--tls=false`; serve is
+    HTTPS by default. Update the "reach it" URL to `https://<name>.local`
+    (bare, via :443) when `--https`, else `http://<name>.local`. When `--https`,
+    add a one-line hint that warning-free needs the local CA trusted
+    (`--tls-mode local-ca`; see the HTTPS/TLS README section).
+- **`README.md`** — rework the "Serving on port 80 (`fwrd net`)" section: remove
+  the `--tls=false` requirement block and the `--tls=false` in both examples;
+  document that `net up` now maps `{80, 443}` so `https://fwrd.local` works bare
+  and `http://fwrd.local` upgrades to it; keep a note that `--https=false`
+  (net) + `--tls=false` (serve) restores the cleartext-only `:80` mode. Update
+  the feature bullet (top of README) `http://fwrd.local` → `https://fwrd.local`.
+- **`TODO.md`** — move this entry's outcome into the HTTPS Recent-Additions
+  entry's known-limitations (mark the `:443` item resolved); keep the host-Mac
+  `pf skip lo0` caveat (it applies to `:443` too — the host itself still can't
+  reach the bare name).
+
+**Verify:** `go build ./...`, `go test ./...`, lint. Manual (root, owner-run):
+`sudo fwrd net up --alias-ip <ip>` → confirm pf/nft has both `:80` and `:443`
+rdr rules → `fwrd serve --addr 0.0.0.0:8080 --mdns --mdns-ip <ip>` (HTTPS) →
+from a **separate** LAN device: `https://fwrd.local` serves; `http://fwrd.local`
+308s to it. (The host Mac itself still can't reach the bare name — pf skips
+`lo0`; unchanged.)
+
+**Commit convention:** Conventional Commits, `-`-bullet bodies, no prose
+paragraph (project rule). Branch off `main`; do not push or release.
 
 ---
 
