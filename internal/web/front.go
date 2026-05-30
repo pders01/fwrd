@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/pders01/fwrd/internal/storage"
 	"github.com/pders01/fwrd/internal/topics"
@@ -167,13 +168,30 @@ func (s *Server) buildFeedNames() map[string]string {
 }
 
 func feedLabel(f *storage.Feed) string {
-	if f.Title != "" {
-		return f.Title
+	title := strings.TrimSpace(f.Title)
+	// A degenerate title — empty or all-digits ("04", "2026") — is a useless
+	// label (one real feed's title is literally "04"); prefer the host. Only
+	// digits are rejected so legitimately short titles ("Go", "C") survive.
+	if title != "" && !isAllDigits(title) {
+		return title
 	}
 	if h := feedHost(f); h != "" {
 		return h
 	}
+	if title != "" {
+		return title
+	}
 	return f.URL
+}
+
+// isAllDigits reports whether s is non-empty and every rune is a digit.
+func isAllDigits(s string) bool {
+	for _, r := range s {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return s != ""
 }
 
 // feedHost is the feed URL's host with a leading "www." trimmed, or "" if
