@@ -196,13 +196,17 @@ may already hold. `fwrd net` sidesteps both problems without binding 80 in the
 server itself:
 
 ```bash
-sudo fwrd net up --iface en0 --alias-ip 192.168.1.240
+sudo fwrd net up --alias-ip 192.168.1.240
 # then, as your normal user:
 fwrd serve --addr 0.0.0.0:8080 --mdns --mdns-ip 192.168.1.240
 # reachable from any LAN device at:  http://fwrd.local
 sudo fwrd net down            # remove the alias IP + redirect
 fwrd net status               # show the active binding, if any
 ```
+
+`--iface` is auto-detected from the alias IP's subnet (the IP already says
+which network it's on), so on a multi-homed host you just pick the alias IP on
+the right LAN; pass `--iface` to override.
 
 `net up` gives fwrd its **own** LAN IP (an alias on your interface) and installs
 a firewall redirect from that IP's port 80 to fwrd's unprivileged port — `pf`

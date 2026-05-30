@@ -59,6 +59,36 @@ var ErrUnsupported = errors.New("fwrd net is only supported on Linux and macOS")
 // Supported reports whether this platform has a netbind backend.
 func Supported() bool { return supported }
 
+// DetectIface returns the name of the up, non-loopback interface whose subnet
+// contains aliasIP. The alias IP already encodes its target subnet, so this
+// makes --iface derivable rather than required — and the match is exact, not a
+// default-route guess that breaks on a multi-homed host.
+func DetectIface(aliasIP string) (string, error) {
+	ip := net.ParseIP(aliasIP)
+	if ip == nil {
+		return "", fmt.Errorf("--alias-ip %q is not a valid IP", aliasIP)
+	}
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return "", err
+	}
+	for _, ifi := range ifaces {
+		if ifi.Flags&net.FlagUp == 0 || ifi.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := ifi.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			if ipnet, ok := a.(*net.IPNet); ok && ipnet.Contains(ip) {
+				return ifi.Name, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("no active interface has a subnet containing %s; pass --iface explicitly", aliasIP)
+}
+
 func (o *Options) applyDefaults() {
 	if o.Prefix == 0 {
 		o.Prefix = 24
