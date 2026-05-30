@@ -23,6 +23,46 @@ This document tracks remaining improvement opportunities and optional enhancemen
 
 ## Recent Additions
 
+### **HTTPS for `fwrd serve` (self-signed by default, pluggable cert source)** — COMPLETED
+
+The web view now serves over **HTTPS by default** with no setup. A new
+`internal/web/webtls` package abstracts the certificate behind a single
+`Source` interface with three origins, selected by `--tls-mode` / `[web.tls]`:
+
+- **`self-signed`** (default) — an auto-generated leaf (ECDSA P-256, ≤398-day
+  validity), persisted under `~/.fwrd/tls` and regenerated only on expiry or
+  when the advertised host set changes. One-time browser warning.
+- **`local-ca`** — a long-lived local CA plus a leaf it signs; warning-free
+  once the printed `ca.pem` is trusted per device. Leaf is written as a
+  leaf+CA chain.
+- **`file`** — bring-your-own via `--tls-cert` / `--tls-key` (presence selects
+  the file source regardless of mode).
+
+**Single-port TLS mux** (`internal/web/tlsmux.go`) is the enabler for
+HTTPS-by-default without breakage: it peeks the first byte of each connection
+(TLS ClientHello `0x16` → wrapped in `tls.Server`; anything else stays plain),
+and the handler 308-redirects cleartext (`r.TLS == nil`) to `https://` on the
+**same port**. So existing `http://fwrd.local:PORT` bookmarks and the
+`fwrd net` bare-`:80` cleartext redirect keep working, auto-upgraded. Relies on
+`net/http` special-casing `*tls.Conn` to populate `r.TLS`. A short peek
+deadline guards against a client that connects without sending.
+
+Flags `--tls` / `--tls-mode` / `--tls-cert` / `--tls-key` (flag > `[web.tls]` >
+default), forwarded through `service install`. SANs cover `localhost`,
+`127.0.0.1`/`::1`, the host name, `<mdns-name>.local`, every `--mdns-ip`, and a
+concrete `--addr` host. `serve`/mDNS log URLs switch to the active scheme.
+`--tls=false` opts out.
+
+**Known limitation (won't-fix here):** dotlocal v0.3.0 advertises mDNS as
+`_http._tcp` only (no service-type param), so the SRV label stays `http` even
+though the URL is `https` — cosmetic; name resolution and the URL are
+unaffected.
+
+Code: `internal/web/webtls/webtls.go`, `internal/web/tlsmux.go`,
+`internal/web/server.go`, `internal/config/config.go`, `cmd/rss/main.go`,
+`internal/service/`. Tested in `webtls_test.go`, `tlsmux_test.go`,
+`service_unix_test.go`, `config_test.go`.
+
 ### **Port 80 (`fwrd net`), responsive web UI, fail-fast serve, `fwrd logs`** — COMPLETED
 
 A round of usability fixes from real-world use:
