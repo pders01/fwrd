@@ -41,7 +41,28 @@ func Advertise(name string, port int) (*Advertiser, error) {
 	if len(ips) == 0 {
 		return nil, fmt.Errorf("no up, non-loopback IPv4 interface to advertise on")
 	}
+	return advertise(name, port, ips)
+}
 
+// AdvertiseOn is like Advertise but publishes the A record for exactly the
+// given addresses instead of every LAN interface address. Use it to pin
+// <name>.local to a single dedicated alias IP (see `fwrd net`), so clients
+// reach the redirect target rather than the host's primary address.
+// Non-IPv4 inputs are dropped; at least one usable IPv4 must remain.
+func AdvertiseOn(name string, port int, ips []net.IP) (*Advertiser, error) {
+	v4 := make([]net.IP, 0, len(ips))
+	for _, ip := range ips {
+		if ip4 := ip.To4(); ip4 != nil {
+			v4 = append(v4, ip4)
+		}
+	}
+	if len(v4) == 0 {
+		return nil, fmt.Errorf("no usable IPv4 address to advertise on")
+	}
+	return advertise(name, port, v4)
+}
+
+func advertise(name string, port int, ips []net.IP) (*Advertiser, error) {
 	host := name + ".local."
 	svc, err := mdns.NewMDNSService(name, "_http._tcp", "local.", host, port, ips, []string{"fwrd web view"})
 	if err != nil {
