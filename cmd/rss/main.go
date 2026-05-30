@@ -567,8 +567,13 @@ func runServiceInstall(_ *cobra.Command, _ []string) {
 		logger.Fatal("cannot resolve the fwrd binary path", "err", err)
 	}
 	// Resolve symlinks so the unit points at the real binary, not a launcher
-	// shim that might move.
-	if resolved, rerr := filepath.EvalSymlinks(bin); rerr == nil {
+	// shim that might move — except when the symlink is the stable handle and
+	// the resolved target is the volatile one. Homebrew installs fwrd as a
+	// stable .../bin/fwrd symlink into a version-stamped Cellar/Caskroom path
+	// that changes on every `brew upgrade`; pointing the service at the
+	// resolved path would leave it dangling after the next upgrade, so keep
+	// the symlink in that case.
+	if resolved, rerr := filepath.EvalSymlinks(bin); rerr == nil && !isVersionedPkgPath(resolved) {
 		bin = resolved
 	}
 	path, err := service.Install(&service.Options{
@@ -596,6 +601,20 @@ func runServiceInstall(_ *cobra.Command, _ []string) {
 			logger.Info("reachable on the LAN", "url", "http://"+svcMDNSName+".local:"+port)
 		}
 	}
+}
+
+// isVersionedPkgPath reports whether p sits inside a package manager's
+// version-stamped directory — Homebrew's Cellar (formulae) or Caskroom
+// (casks), on macOS or Linuxbrew. Such a path embeds a version that changes
+// on `brew upgrade`, so the invoking symlink (e.g. /opt/homebrew/bin/fwrd) is
+// the stable handle to record, not the resolved target.
+func isVersionedPkgPath(p string) bool {
+	for seg := range strings.SplitSeq(p, string(filepath.Separator)) {
+		if seg == "Cellar" || seg == "Caskroom" {
+			return true
+		}
+	}
+	return false
 }
 
 func runServiceUninstall(_ *cobra.Command, _ []string) {
