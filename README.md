@@ -7,7 +7,7 @@ A fast, terminal-based RSS feed aggregator with full-text search capabilities, b
 - **Triple Interface**: Interactive TUI (Bubble Tea) + Command-line interface (Cobra) + web view (`fwrd serve`)
 - **Newspaper web view**: The web front page is a newspaper — a lead story plus emergent topic sections clustered from recent articles; feeds are managed at `/feeds`
 - **Auto light/dark**: Every front-end follows the system light/dark setting — the web view via CSS, the TUI by detecting the terminal/OS appearance (override with `[ui] theme`)
-- **Zero-config LAN access**: `serve --mdns` advertises the web view at `http://fwrd.local:8080` over mDNS; `fwrd service install` runs it as a systemd/launchd background service
+- **Zero-config LAN access**: `serve --mdns` advertises the web view at `http://fwrd.local:8080` over mDNS; `fwrd service install` runs it as a systemd/launchd background service; `fwrd net up` exposes it at a bare `http://fwrd.local` (port 80) via a dedicated alias IP + firewall redirect, without colliding with the host's own port 80
 - **Full‑text search**: Bleve‑powered search across feeds and articles with debounced input
 - **Comprehensive CLI**: Complete feed management from command line (add, list, delete, refresh)
 - **Smart caching**: Honors ETag and Last-Modified; handles 304/Retry-After responses
@@ -181,6 +181,57 @@ any `--config`/`--db` you pass), then enables and starts it. Override the bind
 or mDNS name with the same `--addr` / `--mdns` / `--mdns-name` flags. Because
 the default bind is LAN-facing and unauthenticated, set `[web.auth]` (see
 above) when installing on a shared network.
+
+If the chosen port is already in use, `serve` now fails fast with a clear
+error instead of pretending to start. As a background service it retries a few
+times and then gives up: on Linux the unit enters `failed`
+(`systemctl --user status fwrd`); on macOS launchd keeps the error in
+`~/.fwrd/serve.err.log` (see [Viewing logs](#viewing-logs)).
+
+#### Serving on port 80 (`fwrd net`)
+
+To reach the web view at a bare `http://fwrd.local` (no `:8080`), fwrd needs to
+answer on port 80 — a privileged port that a host process (nginx, Docker, …)
+may already hold. `fwrd net` sidesteps both problems without binding 80 in the
+server itself:
+
+```bash
+sudo fwrd net up --iface en0 --alias-ip 192.168.1.240
+# then, as your normal user:
+fwrd serve --addr 0.0.0.0:8080 --mdns --mdns-ip 192.168.1.240
+# reachable from any LAN device at:  http://fwrd.local
+sudo fwrd net down            # remove the alias IP + redirect
+fwrd net status               # show the active binding, if any
+```
+
+`net up` gives fwrd its **own** LAN IP (an alias on your interface) and installs
+a firewall redirect from that IP's port 80 to fwrd's unprivileged port — `pf`
+on macOS, `nftables` on Linux. The redirect runs in the kernel's PREROUTING/rdr
+path, *before* the socket lookup, so it works even when the host already binds
+`0.0.0.0:80`; and because fwrd has a dedicated IP, the redirect never touches
+the host's own port-80 traffic. mDNS then advertises `fwrd.local` for the alias
+IP only (`serve --mdns-ip`).
+
+Pick an `--alias-ip` that is on your LAN subnet and currently unused (outside
+the DHCP pool). `net up`/`down` need `sudo` (interface + firewall changes). On
+macOS the redirect is loaded into the `com.apple/fwrd` pf sub-anchor — which
+the stock `rdr-anchor "com.apple/*"` already evaluates — so `/etc/pf.conf` is
+**never modified**; teardown just flushes that sub-anchor. The binding is
+**not** reboot-persistent — re-run `fwrd net up` after a reboot. Linux and
+macOS only.
+
+#### Viewing logs
+
+```bash
+./fwrd logs                 # tail fwrd's debug log (~/.fwrd/fwrd.log)
+./fwrd logs -f              # follow live
+./fwrd logs -n 500          # last 500 lines
+./fwrd logs --service       # the background service's output instead
+```
+
+`logs` is a thin wrapper: the default reads the debug log file, while
+`--service` streams the service's output — `journalctl --user -u fwrd` on
+Linux, the LaunchAgent's `~/.fwrd/serve.*.log` files on macOS.
 
 #### OPML on the command line
 
