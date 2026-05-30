@@ -136,13 +136,26 @@
 // article would otherwise leave the search field blurred. pageshow with
 // event.persisted is the bfcache-restore signal; a normal load honours
 // autofocus on its own and reports persisted === false here.
+//
+// Scroll preservation: on a bfcache restore the browser has already restored
+// the prior scroll position. Focusing an element scrolls it into view, so
+// refocusing the top search field would jump back to the top and throw that
+// position away. So (a) only refocus when the user is still at the top (the
+// hero is in view — they hadn't scrolled into the list), and (b) focus with
+// preventScroll so it never moves the viewport. Net effect: scroll down the
+// front page, open an article, hit back — and you land where you left off.
 (function () {
   "use strict";
   window.addEventListener("pageshow", function (event) {
     if (!event.persisted) return;
+    if (window.scrollY > 0) return; // user had scrolled — keep their position
     var input = document.querySelector("input[autofocus]");
     if (!input) return;
-    input.focus();
+    try {
+      input.focus({ preventScroll: true });
+    } catch (e) {
+      input.focus();
+    }
     // Drop the caret after any text the browser restored.
     var n = input.value.length;
     try {
