@@ -5,16 +5,20 @@
 {{if not .Available}}
 <p class="muted">Search is unavailable (index failed to initialize).</p>
 {{else if .Query}}
-<p class="muted">Results for “{{.Query}}”</p>
 {{if .Results}}
+<p class="muted">Results for “{{.Query}}” — {{len .Results}} match{{if ne (len .Results) 1}}es{{end}}</p>
 <ul class="article-list">
 {{range .Results}}
-<li class="{{if .Read}}read{{end}}{{if .Starred}} starred{{end}}"><a href="/article?id={{.ID}}">{{if .Title}}{{.Title}}{{else}}(untitled){{end}}</a>
-{{if not .Published.IsZero}}<time class="muted">{{date .Published}}</time>{{end}}</li>
+<li class="{{if .Article.Read}}read{{end}}{{if .Article.Starred}} starred{{end}}">
+<a href="/article?id={{.Article.ID}}">{{if .Article.Title}}{{.Article.Title}}{{else}}(untitled){{end}}</a>
+<span class="row-meta">
+<span class="byline">{{.Feed}}{{if not .Article.Published.IsZero}} · {{date .Article.Published}}{{end}}</span>
+</span>
+</li>
 {{end}}
 </ul>
 {{else}}
-<p class="muted">No matches.</p>
+<p class="muted">Results for “{{.Query}}” — no matches.</p>
 {{end}}
 {{else}}
 <p class="muted">Type a query above.</p>

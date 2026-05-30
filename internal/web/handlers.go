@@ -53,7 +53,7 @@ type articleData struct {
 type searchData struct {
 	pageBase
 	Query     string
-	Results   []*storage.Article
+	Results   []headlineView
 	Available bool
 }
 
@@ -151,10 +151,21 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "search failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+		// The search index stores a thin article (no Published, read/star
+		// state, or feed); hydrate the full record from storage so each result
+		// carries a source byline and date — the only way to tell near-
+		// identical titles ("This Week in Rust 650/648/651") apart. names is
+		// the memoized feed-ID → label map shared with the front page.
+		_, names := s.frontView()
 		for _, res := range results {
-			if res.Article != nil {
-				data.Results = append(data.Results, res.Article)
+			if res.Article == nil {
+				continue
 			}
+			a := res.Article
+			if full, err := s.store.GetArticle(a.ID); err == nil && full != nil {
+				a = full
+			}
+			data.Results = append(data.Results, headlineView{Article: a, Feed: names[a.FeedID]})
 		}
 	}
 	s.render(w, "search.html", data)
