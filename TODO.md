@@ -4,7 +4,7 @@ This document tracks remaining improvement opportunities and optional enhancemen
 
 ## Current Status
 
-**38 test files across 63 Go source files.** Per-package statement coverage
+**40 test files across 64 Go source files.** Per-package statement coverage
 below (excludes `test/integration`, which needs port 8080 free — OrbStack
 often holds it on this machine):
 
@@ -31,6 +31,38 @@ often holds it on this machine):
 ---
 
 ## Recent Additions
+
+### **Request audit log (`internal/audit`)** — COMPLETED
+
+`serve --audit` records **every HTTP request through fwrd**, both directions,
+as JSON lines at `~/.fwrd/audit.log` (append-only, one object per line).
+
+- **`internal/audit`** — a concurrency-safe, nil-safe `Logger` (writes are
+  mutex-serialized; a nil `*Logger` is a no-op so callers hold a possibly
+  disabled one without checks) and a unified `Record` whose direction-specific
+  fields carry `omitempty`.
+- **Inbound** — an `auditLog` middleware wraps the chain **outermost** (so it
+  records the TLS `308` redirects and `401`/`403` rejections, not just requests
+  that reach a handler), plus a status/bytes-capturing `ResponseWriter`. Logs
+  method, request URI, status, byte count, duration, client IP, Host, TLS, and
+  the Basic-Auth username (**never** the password).
+- **Outbound** — a single `http.RoundTripper` on the shared feed/plugin client
+  (`Manager.UseAuditLogger`) covers **both** feed fetches and Lua plugin
+  `http.get`; a request-context tag attributes each to `source:"feed"` or
+  `source:"plugin"`.
+- **Config** — `[web.audit] enabled`/`path` (default **off**, `~/.fwrd/audit.log`);
+  `serve --audit` flag overrides config. Off by default because it records every
+  browse and every fetch (privacy + disk growth).
+- Client IP is the transport peer; `X-Forwarded-For` is **not** trusted (behind
+  a proxy the IP is the proxy's). Log is unrotated — manage with `logrotate`.
+
+Tested in `internal/audit/audit_test.go` (JSON/omitempty/nil-safety,
+RoundTripper success/error/passthrough) and `internal/web/audit_test.go`
+(middleware status + IP capture). Verified end-to-end against a live `serve`.
+
+Code: `internal/audit/audit.go`, `internal/web/server.go`,
+`internal/feed/{fetcher,manager}.go`, `internal/plugins/lua/http.go`,
+`internal/config/config.go`, `cmd/rss/main.go`.
 
 ### **HTTPS for `fwrd serve` (self-signed by default, pluggable cert source)** — COMPLETED
 
