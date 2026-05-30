@@ -122,7 +122,7 @@ func init() {
 
 	// net flags: the alias-IP + firewall redirect that exposes fwrd.local on
 	// port 80 without colliding with a host process already on :80.
-	netUpCmd.Flags().StringVar(&netIface, "iface", "", "LAN interface to attach the alias IP to (e.g. en0 or eth0)")
+	netUpCmd.Flags().StringVar(&netIface, "iface", "", "LAN interface for the alias IP (e.g. en0); default: auto-detected from --alias-ip's subnet")
 	netUpCmd.Flags().StringVar(&netAliasIP, "alias-ip", "", "dedicated, currently-unused LAN IP to give fwrd")
 	netUpCmd.Flags().IntVar(&netPort, "port", 80, "public port to redirect from")
 	netUpCmd.Flags().IntVar(&netToPort, "to-port", 8080, "fwrd's unprivileged port to redirect to")
@@ -602,8 +602,20 @@ func runNetUp(_ *cobra.Command, _ []string) {
 	if !netbind.Supported() {
 		logger.Fatal("fwrd net is only supported on Linux and macOS")
 	}
+	if netAliasIP == "" {
+		logger.Fatal("--alias-ip is required (a currently-unused IP on your LAN subnet)")
+	}
+	iface := netIface
+	if iface == "" {
+		detected, err := netbind.DetectIface(netAliasIP)
+		if err != nil {
+			logger.Fatal("could not auto-detect the interface", "err", err)
+		}
+		iface = detected
+		logger.Info("auto-detected interface from the alias IP", "iface", iface, "alias", netAliasIP)
+	}
 	st, err := netbind.Up(&netbind.Options{
-		Iface:   netIface,
+		Iface:   iface,
 		AliasIP: netAliasIP,
 		Port:    netPort,
 		ToPort:  netToPort,

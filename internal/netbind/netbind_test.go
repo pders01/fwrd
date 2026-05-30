@@ -42,6 +42,17 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+func TestDetectIface_Errors(t *testing.T) {
+	if _, err := DetectIface("not-an-ip"); err == nil {
+		t.Fatal("expected an error for an invalid IP")
+	}
+	// 203.0.113.0/24 is TEST-NET-3 (RFC 5737); no host is on it, so no
+	// interface subnet should contain it.
+	if _, err := DetectIface("203.0.113.7"); err == nil {
+		t.Fatal("expected an error for an IP on no local subnet")
+	}
+}
+
 func TestStateRoundTrip(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
