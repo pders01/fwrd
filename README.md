@@ -171,8 +171,16 @@ The certificate comes from one of three sources (`--tls-mode`, or `[web.tls]`):
   one-time "not private" warning. Persisted under `~/.fwrd/tls`.
 - **`local-ca`** — a local CA plus a leaf it signs. Warning-free **once you
   trust the printed CA** (`~/.fwrd/tls/ca.pem`) on each device that visits:
-  macOS `security add-trusted-cert -d -r trustRoot -k ~/Library/Keychains/login.keychain-db ca.pem`;
-  iOS/Android install it as a profile/credential.
+
+  ```bash
+  # macOS (system-wide; trusts it for Safari and Chrome)
+  sudo security add-trusted-cert -d -r trustRoot \
+    -k /Library/Keychains/System.keychain ~/.fwrd/tls/ca.pem
+  ```
+
+  iOS/Android install `ca.pem` as a profile/credential. The CA's private key
+  (`ca-key.pem`, `0600`) can sign a certificate for any host — keep it private;
+  anyone who reads it can MITM devices that trust the CA.
 - **`file`** — bring your own: `--tls-cert cert.pem --tls-key key.pem` (setting
   these selects the file source regardless of mode).
 

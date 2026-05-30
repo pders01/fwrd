@@ -99,6 +99,49 @@ func TestLocalCA_LeafChainsToCA(t *testing.T) {
 	}
 }
 
+func TestModeSwitch_RegeneratesLeaf(t *testing.T) {
+	dir := t.TempDir()
+	hosts := []string{"fwrd.local"}
+
+	// Start self-signed: leaf is its own issuer.
+	ss, err := NewSource(ModeSelfSigned, dir, "", "", hosts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selfLeaf := leafFromConfig(t, ss)
+	if selfLeaf.Issuer.CommonName != selfLeaf.Subject.CommonName {
+		t.Fatalf("self-signed leaf should be its own issuer, got issuer=%q subject=%q",
+			selfLeaf.Issuer.CommonName, selfLeaf.Subject.CommonName)
+	}
+
+	// Switch to local-ca over the same dir: the stale self-signed leaf must be
+	// replaced by a CA-signed one (the bug was reusing it).
+	ca, err := NewSource(ModeLocalCA, dir, "", "", hosts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caLeaf := leafFromConfig(t, ca)
+	if caLeaf.Issuer.CommonName == caLeaf.Subject.CommonName {
+		t.Errorf("after switch to local-ca the leaf is still self-signed (issuer=subject=%q)", caLeaf.Subject.CommonName)
+	}
+	if caLeaf.Issuer.CommonName != "fwrd local CA" {
+		t.Errorf("leaf issuer = %q, want 'fwrd local CA'", caLeaf.Issuer.CommonName)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ca.pem")); err != nil {
+		t.Errorf("ca.pem should exist after switching to local-ca: %v", err)
+	}
+
+	// Switch back to self-signed: leaf must become self-issued again.
+	back, err := NewSource(ModeSelfSigned, dir, "", "", hosts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backLeaf := leafFromConfig(t, back)
+	if backLeaf.Issuer.CommonName != backLeaf.Subject.CommonName {
+		t.Errorf("after switching back to self-signed the leaf is still CA-signed (issuer=%q)", backLeaf.Issuer.CommonName)
+	}
+}
+
 func TestFileSource_LoadsProvidedPair(t *testing.T) {
 	dir := t.TempDir()
 	certPath := filepath.Join(dir, "c.pem")
