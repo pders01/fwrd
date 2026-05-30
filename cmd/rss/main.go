@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -97,6 +98,7 @@ var (
 	netIface       string
 	netAliasIPs    []string
 	netPort        int
+	netHTTPS       bool
 	netToPort      int
 	netPrefix      int
 	netMask        string
@@ -142,6 +144,7 @@ func init() {
 	netUpCmd.Flags().StringVar(&netIface, "iface", "", "LAN interface for the alias IP(s) (e.g. en0); default: auto-detected from each --alias-ip's subnet")
 	netUpCmd.Flags().StringArrayVar(&netAliasIPs, "alias-ip", nil, "dedicated, currently-unused LAN IP to give fwrd; repeat once per LAN for port 80 on each")
 	netUpCmd.Flags().IntVar(&netPort, "port", 80, "public port to redirect from")
+	netUpCmd.Flags().BoolVar(&netHTTPS, "https", true, "also redirect :443 so bare https://<name>.local works (serve is HTTPS by default); --https=false maps only --port")
 	netUpCmd.Flags().IntVar(&netToPort, "to-port", 8080, "fwrd's unprivileged port to redirect to")
 	netUpCmd.Flags().IntVar(&netPrefix, "prefix", 24, "CIDR prefix length for the alias IP (Linux)")
 	netUpCmd.Flags().StringVar(&netMask, "mask", "255.255.255.0", "netmask for the alias IP (macOS)")
@@ -677,6 +680,29 @@ func runServiceUninstall(_ *cobra.Command, _ []string) {
 // sub-anchor / nftables table and the ~/.fwrd/port80.json state file.
 const netName = "fwrd"
 
+// netPorts is the set of public ports `fwrd net up` redirects onto fwrd's app
+// port. It always includes the base port and, when https is set, 443 — so the
+// bare https://<name>.local (:443) resolves and the cleartext :80 → :443 308
+// from HTTPS-by-default serve lands on a mapped port. The result is de-duped
+// (port already 443, or 443 disabled) preserving order, matching port80's own
+// normalization.
+func netPorts(port int, https bool) []int {
+	ports := []int{port}
+	if https && port != 443 {
+		ports = append(ports, 443)
+	}
+	return ports
+}
+
+// joinPorts renders a port set as ":80, :443" for log output.
+func joinPorts(ports []int) string {
+	parts := make([]string, len(ports))
+	for i, p := range ports {
+		parts[i] = fmt.Sprintf(":%d", p)
+	}
+	return strings.Join(parts, ", ")
+}
+
 func runNetUp(_ *cobra.Command, _ []string) {
 	if !port80.Supported() {
 		logger.Fatal("fwrd net is only supported on Linux and macOS")
@@ -700,13 +726,13 @@ func runNetUp(_ *cobra.Command, _ []string) {
 		aliases = append(aliases, port80.Alias{Iface: iface, AliasIP: ip, Prefix: netPrefix, Mask: netMask})
 	}
 
-	st, err := port80.Up(port80.Options{Name: netName, Aliases: aliases, Port: netPort, ToPort: netToPort})
+	st, err := port80.Up(port80.Options{Name: netName, Aliases: aliases, Ports: netPorts(netPort, netHTTPS), ToPort: netToPort})
 	if err != nil {
 		logger.Fatal("net up failed", "err", err)
 	}
 	for _, a := range st.Aliases {
-		logger.Info("port-80 redirect installed",
-			"alias", a.AliasIP, "iface", a.Iface, "redirect", fmt.Sprintf(":%d → :%d", st.Port, st.ToPort), "backend", st.Backend)
+		logger.Info("port redirect installed",
+			"alias", a.AliasIP, "iface", a.Iface, "redirect", fmt.Sprintf("%s → :%d", joinPorts(st.Ports), st.ToPort), "backend", st.Backend)
 	}
 	// The redirect targets the loopback port, so fwrd must accept off-box
 	// traffic: bind 0.0.0.0 and advertise the alias IPs (scoped per subnet).
@@ -716,7 +742,13 @@ func runNetUp(_ *cobra.Command, _ []string) {
 	}
 	logger.Info("now start the server",
 		"run", fmt.Sprintf("fwrd serve --addr 0.0.0.0:%d --mdns --mdns-name %s%s", st.ToPort, serveMDNSName, mdnsFlags.String()))
-	logger.Info("then reach it from any LAN device", "url", "http://"+serveMDNSName+".local")
+	if netHTTPS {
+		logger.Info("then reach it from any LAN device", "url", "https://"+serveMDNSName+".local")
+		logger.Info("for a warning-free name, trust the local CA on each device", "run", "fwrd serve --tls-mode local-ca")
+	} else {
+		logger.Info("then reach it from any LAN device", "url", "http://"+serveMDNSName+".local",
+			"note", "cleartext only; start serve with --tls=false")
+	}
 	logger.Info("undo with", "run", "sudo fwrd net down")
 }
 
@@ -744,10 +776,14 @@ func runNetStatus(_ *cobra.Command, _ []string) {
 	if err != nil {
 		logger.Fatal("net status failed", "err", err)
 	}
+	scheme := "http"
+	if slices.Contains(st.Ports, 443) {
+		scheme = "https"
+	}
 	for _, a := range st.Aliases {
-		logger.Info("active port-80 binding",
-			"alias", a.AliasIP, "iface", a.Iface, "redirect", fmt.Sprintf(":%d → :%d", st.Port, st.ToPort),
-			"backend", st.Backend, "url", "http://"+serveMDNSName+".local")
+		logger.Info("active port redirect",
+			"alias", a.AliasIP, "iface", a.Iface, "redirect", fmt.Sprintf("%s → :%d", joinPorts(st.Ports), st.ToPort),
+			"backend", st.Backend, "url", scheme+"://"+serveMDNSName+".local")
 	}
 }
 
