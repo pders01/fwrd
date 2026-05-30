@@ -159,28 +159,18 @@ Two ways to protect it:
 #### HTTPS / TLS
 
 `serve` runs over **HTTPS by default** with an auto-generated certificate;
-there is nothing to configure for encryption. Cleartext requests to the same
-port are answered with a `308` redirect to `https://`, so old `http://` links
-and the `fwrd net` bare-`:80` flow keep working. Use `--tls=false` for plain
-HTTP.
+there is nothing to configure for encryption. A cleartext request to the serve
+port is answered with a `308` redirect to `https://` on the **same host:port**,
+so existing `http://host:PORT` bookmarks keep working. Use `--tls=false` for
+plain HTTP (required with `fwrd net` — see the note in that section).
 
 The certificate comes from one of three sources (`--tls-mode`, or `[web.tls]`):
 
 - **`self-signed`** (default) — a self-signed leaf, regenerated automatically
   when the advertised host set changes. Zero setup, but browsers show a
   one-time "not private" warning. Persisted under `~/.fwrd/tls`.
-- **`local-ca`** — a local CA plus a leaf it signs. Warning-free **once you
-  trust the printed CA** (`~/.fwrd/tls/ca.pem`) on each device that visits:
-
-  ```bash
-  # macOS (system-wide; trusts it for Safari and Chrome)
-  sudo security add-trusted-cert -d -r trustRoot \
-    -k /Library/Keychains/System.keychain ~/.fwrd/tls/ca.pem
-  ```
-
-  iOS/Android install `ca.pem` as a profile/credential. The CA's private key
-  (`ca-key.pem`, `0600`) can sign a certificate for any host — keep it private;
-  anyone who reads it can MITM devices that trust the CA.
+- **`local-ca`** — a local CA plus a leaf it signs, so you can be warning-free.
+  See [Trusting the local CA](#trusting-the-local-ca) below.
 - **`file`** — bring your own: `--tls-cert cert.pem --tls-key key.pem` (setting
   these selects the file source regardless of mode).
 
@@ -195,6 +185,37 @@ mode    = "self-signed" # or "local-ca" / "file"
 
 The generated certificate's SANs cover `localhost`, `127.0.0.1`/`::1`, the host
 name, `<mdns-name>.local`, every `--mdns-ip`, and a concrete `--addr` host.
+
+##### Trusting the local CA
+
+In `local-ca` mode fwrd writes a local certificate authority to
+`~/.fwrd/tls/ca.pem` and signs the server certificate with it. Browsers stay
+warning-free **once that CA is trusted on each device that visits** — a
+one-time step per device (the CA is stable; fwrd reuses it across cert
+regenerations).
+
+```bash
+# macOS — trust system-wide (Safari and Chrome):
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain ~/.fwrd/tls/ca.pem
+
+# verify it took, then fully quit and reopen the browser:
+security verify-cert -c <(openssl s_client -connect fwrd.local:8080 </dev/null 2>/dev/null | openssl x509)
+
+# remove trust later:
+sudo security delete-certificate -c "fwrd local CA" /Library/Keychains/System.keychain
+```
+
+On **iOS/Android** install `ca.pem` as a profile / user credential. On **Linux**
+copy it into the system anchors (e.g. `/usr/local/share/ca-certificates/` +
+`sudo update-ca-certificates`); Chrome/Firefox also keep their own NSS store.
+
+> **Caveat — the CA can sign for any host.** A device that trusts this CA will
+> trust **anything** the CA's key signs, not just fwrd. The key
+> (`~/.fwrd/tls/ca-key.pem`, mode `0600`) therefore must stay private: whoever
+> reads it can mint trusted certificates for any domain and MITM those devices.
+> Keep it on the serving host, never copy it (copy only `ca.pem`), and prefer
+> `self-signed` if you are not comfortable with that trade-off.
 
 #### Reach it at `fwrd.local` (mDNS)
 
@@ -223,15 +244,17 @@ Install `fwrd serve` as a per-user service — a systemd user unit on Linux, a
 launchd LaunchAgent on macOS. No root; it writes under your home directory.
 
 ```bash
-./fwrd service install     # defaults to --addr 0.0.0.0:8080 --mdns
+./fwrd service install     # defaults to --addr 0.0.0.0:8080 --mdns, HTTPS on
 ./fwrd service uninstall
 ```
 
 `install` writes the unit/plist (pointing at the running binary, forwarding
-any `--config`/`--db` you pass), then enables and starts it. Override the bind
-or mDNS name with the same `--addr` / `--mdns` / `--mdns-name` flags. Because
-the default bind is LAN-facing and unauthenticated, set `[web.auth]` (see
-above) when installing on a shared network.
+any `--config`/`--db` you pass), then enables and starts it. Override the bind,
+mDNS name, or TLS with the same `--addr` / `--mdns` / `--mdns-name` /
+`--tls` / `--tls-mode` flags — they are forwarded verbatim into the unit.
+Because the default bind is LAN-facing and unauthenticated, set `[web.auth]`
+(see above) when installing on a shared network; HTTPS (the default) keeps
+those credentials encrypted in transit.
 
 If the chosen port is already in use, `serve` now fails fast with a clear
 error instead of pretending to start. As a background service it retries a few
@@ -249,7 +272,7 @@ server itself:
 ```bash
 sudo fwrd net up --alias-ip 192.168.1.240
 # then, as your normal user:
-fwrd serve --addr 0.0.0.0:8080 --mdns --mdns-ip 192.168.1.240
+fwrd serve --addr 0.0.0.0:8080 --mdns --mdns-ip 192.168.1.240 --tls=false
 # reachable from any LAN device at:  http://fwrd.local
 sudo fwrd net down            # remove the alias IP + redirect
 fwrd net status               # show the active binding, if any
@@ -260,8 +283,16 @@ to get `http://fwrd.local` on each, and advertise them all:
 
 ```bash
 sudo fwrd net up --alias-ip 192.168.1.240 --alias-ip 192.168.178.240
-fwrd serve --addr 0.0.0.0:8080 --mdns --mdns-ip 192.168.1.240 --mdns-ip 192.168.178.240
+fwrd serve --addr 0.0.0.0:8080 --mdns --mdns-ip 192.168.1.240 --mdns-ip 192.168.178.240 --tls=false
 ```
+
+> **Pair `fwrd net` with `--tls=false`.** The redirect maps the alias's port 80
+> to the unprivileged serve port only. With HTTPS on, a request to
+> `http://fwrd.local` is bounced to `https://fwrd.local` (port 443), which the
+> redirect does not map — so the bare-`:80` URL would dead-end. Serving plain
+> HTTP on the alias keeps `http://fwrd.local` working; reach for a reverse
+> proxy if you want HTTPS on the bare name. (HTTPS on `:443` via the alias is a
+> candidate follow-up.)
 
 `--iface` is auto-detected from each alias IP's subnet (the IP already says
 which network it's on), so you just pick an unused IP on each LAN; pass

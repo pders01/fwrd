@@ -53,10 +53,15 @@ default), forwarded through `service install`. SANs cover `localhost`,
 concrete `--addr` host. `serve`/mDNS log URLs switch to the active scheme.
 `--tls=false` opts out.
 
-**Known limitation (won't-fix here):** dotlocal v0.3.0 advertises mDNS as
-`_http._tcp` only (no service-type param), so the SRV label stays `http` even
-though the URL is `https` — cosmetic; name resolution and the URL are
-unaffected.
+**Known limitations:**
+
+- dotlocal v0.3.0 advertises mDNS as `_http._tcp` only (no service-type
+  param), so the SRV label stays `http` even though the URL is `https` —
+  cosmetic; name resolution and the URL are unaffected.
+- `fwrd net` (bare `:80`) needs `--tls=false`: the alias redirect maps only
+  `:80`→serve-port, so an HTTPS cleartext `308` to `https://fwrd.local`
+  (`:443`) dead-ends. Candidate follow-up: a `:443`→serve-port redirect in
+  `fwrd net` so the bare name can serve HTTPS.
 
 Code: `internal/web/webtls/webtls.go`, `internal/web/tlsmux.go`,
 `internal/web/server.go`, `internal/config/config.go`, `cmd/rss/main.go`,
