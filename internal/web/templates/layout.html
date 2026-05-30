@@ -9,9 +9,14 @@
 <script src="/static/app.js" defer></script>
 </head>
 <body>
+{{template "flash" .}}
 {{template "content" .}}
 </body>
 </html>{{end}}
+
+{{/* One-shot notice after a POST/redirect. Dot is the page view model; it
+     carries .Flash via the embedded pageBase (nil renders nothing). */}}
+{{define "flash"}}{{with .Flash}}<div class="flash flash-{{.Kind}}" role="status">{{.Text}}</div>{{end}}{{end}}
 
 {{/* Compact header for inner pages: brand, search, manage link. The front
      page renders its own grand masthead instead. Dot (.) is the search
