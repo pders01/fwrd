@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"html/template"
 	"net/http"
 	"sort"
@@ -31,22 +32,26 @@ type feedView struct {
 }
 
 type indexData struct {
+	pageBase
 	Feeds []feedView
 }
 
 type feedData struct {
+	pageBase
 	Feed       *storage.Feed
 	Articles   []*storage.Article
 	NextCursor string
 }
 
 type articleData struct {
+	pageBase
 	Article *storage.Article
 	Feed    *storage.Feed
 	Body    template.HTML
 }
 
 type searchData struct {
+	pageBase
 	Query     string
 	Results   []*storage.Article
 	Available bool
@@ -56,7 +61,7 @@ type searchData struct {
 // unread counts plus the add / refresh / delete / OPML controls. The
 // reading surface (the newspaper front page) lives at "/"; this is the
 // "manage" half of the read/manage split.
-func (s *Server) handleFeeds(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleFeeds(w http.ResponseWriter, r *http.Request) {
 	feeds, err := s.store.GetAllFeeds()
 	if err != nil {
 		http.Error(w, "failed to load feeds: "+err.Error(), http.StatusInternalServerError)
@@ -90,7 +95,9 @@ func (s *Server) handleFeeds(w http.ResponseWriter, _ *http.Request) {
 			Total:  st.Total,
 		})
 	}
-	s.render(w, "feeds.html", indexData{Feeds: views})
+	data := indexData{Feeds: views}
+	data.Flash = takeFlash(w, r)
+	s.render(w, "feeds.html", data)
 }
 
 func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +119,9 @@ func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
 		articles = articles[:articlesPerPage]
 		next = articles[len(articles)-1].ID
 	}
-	s.render(w, "feed.html", feedData{Feed: feed, Articles: articles, NextCursor: next})
+	data := feedData{Feed: feed, Articles: articles, NextCursor: next}
+	data.Flash = takeFlash(w, r)
+	s.render(w, "feed.html", data)
 }
 
 func (s *Server) handleArticle(w http.ResponseWriter, r *http.Request) {
@@ -158,18 +167,22 @@ func (s *Server) handleAddFeed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "feed management is disabled", http.StatusServiceUnavailable)
 		return
 	}
-	url := strings.TrimSpace(r.FormValue("url"))
-	if url == "" {
-		http.Error(w, "missing feed url", http.StatusBadRequest)
+	feedURL := strings.TrimSpace(r.FormValue("url"))
+	if feedURL == "" {
+		setFlash(w, flashError, "Enter a feed URL to add.")
+		redirect(w, r, "/feeds")
 		return
 	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	if _, err := s.manager.AddFeed(url); err != nil {
-		http.Error(w, "failed to add feed: "+err.Error(), http.StatusBadGateway)
+	f, err := s.manager.AddFeed(feedURL)
+	if err != nil {
+		setFlash(w, flashError, "Couldn't add "+feedURL+": "+err.Error())
+		redirect(w, r, "/feeds")
 		return
 	}
-	redirect(w, r, "/")
+	setFlash(w, flashNotice, "Added "+feedLabel(f)+".")
+	redirect(w, r, "/feeds")
 }
 
 func (s *Server) handleRefreshFeed(w http.ResponseWriter, r *http.Request) {
@@ -181,9 +194,12 @@ func (s *Server) handleRefreshFeed(w http.ResponseWriter, r *http.Request) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	if err := s.manager.RefreshFeed(id); err != nil {
-		http.Error(w, "failed to refresh feed: "+err.Error(), http.StatusBadGateway)
+		// The feed page shows the persisted error badge; the flash names it.
+		setFlash(w, flashError, "Refresh failed: "+err.Error())
+		redirect(w, r, "/feeds/"+id)
 		return
 	}
+	setFlash(w, flashNotice, "Feed refreshed.")
 	redirect(w, r, "/feeds/"+id)
 }
 
@@ -194,9 +210,23 @@ func (s *Server) handleRefreshAll(w http.ResponseWriter, r *http.Request) {
 	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	if _, err := s.manager.RefreshAllFeeds(); err != nil {
-		http.Error(w, "failed to refresh feeds: "+err.Error(), http.StatusBadGateway)
-		return
+	// Per-feed failures are expected (feeds go down) and are persisted as
+	// badges on /feeds, so a partial failure is not a page error — summarize
+	// it in a flash instead of replacing the UI with a raw 502.
+	summary, err := s.manager.RefreshAllFeeds()
+	switch {
+	case len(summary.Errors) == 0 && err != nil:
+		// No per-feed errors but a returned error means a catastrophic
+		// failure (e.g. listing the feeds failed), which is page-worthy.
+		setFlash(w, flashError, "Refresh failed: "+err.Error())
+	case len(summary.Errors) > 0:
+		setFlash(w, flashError, fmt.Sprintf(
+			"Refreshed %d feed(s), %d new; %d failed — see the Feeds page.",
+			summary.UpdatedFeeds, summary.AddedArticles, len(summary.Errors)))
+	default:
+		setFlash(w, flashNotice, fmt.Sprintf(
+			"Refreshed %d feed(s), %d new article(s).",
+			summary.UpdatedFeeds, summary.AddedArticles))
 	}
 	redirect(w, r, "/")
 }
@@ -206,14 +236,16 @@ func (s *Server) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	if err := s.store.DeleteFeed(id); err != nil {
-		http.Error(w, "failed to delete feed: "+err.Error(), http.StatusInternalServerError)
+		setFlash(w, flashError, "Couldn't delete feed: "+err.Error())
+		redirect(w, r, "/feeds")
 		return
 	}
 	// Keep the search index in step with the deletion.
 	if dl, ok := s.searcher.(search.DeleteListener); ok {
 		dl.OnFeedDeleted(id)
 	}
-	redirect(w, r, "/")
+	setFlash(w, flashNotice, "Feed deleted.")
+	redirect(w, r, "/feeds")
 }
 
 func (s *Server) handleToggleRead(w http.ResponseWriter, r *http.Request) {
@@ -263,7 +295,8 @@ func (s *Server) handleOPMLImport(w http.ResponseWriter, r *http.Request) {
 	// disk, so without this a hostile body could fill the disk.
 	r.Body = http.MaxBytesReader(w, r.Body, opmlMaxUpload)
 	if err := r.ParseMultipartForm(opmlMaxUpload); err != nil {
-		http.Error(w, "invalid upload: "+err.Error(), http.StatusBadRequest)
+		setFlash(w, flashError, "Upload failed: "+err.Error())
+		redirect(w, r, "/feeds")
 		return
 	}
 	// RemoveAll deletes any temp files ParseMultipartForm spilled to disk;
@@ -271,14 +304,16 @@ func (s *Server) handleOPMLImport(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = r.MultipartForm.RemoveAll() }()
 	file, _, err := r.FormFile("file")
 	if err != nil {
-		http.Error(w, "missing OPML file", http.StatusBadRequest)
+		setFlash(w, flashError, "Choose an OPML file to import.")
+		redirect(w, r, "/feeds")
 		return
 	}
 	defer file.Close()
 
 	feeds, err := opml.Parse(file)
 	if err != nil {
-		http.Error(w, "failed to parse OPML: "+err.Error(), http.StatusBadRequest)
+		setFlash(w, flashError, "Couldn't parse OPML: "+err.Error())
+		redirect(w, r, "/feeds")
 		return
 	}
 
@@ -290,15 +325,30 @@ func (s *Server) handleOPMLImport(w http.ResponseWriter, r *http.Request) {
 	for _, f := range existing {
 		have[f.URL] = true
 	}
+	added, skipped, failed := 0, 0, 0
 	for _, f := range feeds {
 		if have[f.URL] {
+			skipped++
 			continue
 		}
 		// Best-effort: a feed that fails to fetch is skipped so one bad
 		// entry doesn't abort the whole import.
-		_, _ = s.manager.AddFeed(f.URL)
+		if _, err := s.manager.AddFeed(f.URL); err != nil {
+			failed++
+			continue
+		}
+		added++
 	}
-	redirect(w, r, "/")
+	msg := fmt.Sprintf("Imported %d feed(s)", added)
+	if skipped > 0 {
+		msg += fmt.Sprintf(", %d already present", skipped)
+	}
+	if failed > 0 {
+		setFlash(w, flashError, msg+fmt.Sprintf(", %d failed to fetch.", failed))
+	} else {
+		setFlash(w, flashNotice, msg+".")
+	}
+	redirect(w, r, "/feeds")
 }
 
 func (s *Server) handleToggleStar(w http.ResponseWriter, r *http.Request) {

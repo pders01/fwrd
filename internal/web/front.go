@@ -35,6 +35,7 @@ type sectionView struct {
 }
 
 type frontData struct {
+	pageBase
 	Now        time.Time
 	HasContent bool
 	Lead       *storage.Article
@@ -44,6 +45,7 @@ type frontData struct {
 }
 
 type topicData struct {
+	pageBase
 	Label    string
 	Slug     string
 	Articles []headlineView
@@ -94,10 +96,11 @@ func (s *Server) frontView() (model *topics.Model, names map[string]string) {
 // (the most recent article across all feeds), and topical section blocks
 // derived from the corpus. The topic model is memoized (see frontView) and
 // rebuilt whenever the store changes, so read/star state stays fresh.
-func (s *Server) handleFront(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleFront(w http.ResponseWriter, r *http.Request) {
 	model, names := s.frontView()
 
 	data := frontData{Now: time.Now(), HasContent: model.Lead != nil}
+	data.Flash = takeFlash(w, r)
 	if model.Lead != nil {
 		data.Lead = model.Lead
 		data.LeadFeed = names[model.Lead.FeedID]
