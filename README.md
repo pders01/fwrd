@@ -166,6 +166,14 @@ only makes sense with a non-loopback bind (`--addr 0.0.0.0:8080`); a
 loopback-bound server logs a warning because the name would resolve to an
 unreachable interface. On Linux it coexists with a running Avahi.
 
+On a multi-homed host (several LANs at once), `--mdns` runs one responder per
+interface, each answering with only the address reachable on the subnet the
+query arrived from — so `fwrd.local` resolves correctly on every LAN, and a
+client never gets an address on a subnet it can't route to. Virtual interfaces
+(VM/container bridges, VPN tunnels, AirDrop) are skipped automatically;
+restrict to specific interfaces with `--mdns-iface en0,en9`, or pin to a single
+address with `--mdns-ip <ip>` (which advertises that one subnet only).
+
 #### Run it as a background service
 
 Install `fwrd serve` as a per-user service — a systemd user unit on Linux, a
