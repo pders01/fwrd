@@ -83,6 +83,8 @@ var (
 	svcAddr        string
 	svcMDNS        bool
 	svcMDNSName    string
+	svcMDNSIPs     []string
+	svcMDNSIface   string
 	netIface       string
 	netAliasIPs    []string
 	netPort        int
@@ -144,6 +146,8 @@ func init() {
 	serviceInstallCmd.Flags().StringVar(&svcAddr, "addr", "0.0.0.0:8080", "address the service binds")
 	serviceInstallCmd.Flags().BoolVar(&svcMDNS, "mdns", true, "advertise the service over mDNS as <name>.local")
 	serviceInstallCmd.Flags().StringVar(&svcMDNSName, "mdns-name", "fwrd", "mDNS hostname label; advertised as <name>.local")
+	serviceInstallCmd.Flags().StringArrayVar(&svcMDNSIPs, "mdns-ip", nil, "advertise these alias IP(s) from `fwrd net up`, each scoped to its subnet (repeatable); for bare http://<name>.local on port 80")
+	serviceInstallCmd.Flags().StringVar(&svcMDNSIface, "mdns-iface", "", "comma-separated interfaces to advertise on; default: auto-detected LAN interfaces")
 	serviceCmd.AddCommand(serviceInstallCmd)
 	serviceCmd.AddCommand(serviceUninstallCmd)
 
@@ -568,12 +572,14 @@ func runServiceInstall(_ *cobra.Command, _ []string) {
 		bin = resolved
 	}
 	path, err := service.Install(&service.Options{
-		BinPath:  bin,
-		Addr:     svcAddr,
-		MDNS:     svcMDNS,
-		MDNSName: svcMDNSName,
-		Config:   cfgFile,
-		DB:       dbPath,
+		BinPath:   bin,
+		Addr:      svcAddr,
+		MDNS:      svcMDNS,
+		MDNSName:  svcMDNSName,
+		MDNSIPs:   svcMDNSIPs,
+		MDNSIface: svcMDNSIface,
+		Config:    cfgFile,
+		DB:        dbPath,
 	})
 	if err != nil {
 		// A non-empty path means the file was written but activation failed —
