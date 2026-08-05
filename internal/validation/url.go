@@ -222,7 +222,10 @@ func isSuspiciousHostname(hostname string) bool {
 // isHexString checks if a string contains only hexadecimal characters
 func isHexString(s string) bool {
 	for _, char := range s {
-		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F')) {
+		isDigit := char >= '0' && char <= '9'
+		isLowerHex := char >= 'a' && char <= 'f'
+		isUpperHex := char >= 'A' && char <= 'F'
+		if !isDigit && !isLowerHex && !isUpperHex {
 			return false
 		}
 	}

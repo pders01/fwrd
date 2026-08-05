@@ -399,13 +399,13 @@ func (s *Server) drainHTTP(srv *http.Server, serveErr error) error {
 
 // ---- mutation helpers (use coordinator when available) ----
 
-func (s *Server) addFeed(ctx context.Context, url string) (*storage.Feed, error) {
+func (s *Server) addFeed(ctx context.Context, feedURL string) (*storage.Feed, error) {
 	if s.coordinator != nil {
-		return s.coordinator.AddFeed(ctx, url)
+		return s.coordinator.AddFeed(ctx, feedURL)
 	}
 	s.fallbackMu.Lock()
 	defer s.fallbackMu.Unlock()
-	return s.manager.AddFeedContext(ctx, url)
+	return s.manager.AddFeedContext(ctx, feedURL)
 }
 
 func (s *Server) refreshFeed(ctx context.Context, id string) error {

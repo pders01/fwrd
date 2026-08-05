@@ -90,17 +90,17 @@ func TestIntegration_FetchRSSFeed(t *testing.T) {
 
 	// Test fetching RSS feed
 	feedURL := integrationURL("/feed.rss")
-	feed, err := manager.AddFeed(feedURL)
+	feedResult, err := manager.AddFeed(feedURL)
 	if err != nil {
 		t.Fatalf("Failed to add RSS feed: %v", err)
 	}
 
-	if feed.URL != feedURL {
-		t.Errorf("Expected URL %s, got %s", feedURL, feed.URL)
+	if feedResult.URL != feedURL {
+		t.Errorf("Expected URL %s, got %s", feedURL, feedResult.URL)
 	}
 
 	// Check articles were saved
-	articles, err := store.GetArticles(feed.ID, 10)
+	articles, err := store.GetArticles(feedResult.ID, 10)
 	if err != nil {
 		t.Fatalf("Failed to get articles: %v", err)
 	}
@@ -126,12 +126,12 @@ func TestIntegration_FetchAtomFeed(t *testing.T) {
 
 	// Test fetching Atom feed
 	feedURL := integrationURL("/feed.atom")
-	feed, err := manager.AddFeed(feedURL)
+	feedResult, err := manager.AddFeed(feedURL)
 	if err != nil {
 		t.Fatalf("Failed to add Atom feed: %v", err)
 	}
 
-	articles, err := store.GetArticles(feed.ID, 10)
+	articles, err := store.GetArticles(feedResult.ID, 10)
 	if err != nil {
 		t.Fatalf("Failed to get articles: %v", err)
 	}
@@ -185,12 +185,12 @@ func TestIntegration_MediaExtraction(t *testing.T) {
 	defer cleanup()
 
 	feedURL := integrationURL("/feed.rss")
-	feed, err := manager.AddFeed(feedURL)
+	feedResult, err := manager.AddFeed(feedURL)
 	if err != nil {
 		t.Fatalf("Failed to add feed: %v", err)
 	}
 
-	articles, err := store.GetArticles(feed.ID, 10)
+	articles, err := store.GetArticles(feedResult.ID, 10)
 	if err != nil {
 		t.Fatalf("Failed to get articles: %v", err)
 	}

@@ -114,19 +114,19 @@ func (a *App) renderArticle(article *storage.Article) tea.Cmd {
 
 		// Apply size limits for security and performance
 		safeTitle := sanitizeAndLimitContent(article.Title, maxTitleSize)
-		content.WriteString(fmt.Sprintf("# %s\n\n", safeTitle))
-		content.WriteString(fmt.Sprintf("*Published: %s*\n\n", article.Published.Format(time.RFC1123)))
+		fmt.Fprintf(&content, "# %s\n\n", safeTitle)
+		fmt.Fprintf(&content, "*Published: %s*\n\n", article.Published.Format(time.RFC1123))
 
 		if article.URL != "" {
 			safeURL := sanitizeAndLimitContent(article.URL, maxURLSize)
-			content.WriteString(fmt.Sprintf("[Read Online](%s)\n\n", safeURL))
+			fmt.Fprintf(&content, "[Read Online](%s)\n\n", safeURL)
 		}
 
 		if len(article.MediaURLs) > 0 {
 			content.WriteString("**Media:**\n")
 			for _, url := range article.MediaURLs {
 				safeMediaURL := sanitizeAndLimitContent(url, maxURLSize)
-				content.WriteString(fmt.Sprintf("- %s\n", safeMediaURL))
+				fmt.Fprintf(&content, "- %s\n", safeMediaURL)
 			}
 			content.WriteString("\n")
 		}

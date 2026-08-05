@@ -57,12 +57,16 @@ coverage:
 ## lint: Run Go linters
 lint:
 	@echo "Running linters..."
-	@if command -v golangci-lint > /dev/null; then \
-		golangci-lint run ./...; \
-	else \
-		echo "golangci-lint not installed. Running go vet instead..."; \
-		go vet ./...; \
+	@if ! command -v golangci-lint > /dev/null; then \
+		echo "golangci-lint v2 is required. Install with:"; \
+		echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2"; \
+		exit 1; \
 	fi
+	@if ! golangci-lint version | grep -Eq 'version v?2\.'; then \
+		echo "golangci-lint v2 is required; found: $$(golangci-lint version)"; \
+		exit 1; \
+	fi
+	@golangci-lint run ./...
 	@echo "Running gofmt..."
 	@gofmt -l -s .
 
