@@ -8,6 +8,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/pders01/fwrd/internal/ipc"
+	"github.com/pders01/fwrd/internal/storage"
 )
 
 func TestPluginsListCommand(t *testing.T) {
@@ -122,6 +125,72 @@ func TestGenerateConfigCommand(t *testing.T) {
 	// Check output message
 	if !strings.Contains(out, "Generated default configuration at:") {
 		t.Errorf("Expected output to contain 'Generated default configuration at:', got: %s", out)
+	}
+}
+
+func TestSecureDBPathCreatesParent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "fwrd.db")
+	got, err := secureDBPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := ipc.CanonicalDBPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("secureDBPath = %q, want %q", got, want)
+	}
+	if info, err := os.Stat(filepath.Dir(path)); err != nil || !info.IsDir() {
+		t.Fatalf("parent directory was not created: info=%v err=%v", info, err)
+	}
+}
+
+func TestSecureDBPathRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := secureDBPath(filepath.Join(link, "escaped.db")); err == nil {
+		t.Fatal("secureDBPath accepted a symlink escaping allowed roots")
+	}
+}
+
+func TestSecureDBPathUsesCanonicalAlias(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "alias")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	got, err := secureDBPath(filepath.Join(link, "fwrd.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := secureDBPath(filepath.Join(target, "fwrd.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("alias path = %q, direct path = %q", got, want)
+	}
+}
+
+func TestSecureDBPathPreservesMemoryPath(t *testing.T) {
+	got, err := secureDBPath(storage.MemoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != storage.MemoryPath {
+		t.Fatalf("secureDBPath = %q, want MemoryPath", got)
 	}
 }
 

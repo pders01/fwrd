@@ -21,6 +21,11 @@ type BatchScope interface {
 	CommitBatch()
 }
 
+// DeleteListener receives notification after a feed is deleted.
+type DeleteListener interface {
+	OnFeedDeleted(feedID string)
+}
+
 // RefreshSummary reports the outcome of RefreshAllFeeds.
 type RefreshSummary struct {
 	UpdatedFeeds  int

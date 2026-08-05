@@ -35,9 +35,11 @@ type Manager struct {
 	config         *config.Config
 	urlValidator   *validation.FeedURLValidator
 	pluginRegistry *plugins.Registry
+	forceRefresh   bool
 
-	dataListeners []DataListener
-	batchScopes   []BatchScope
+	dataListeners   []DataListener
+	deleteListeners []DeleteListener
+	batchScopes     []BatchScope
 }
 
 func NewManager(store *storage.Store, cfg *config.Config) *Manager {
@@ -59,10 +61,15 @@ func NewManager(store *storage.Store, cfg *config.Config) *Manager {
 
 // SetForceRefresh configures the manager to ignore ETag/Last-Modified headers
 func (m *Manager) SetForceRefresh(force bool) {
+	m.forceRefresh = force
 	if m.fetcher != nil {
 		m.fetcher.SetIgnoreCache(force)
 	}
 }
+
+// ForceRefresh reports the manager's current cache-bypass default. Mutation
+// coordination ensures temporary RPC overrides are not changed concurrently.
+func (m *Manager) ForceRefresh() bool { return m.forceRefresh }
 
 // PluginRegistry returns the registry plugins are registered against.
 // Callers wire scriptable plugin loaders against this registry at
@@ -123,10 +130,36 @@ func (m *Manager) RegisterBatchScope(s BatchScope) {
 	}
 }
 
+// RegisterDeleteListener subscribes l to feed deletion notifications.
+func (m *Manager) RegisterDeleteListener(l DeleteListener) {
+	if l != nil {
+		m.deleteListeners = append(m.deleteListeners, l)
+	}
+}
+
+// DeleteFeed removes a feed and all its articles, then notifies
+// registered delete listeners.
+func (m *Manager) DeleteFeed(id string) error {
+	if err := m.store.DeleteFeed(id); err != nil {
+		return err
+	}
+	for _, l := range m.deleteListeners {
+		l.OnFeedDeleted(id)
+	}
+	return nil
+}
+
 func (m *Manager) notifyDataUpdated(feed *storage.Feed, articles []*storage.Article) {
 	for _, l := range m.dataListeners {
 		l.OnDataUpdated(feed, articles)
 	}
+}
+
+// NotifyDataUpdated emits a post-write notification for primitive storage
+// operations coordinated outside Manager. Callers must serialize it with the
+// corresponding mutation just as Manager's own operations do.
+func (m *Manager) NotifyDataUpdated(feed *storage.Feed, articles []*storage.Article) {
+	m.notifyDataUpdated(feed, articles)
 }
 
 func (m *Manager) beginBatchScopes() {
@@ -146,16 +179,27 @@ func (m *Manager) commitBatchScopes() {
 // DataListeners. The returned feed and saved articles are also handed to
 // listeners.
 func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
+	return m.AddFeedContext(context.Background(), url)
+}
+
+// AddFeedContext is AddFeed with caller-controlled cancellation.
+func (m *Manager) AddFeedContext(ctx context.Context, url string) (*storage.Feed, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	normalizedURL, err := m.urlValidator.ValidateAndNormalize(url)
 	if err != nil {
 		return nil, fmt.Errorf("invalid feed URL: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), m.config.Feed.HTTPTimeout)
+	pluginCtx, cancel := context.WithTimeout(ctx, m.config.Feed.HTTPTimeout)
 	defer cancel()
 
-	feedInfo, err := m.pluginRegistry.EnhanceFeed(ctx, normalizedURL)
+	feedInfo, err := m.pluginRegistry.EnhanceFeed(pluginCtx, normalizedURL)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		feedInfo = &plugins.FeedInfo{
 			OriginalURL: normalizedURL,
 			FeedURL:     normalizedURL,
@@ -175,7 +219,7 @@ func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
 		UpdatedAt: time.Now(),
 	}
 
-	resp, updated, err := m.fetcher.Fetch(feed)
+	resp, updated, err := m.fetcher.FetchContext(ctx, feed)
 	if err != nil {
 		return nil, fmt.Errorf("fetching feed: %w", err)
 	}
@@ -184,8 +228,11 @@ func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
 	}
 	defer resp.Body.Close()
 
-	articles, err := m.parser.Parse(io.LimitReader(resp.Body, maxFeedBodySize), feed.ID)
+	articles, err := m.parser.Parse(io.LimitReader(contextReader{ctx: ctx, reader: resp.Body}, maxFeedBodySize), feed.ID)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		return nil, fmt.Errorf("parsing feed: %w", err)
 	}
 
@@ -194,6 +241,9 @@ func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
 	}
 
 	m.fetcher.UpdateFeedMetadata(feed, resp)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	if err := m.store.SaveFeed(feed); err != nil {
 		return nil, fmt.Errorf("saving feed: %w", err)
@@ -208,7 +258,12 @@ func (m *Manager) AddFeed(url string) (*storage.Feed, error) {
 
 // RefreshFeed re-fetches a single feed and notifies listeners on success.
 func (m *Manager) RefreshFeed(feedID string) error {
-	_, _, err := m.refreshFeedByID(feedID, true)
+	return m.RefreshFeedContext(context.Background(), feedID)
+}
+
+// RefreshFeedContext is RefreshFeed with caller-controlled cancellation.
+func (m *Manager) RefreshFeedContext(ctx context.Context, feedID string) error {
+	_, _, err := m.refreshFeedByIDContext(ctx, feedID, true)
 	return err
 }
 
@@ -217,7 +272,10 @@ func (m *Manager) RefreshFeed(feedID string) error {
 // notifications from a single goroutine. When notify is true,
 // notifyDataUpdated runs inline; the multi-feed path passes false and
 // notifies later from the result-collection loop.
-func (m *Manager) refreshFeedByID(feedID string, notify bool) (*storage.Feed, []*storage.Article, error) {
+func (m *Manager) refreshFeedByIDContext(ctx context.Context, feedID string, notify bool) (*storage.Feed, []*storage.Article, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	feed, err := m.store.GetFeed(feedID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("getting feed: %w", err)
@@ -227,8 +285,11 @@ func (m *Manager) refreshFeedByID(feedID string, notify bool) (*storage.Feed, []
 		return feed, nil, nil
 	}
 
-	resp, updated, err := m.fetcher.Fetch(feed)
+	resp, updated, err := m.fetcher.FetchContext(ctx, feed)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return feed, nil, ctxErr
+		}
 		// Persist the failure so /feeds can surface a stale/error badge.
 		// Best-effort: a save error here is subordinate to the fetch error.
 		recordFeedError(feed, err)
@@ -247,8 +308,11 @@ func (m *Manager) refreshFeedByID(feedID string, notify bool) (*storage.Feed, []
 	}
 	defer resp.Body.Close()
 
-	articles, err := m.parser.Parse(io.LimitReader(resp.Body, maxFeedBodySize), feedID)
+	articles, err := m.parser.Parse(io.LimitReader(contextReader{ctx: ctx, reader: resp.Body}, maxFeedBodySize), feedID)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return feed, nil, ctxErr
+		}
 		recordFeedError(feed, err)
 		_ = m.store.SaveFeed(feed)
 		return feed, nil, fmt.Errorf("parsing feed: %w", err)
@@ -257,6 +321,9 @@ func (m *Manager) refreshFeedByID(feedID string, notify bool) (*storage.Feed, []
 	m.fetcher.UpdateFeedMetadata(feed, resp)
 	feed.UpdatedAt = time.Now()
 	clearFeedError(feed)
+	if err := ctx.Err(); err != nil {
+		return feed, nil, err
+	}
 
 	if err := m.store.SaveFeed(feed); err != nil {
 		return feed, nil, fmt.Errorf("saving feed: %w", err)
@@ -277,6 +344,14 @@ func (m *Manager) refreshFeedByID(feedID string, notify bool) (*storage.Feed, []
 // goroutines complete, so listener implementations need not be safe
 // for concurrent invocation.
 func (m *Manager) RefreshAllFeeds() (RefreshSummary, error) {
+	return m.RefreshAllFeedsContext(context.Background())
+}
+
+// RefreshAllFeedsContext is RefreshAllFeeds with caller-controlled cancellation.
+func (m *Manager) RefreshAllFeedsContext(ctx context.Context) (RefreshSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return RefreshSummary{}, err
+	}
 	feeds, err := m.store.GetAllFeeds()
 	if err != nil {
 		return RefreshSummary{}, fmt.Errorf("getting feeds: %w", err)
@@ -304,14 +379,27 @@ func (m *Manager) RefreshAllFeeds() (RefreshSummary, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for f := range feedChan {
-				feed, articles, err := m.refreshFeedByID(f.ID, false)
-				resultChan <- result{feed: feed, articles: articles, err: err}
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case f, ok := <-feedChan:
+					if !ok {
+						return
+					}
+					feed, articles, refreshErr := m.refreshFeedByIDContext(ctx, f.ID, false)
+					resultChan <- result{feed: feed, articles: articles, err: refreshErr}
+				}
 			}
 		}()
 	}
+feedLoop:
 	for _, f := range feeds {
-		feedChan <- f
+		select {
+		case feedChan <- f:
+		case <-ctx.Done():
+			break feedLoop
+		}
 	}
 	close(feedChan)
 	wg.Wait()
@@ -335,7 +423,19 @@ func (m *Manager) RefreshAllFeeds() (RefreshSummary, error) {
 		m.notifyDataUpdated(r.feed, r.articles)
 	}
 
-	return summary, errors.Join(summary.Errors...)
+	return summary, errors.Join(append(summary.Errors, ctx.Err())...)
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }
 
 // recordFeedError stamps a failed refresh onto the feed. LastFetched is left

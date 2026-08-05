@@ -1,0 +1,124 @@
+// Package control provides the shared FeedOperations interface and the
+// session abstraction that CLI commands use to access storage and feed
+// lifecycle operations, whether locally or over IPC.
+package control
+
+import (
+	"context"
+
+	"github.com/pders01/fwrd/internal/feed"
+	"github.com/pders01/fwrd/internal/storage"
+)
+
+// FeedOperations groups feed lifecycle methods that must run in the
+// database-owning process so that plugins, Bleve notifications, and
+// audit logging are all driven by the serve-side manager.
+type FeedOperations interface {
+	AddFeed(ctx context.Context, url string) (*storage.Feed, error)
+	RefreshFeed(ctx context.Context, id string, force bool) error
+	RefreshAllFeeds(ctx context.Context, force bool) (feed.RefreshSummary, error)
+	DeleteFeed(ctx context.Context, id string) error
+	ImportFeeds(ctx context.Context, urls []string) (ImportSummary, error)
+}
+
+// ImportSummary reports the outcome of ImportFeeds.
+type ImportSummary struct {
+	Added    int
+	Skipped  int
+	Failed   int
+	Failures []ImportFailure `json:"failures,omitempty"`
+}
+
+// ImportFailure identifies a URL that could not be added.
+type ImportFailure struct {
+	URL   string `json:"url"`
+	Error string `json:"error"`
+}
+
+// LocalOps is the local (non-IPC) FeedOperations implementation that
+// delegates directly to feed.Manager and storage.Store.
+type LocalOps struct {
+	Store   *storage.Store
+	Manager *feed.Manager
+}
+
+func (l *LocalOps) AddFeed(ctx context.Context, url string) (*storage.Feed, error) {
+	return l.Manager.AddFeedContext(ctx, url)
+}
+
+func (l *LocalOps) RefreshFeed(ctx context.Context, id string, force bool) error {
+	previous := l.Manager.ForceRefresh()
+	l.Manager.SetForceRefresh(force)
+	defer l.Manager.SetForceRefresh(previous)
+	return l.Manager.RefreshFeedContext(ctx, id)
+}
+
+func (l *LocalOps) RefreshAllFeeds(ctx context.Context, force bool) (feed.RefreshSummary, error) {
+	previous := l.Manager.ForceRefresh()
+	l.Manager.SetForceRefresh(force)
+	defer l.Manager.SetForceRefresh(previous)
+	return l.Manager.RefreshAllFeedsContext(ctx)
+}
+
+func (l *LocalOps) DeleteFeed(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return l.Manager.DeleteFeed(id)
+}
+
+// SaveFeed performs a primitive storage mutation and emits the same search
+// notification as a manager-driven operation.
+func (l *LocalOps) SaveFeed(value *storage.Feed) error {
+	if err := l.Store.SaveFeed(value); err != nil {
+		return err
+	}
+	l.Manager.NotifyDataUpdated(value, nil)
+	return nil
+}
+
+// SaveArticles performs a primitive storage mutation and updates search.
+func (l *LocalOps) SaveArticles(articles []*storage.Article) error {
+	if err := l.Store.SaveArticles(articles); err != nil {
+		return err
+	}
+	l.Manager.NotifyDataUpdated(nil, articles)
+	return nil
+}
+
+func (l *LocalOps) ImportFeeds(ctx context.Context, urls []string) (ImportSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return ImportSummary{}, err
+	}
+	// Snapshot existing URLs so already-subscribed feeds are skipped.
+	existing, err := l.Store.GetAllFeeds()
+	if err != nil {
+		return ImportSummary{}, err
+	}
+	have := make(map[string]bool, len(existing))
+	for _, f := range existing {
+		have[f.URL] = true
+	}
+
+	var summary ImportSummary
+	for _, u := range urls {
+		if err := ctx.Err(); err != nil {
+			return summary, err
+		}
+		if have[u] {
+			summary.Skipped++
+			continue
+		}
+		if _, addErr := l.Manager.AddFeedContext(ctx, u); addErr != nil {
+			if ctx.Err() != nil {
+				return summary, ctx.Err()
+			}
+			summary.Failed++
+			summary.Failures = append(summary.Failures, ImportFailure{URL: u, Error: addErr.Error()})
+			continue
+		}
+		have[u] = true
+		summary.Added++
+	}
+	return summary, nil
+}

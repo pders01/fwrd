@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -177,26 +178,58 @@ func (v *FilePathValidator) validateBaseDirs(path string) error {
 		}
 	}
 
-	// Check if path is within any allowed base directory
-	for _, baseDir := range v.AllowedBaseDirs {
-		absBaseDir, err := filepath.Abs(baseDir)
-		if err != nil {
-			continue // Skip invalid base directories
-		}
+	canonicalPath, err := canonicalComparisonPath(absPath)
+	if err != nil {
+		return fmt.Errorf("cannot resolve path: %w", err)
+	}
 
-		// Check if the path is within this base directory
-		relPath, err := filepath.Rel(absBaseDir, absPath)
-		if err != nil {
+	// Resolve allowed roots too (notably /var -> /private/var on macOS), then
+	// compare the resolved path. This prevents a lexical child symlink from
+	// escaping an allowed root.
+	for _, baseDir := range v.AllowedBaseDirs {
+		absBaseDir, absErr := filepath.Abs(baseDir)
+		if absErr != nil {
+			continue
+		}
+		canonicalBase, canonicalErr := canonicalComparisonPath(absBaseDir)
+		if canonicalErr != nil {
 			continue
 		}
 
-		// If relative path doesn't start with "..", it's within the base directory
-		if !strings.HasPrefix(relPath, "..") {
+		relPath, relErr := filepath.Rel(canonicalBase, canonicalPath)
+		if relErr != nil {
+			continue
+		}
+		if relPath != ".." && !strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
 			return nil
 		}
 	}
 
 	return fmt.Errorf("path not within allowed directories: %v", v.AllowedBaseDirs)
+}
+
+func canonicalComparisonPath(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			resolved = path
+		} else {
+			resolvedParent, parentErr := canonicalComparisonPath(parent)
+			if parentErr != nil {
+				return "", parentErr
+			}
+			resolved = filepath.Join(resolvedParent, filepath.Base(path))
+		}
+	}
+	resolved = filepath.Clean(resolved)
+	if runtime.GOOS == "windows" {
+		resolved = strings.ToLower(resolved)
+	}
+	return resolved, nil
 }
 
 // ValidateDirectory ensures a directory path is safe and creates it if necessary

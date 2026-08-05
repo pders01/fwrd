@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -25,8 +27,10 @@ import (
 	"github.com/pders01/dotlocal/port80"
 	"github.com/pders01/fwrd/internal/audit"
 	"github.com/pders01/fwrd/internal/config"
+	"github.com/pders01/fwrd/internal/control"
 	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/feed"
+	"github.com/pders01/fwrd/internal/ipc"
 	"github.com/pders01/fwrd/internal/opml"
 	"github.com/pders01/fwrd/internal/plugins"
 	pluginlua "github.com/pders01/fwrd/internal/plugins/lua"
@@ -413,43 +417,106 @@ func deriveIndexPath(dbFilePath string) string {
 	}
 }
 
-func getStore(cfg *config.Config) (*storage.Store, error) {
-	// Override database path if provided via flag
-	dbFilePath := cfg.Database.Path
+func configuredDBPath(cfg *config.Config) string {
 	if dbPath != "" {
-		dbFilePath = dbPath
+		return dbPath
 	}
-
-	// Use secure path handler for validation
-	pathHandler := validation.NewSecurePathHandler()
-	validatedPath, err := pathHandler.GetSecureDBPath(dbFilePath)
-	if err != nil {
-		return nil, fmt.Errorf("invalid database path: %w", err)
-	}
-
-	// Ensure the parent directory exists before opening the database
-	dbDir := filepath.Dir(validatedPath)
-	if _, err := pathHandler.EnsureSecureDirectory(dbDir); err != nil {
-		return nil, fmt.Errorf("failed to create database directory: %w", err)
-	}
-
-	return storage.NewStoreWithTimeout(validatedPath, cfg.Database.Timeout)
+	return cfg.Database.Path
 }
 
-// withStore provides consistent resource management for store operations
-func withStore(fn func(*storage.Store) error) error {
+// secureDBPath applies the same validation and directory creation to local,
+// remote, and serve command paths so endpoint identity cannot diverge.
+func secureDBPath(path string) (string, error) {
+	if path == storage.MemoryPath {
+		return path, nil
+	}
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home directory: %w", err)
+		}
+		path = filepath.Join(home, ".fwrd", "fwrd.db")
+	} else if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home directory: %w", err)
+		}
+		path = filepath.Join(home, path[2:])
+	}
+
+	canonicalPath, err := ipc.CanonicalDBPath(path)
+	if err != nil {
+		return "", fmt.Errorf("canonicalize database path: %w", err)
+	}
+	pathHandler := validation.NewSecurePathHandler()
+	validatedPath, err := pathHandler.GetSecureDBPath(canonicalPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid database path: %w", err)
+	}
+	if _, err = pathHandler.EnsureSecureDirectory(filepath.Dir(validatedPath)); err != nil {
+		return "", fmt.Errorf("failed to create database directory: %w", err)
+	}
+	return validatedPath, nil
+}
+
+func getStore(cfg *config.Config) (*storage.Store, error) {
+	validatedPath, err := secureDBPath(configuredDBPath(cfg))
+	if err != nil {
+		return nil, err
+	}
+	cfg.Database.Path = validatedPath
+	if dbPath != "" {
+		cfg.Database.SearchIndex = deriveIndexPath(validatedPath)
+	}
+	return storage.NewLocalStoreWithTimeout(validatedPath, cfg.Database.Timeout)
+}
+
+// withSession creates a local or IPC session. Mutating local sessions also
+// load plugins and own the Bleve listeners, matching serve-side semantics.
+func withSession(mutating bool, fn func(*control.Session) error) error {
 	cfg, err := loadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	store, err := getStore(cfg)
+	validatedPath, err := secureDBPath(configuredDBPath(cfg))
 	if err != nil {
-		return fmt.Errorf("failed to open store: %w", err)
+		return err
 	}
-	defer store.Close()
-
-	return fn(store)
+	cfg.Database.Path = validatedPath
+	if dbPath != "" {
+		cfg.Database.SearchIndex = deriveIndexPath(validatedPath)
+	}
+	options := []control.SessionOption{
+		control.WithOpenTimeout(cfg.Database.Timeout),
+		control.WithCanonicalDBPath(),
+	}
+	if mutating {
+		options = append(options, control.WithLocalSetup(func(store *storage.Store, manager *feed.Manager) (io.Closer, error) {
+			loadLuaPlugins(manager)
+			searcher, searchErr := buildSearcher(store, cfg)
+			if searchErr != nil {
+				return nil, searchErr
+			}
+			if listener, ok := searcher.(feed.DataListener); ok {
+				manager.RegisterDataListener(listener)
+			}
+			if scope, ok := searcher.(feed.BatchScope); ok {
+				manager.RegisterBatchScope(scope)
+			}
+			if listener, ok := searcher.(feed.DeleteListener); ok {
+				manager.RegisterDeleteListener(listener)
+			}
+			closer, _ := searcher.(io.Closer)
+			return closer, nil
+		}))
+	}
+	sess, err := control.OpenSession(validatedPath, cfg, options...)
+	if err != nil {
+		return fmt.Errorf("failed to open session: %w", err)
+	}
+	defer sess.Close()
+	return fn(sess)
 }
 
 // withStoreAndConfig provides access to both store and config with proper cleanup
@@ -536,6 +603,9 @@ func runServe(cmd *cobra.Command, _ []string) {
 		if err != nil {
 			return err
 		}
+		if closer, ok := searcher.(io.Closer); ok {
+			defer closer.Close()
+		}
 
 		// Wire the manager exactly as the TUI does so feeds added or
 		// refreshed via the web UI are indexed for search.
@@ -547,8 +617,17 @@ func runServe(cmd *cobra.Command, _ []string) {
 		if bs, ok := searcher.(feed.BatchScope); ok {
 			manager.RegisterBatchScope(bs)
 		}
+		// Register the searcher as a delete listener so feed deletions
+		// via IPC also clean up the Bleve index.
+		if dl, ok := searcher.(feed.DeleteListener); ok {
+			manager.RegisterDeleteListener(dl)
+		}
 
-		srv, err := web.NewServer(store, manager, searcher, cfg)
+		// Build the mutation coordinator so web and IPC mutations share one lock.
+		ops := &control.LocalOps{Store: store, Manager: manager}
+		coord := control.NewMutationCoordinator(ops)
+
+		srv, err := web.NewServer(store, manager, searcher, cfg, coord)
 		if err != nil {
 			return fmt.Errorf("failed to build web server: %w", err)
 		}
@@ -576,29 +655,46 @@ func runServe(cmd *cobra.Command, _ []string) {
 		if err != nil {
 			return err
 		}
+		defer ln.Close()
 
 		// Resolve TLS before announcing anything: a cert problem should fail
 		// fast like a bind failure, not after we've logged "serving".
 		scheme := "http"
 		if tlsEnabled := resolveTLSEnabled(cmd, cfg); tlsEnabled {
-			src, err := webtls.NewSource(
+			src, sourceErr := webtls.NewSource(
 				firstNonEmpty(serveTLSMode, cfg.Web.TLS.Mode),
 				firstNonEmpty(cfg.Web.TLS.Dir, defaultTLSDir()),
 				firstNonEmpty(serveTLSCert, cfg.Web.TLS.CertFile),
 				firstNonEmpty(serveTLSKey, cfg.Web.TLS.KeyFile),
 				tlsHosts(),
 			)
-			if err != nil {
-				return err
+			if sourceErr != nil {
+				return sourceErr
 			}
-			tcfg, err := src.TLSConfig()
-			if err != nil {
-				return fmt.Errorf("tls: %w", err)
+			tcfg, tlsErr := src.TLSConfig()
+			if tlsErr != nil {
+				return fmt.Errorf("tls: %w", tlsErr)
 			}
 			srv.UseTLS(tcfg)
 			scheme = "https"
 			logger.Info("tls enabled", "source", src.Describe())
 		}
+
+		// getStore canonicalized and validated this exact path before opening
+		// bbolt, so the endpoint identity cannot describe a different file.
+		ep := ipc.NewEndpoint(cfg.Database.Path)
+		rpcSrv, err := control.NewRPCServer(ep, store, coord)
+		if err != nil {
+			_ = ln.Close()
+			return fmt.Errorf("start IPC server: %w", err)
+		}
+		defer rpcSrv.Close()
+
+		// Serve IPC in a goroutine alongside HTTP.
+		ipcErrCh := make(chan error, 1)
+		go func() {
+			ipcErrCh <- rpcSrv.Serve()
+		}()
 
 		if !isLoopbackBind(serveAddr) && !srv.AuthEnabled() {
 			logger.Warn("serving on a non-loopback address without authentication; "+
@@ -613,11 +709,55 @@ func runServe(cmd *cobra.Command, _ []string) {
 			}
 		}
 
-		logger.Info("serving", "url", scheme+"://"+serveAddr)
-		if err := srv.Serve(ln); err != nil {
-			return fmt.Errorf("web server error: %w", err)
+		serveCtx, cancelServe := context.WithCancel(context.Background())
+		signalCtx, stopSignals := signal.NotifyContext(serveCtx, os.Interrupt, syscall.SIGTERM)
+		defer func() {
+			stopSignals()
+			cancelServe()
+		}()
+
+		httpErrCh := make(chan error, 1)
+		go func() { httpErrCh <- srv.ServeContext(signalCtx, ln) }()
+
+		logger.Info("serving", "url", scheme+"://"+serveAddr, "ipc", ep.Address)
+
+		var firstErr error
+		httpDone, ipcDone := false, false
+		select {
+		case <-signalCtx.Done():
+			fmt.Fprintln(os.Stderr, "\nshutting down… (waiting for in-flight requests)")
+		case err := <-httpErrCh:
+			httpDone = true
+			if err != nil {
+				firstErr = fmt.Errorf("web server error: %w", err)
+			}
+		case err := <-ipcErrCh:
+			ipcDone = true
+			if err != nil {
+				firstErr = fmt.Errorf("ipc server error: %w", err)
+			}
 		}
-		return nil
+
+		cancelServe()
+		stopSignals()
+		shutCtx, shutCancel := context.WithTimeout(context.Background(), web.ShutdownGrace)
+		shutdownErr := rpcSrv.Shutdown(shutCtx)
+		shutCancel()
+		if shutdownErr != nil && !errors.Is(shutdownErr, context.DeadlineExceeded) {
+			firstErr = errors.Join(firstErr, fmt.Errorf("ipc shutdown: %w", shutdownErr))
+		}
+
+		if !httpDone {
+			if err := <-httpErrCh; err != nil {
+				firstErr = errors.Join(firstErr, fmt.Errorf("web server error: %w", err))
+			}
+		}
+		if !ipcDone {
+			if err := <-ipcErrCh; err != nil && !errors.Is(err, net.ErrClosed) {
+				firstErr = errors.Join(firstErr, fmt.Errorf("ipc server error: %w", err))
+			}
+		}
+		return firstErr
 	}); err != nil {
 		exitWithError(err)
 	}
@@ -1027,8 +1167,8 @@ func exitWithError(err error) {
 }
 
 func listFeeds(_ *cobra.Command, _ []string) {
-	if err := withStore(func(store *storage.Store) error {
-		feeds, err := store.GetAllFeeds()
+	if err := withSession(false, func(sess *control.Session) error {
+		feeds, err := sess.Store.GetAllFeeds()
 		if err != nil {
 			return fmt.Errorf("failed to get feeds: %w", err)
 		}
@@ -1038,15 +1178,17 @@ func listFeeds(_ *cobra.Command, _ []string) {
 			return nil
 		}
 
+		stats, err := sess.Store.FeedStats()
+		if err != nil {
+			return fmt.Errorf("failed to get feed stats: %w", err)
+		}
 		fmt.Printf("Found %d feeds:\n\n", len(feeds))
 		for _, feed := range feeds {
 			fmt.Printf("Title: %s\n", feed.Title)
 			fmt.Printf("URL:   %s\n", feed.URL)
 			fmt.Printf("ID:    %s\n", feed.ID)
 
-			// Get article count
-			articles, _ := store.GetArticles(feed.ID, 0)
-			fmt.Printf("Articles: %d\n", len(articles))
+			fmt.Printf("Articles: %d\n", stats[feed.ID].Total)
 
 			fmt.Printf("Last Fetched: %s\n", feed.LastFetched.Format("2006-01-02 15:04:05"))
 			if feed.ETag != "" {
@@ -1066,12 +1208,9 @@ func listFeeds(_ *cobra.Command, _ []string) {
 func addFeed(_ *cobra.Command, args []string) {
 	url := args[0]
 
-	if err := withStoreAndConfig(func(store *storage.Store, cfg *config.Config) error {
-		manager := feed.NewManager(store, cfg)
-		loadLuaPlugins(manager)
-
+	if err := withSession(true, func(sess *control.Session) error {
 		fmt.Printf("Adding feed: %s\n", url)
-		feed, err := manager.AddFeed(url)
+		feed, err := sess.Feeds.AddFeed(context.Background(), url)
 		if err != nil {
 			return fmt.Errorf("failed to add feed: %w", err)
 		}
@@ -1079,9 +1218,11 @@ func addFeed(_ *cobra.Command, args []string) {
 		fmt.Printf("Successfully added feed: %s (%s)\n", feed.Title, feed.URL)
 		fmt.Printf("Feed ID: %s\n", feed.ID)
 
-		// Get article count
-		articles, _ := store.GetArticles(feed.ID, 0)
-		fmt.Printf("Articles fetched: %d\n", len(articles))
+		stats, err := sess.Store.FeedStats()
+		if err != nil {
+			return fmt.Errorf("failed to get feed stats: %w", err)
+		}
+		fmt.Printf("Articles fetched: %d\n", stats[feed.ID].Total)
 
 		return nil
 	}); err != nil {
@@ -1092,9 +1233,9 @@ func addFeed(_ *cobra.Command, args []string) {
 func deleteFeed(_ *cobra.Command, args []string) {
 	urlOrID := args[0]
 
-	if err := withStore(func(store *storage.Store) error {
+	if err := withSession(true, func(sess *control.Session) error {
 		// Find feed by URL or ID
-		feeds, err := store.GetAllFeeds()
+		feeds, err := sess.Store.GetAllFeeds()
 		if err != nil {
 			return fmt.Errorf("failed to get feeds: %w", err)
 		}
@@ -1113,7 +1254,7 @@ func deleteFeed(_ *cobra.Command, args []string) {
 
 		fmt.Printf("Deleting feed: %s (%s)\n", targetFeed.Title, targetFeed.URL)
 
-		if err := store.DeleteFeed(targetFeed.ID); err != nil {
+		if err := sess.Feeds.DeleteFeed(context.Background(), targetFeed.ID); err != nil {
 			return fmt.Errorf("failed to delete feed: %w", err)
 		}
 
@@ -1126,8 +1267,8 @@ func deleteFeed(_ *cobra.Command, args []string) {
 
 func exportFeeds(_ *cobra.Command, args []string) {
 	path := args[0]
-	if err := withStore(func(store *storage.Store) error {
-		feeds, err := store.GetAllFeeds()
+	if err := withSession(false, func(sess *control.Session) error {
+		feeds, err := sess.Store.GetAllFeeds()
 		if err != nil {
 			return fmt.Errorf("failed to get feeds: %w", err)
 		}
@@ -1151,7 +1292,7 @@ func exportFeeds(_ *cobra.Command, args []string) {
 
 func importFeeds(_ *cobra.Command, args []string) {
 	path := args[0]
-	if err := withStoreAndConfig(func(store *storage.Store, cfg *config.Config) error {
+	if err := withSession(true, func(sess *control.Session) error {
 		var data []byte
 		var err error
 		if path == "-" {
@@ -1172,32 +1313,28 @@ func importFeeds(_ *cobra.Command, args []string) {
 			return nil
 		}
 
-		manager := feed.NewManager(store, cfg)
-		loadLuaPlugins(manager)
-
-		// Snapshot existing URLs so already-subscribed feeds are skipped
-		// rather than re-fetched.
-		existing, _ := store.GetAllFeeds()
+		existing, _ := sess.Store.GetAllFeeds()
 		have := make(map[string]bool, len(existing))
-		for _, f := range existing {
-			have[f.URL] = true
+		for _, value := range existing {
+			have[value.URL] = true
 		}
 
-		var added, skipped, failed int
-		for _, f := range feeds {
-			if have[f.URL] {
-				skipped++
-				continue
+		urls := make([]string, len(feeds))
+		for i, value := range feeds {
+			urls[i] = value.URL
+			if !have[value.URL] {
+				fmt.Printf("Adding %s\n", value.URL)
 			}
-			fmt.Printf("Adding %s\n", f.URL)
-			if _, err := manager.AddFeed(f.URL); err != nil {
-				fmt.Fprintf(os.Stderr, "  failed: %v\n", err)
-				failed++
-				continue
-			}
-			added++
 		}
-		fmt.Printf("Imported %d feed(s); %d skipped (already present); %d failed.\n", added, skipped, failed)
+
+		summary, err := sess.Feeds.ImportFeeds(context.Background(), urls)
+		if err != nil {
+			return fmt.Errorf("failed to import: %w", err)
+		}
+		for _, failure := range summary.Failures {
+			fmt.Fprintf(os.Stderr, "  %s failed: %s\n", failure.URL, failure.Error)
+		}
+		fmt.Printf("Imported %d feed(s); %d skipped (already present); %d failed.\n", summary.Added, summary.Skipped, summary.Failed)
 		return nil
 	}); err != nil {
 		exitWithError(err)
@@ -1240,18 +1377,13 @@ func listPlugins(_ *cobra.Command, _ []string) {
 }
 
 func refreshFeeds(_ *cobra.Command, _ []string) {
-	if err := withStoreAndConfig(func(store *storage.Store, cfg *config.Config) error {
-		manager := feed.NewManager(store, cfg)
-		loadLuaPlugins(manager)
-
-		// Set force refresh if requested
+	if err := withSession(true, func(sess *control.Session) error {
 		if forceRefresh {
 			fmt.Println("Force refresh enabled - ignoring ETag/Last-Modified headers")
-			manager.SetForceRefresh(true)
 		}
 
 		fmt.Println("Refreshing all feeds...")
-		summary, err := manager.RefreshAllFeeds()
+		summary, err := sess.Feeds.RefreshAllFeeds(context.Background(), forceRefresh)
 		if err != nil {
 			return fmt.Errorf("failed to refresh feeds: %w", err)
 		}

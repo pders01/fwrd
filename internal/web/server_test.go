@@ -1,6 +1,8 @@
 package web
 
 import (
+	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,6 +12,8 @@ import (
 	"time"
 
 	"github.com/pders01/fwrd/internal/config"
+	"github.com/pders01/fwrd/internal/control"
+	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/storage"
 )
@@ -22,7 +26,7 @@ func newTestServer(t *testing.T) (*Server, *storage.Store) {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	srv, err := NewServer(store, nil, nil, &config.Config{})
+	srv, err := NewServer(store, nil, nil, &config.Config{}, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -223,7 +227,7 @@ func TestConcurrentMutationsSerialized(t *testing.T) {
 	t.Cleanup(func() { store.Close() })
 
 	stub := &stubDeleteListener{deleted: map[string]int{}}
-	srv, err := NewServer(store, nil, stub, &config.Config{})
+	srv, err := NewServer(store, nil, stub, &config.Config{}, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -256,5 +260,67 @@ func TestSearchUnavailable(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "unavailable") {
 		t.Error("expected 'unavailable' notice when searcher is nil")
+	}
+}
+
+func TestServeContextDrainsActiveMutationAfterListenerFailure(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(started)
+		<-release
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0"?><rss version="2.0"><channel><title>Drain</title><item><title>One</title><link>https://example.com/one</link><guid>one</guid></item></channel></rss>`))
+	}))
+	defer backend.Close()
+
+	store, err := storage.NewStore(storage.MemoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	cfg := config.TestConfig()
+	manager := feed.NewManager(store, cfg)
+	manager.SetPermissiveValidation(true)
+	coordinator := control.NewMutationCoordinator(&control.LocalOps{Store: store, Manager: manager})
+	server, err := NewServer(store, manager, nil, cfg, coordinator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- server.ServeContext(context.Background(), listener) }()
+
+	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+	postDone := make(chan error, 1)
+	go func() {
+		response, postErr := client.PostForm("http://"+listener.Addr().String()+"/feeds", url.Values{"url": {backend.URL}})
+		if response != nil {
+			_ = response.Body.Close()
+		}
+		postDone <- postErr
+	}()
+	<-started
+	if closeErr := listener.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	select {
+	case serveErr := <-serveDone:
+		t.Fatalf("ServeContext returned before active mutation drained: %v", serveErr)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	if postErr := <-postDone; postErr != nil {
+		t.Fatalf("POST /feeds: %v", postErr)
+	}
+	if serveErr := <-serveDone; serveErr == nil {
+		t.Fatal("ServeContext did not report the forced listener failure")
+	}
+	feeds, err := store.GetAllFeeds()
+	if err != nil || len(feeds) != 1 {
+		t.Fatalf("mutation after drain: feeds=%v err=%v", feeds, err)
 	}
 }

@@ -26,7 +26,7 @@ func benchServer(b *testing.B) *Server {
 		b.Fatalf("open store: %v", err)
 	}
 	b.Cleanup(func() { _ = store.Close() })
-	srv, err := NewServer(store, nil, nil, nil)
+	srv, err := NewServer(store, nil, nil, nil, nil)
 	if err != nil {
 		b.Fatalf("new server: %v", err)
 	}

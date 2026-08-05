@@ -1,84 +1,62 @@
 package integration
 
 import (
-	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/storage"
 )
 
-var caddyCmd *exec.Cmd
+var integrationBaseURL string
 
 func TestMain(m *testing.M) {
-	// Start Caddy server
-	if err := startCaddy(); err != nil {
-		fmt.Printf("Failed to start Caddy: %v\n", err)
-		os.Exit(1)
+	rss, err := os.ReadFile(filepath.Join("..", "fixtures", "sample-rss.xml"))
+	if err != nil {
+		panic(err)
+	}
+	atom, err := os.ReadFile(filepath.Join("..", "fixtures", "sample-atom.xml"))
+	if err != nil {
+		panic(err)
 	}
 
-	// Wait for Caddy to start and accept connections
-	if err := waitForCaddy("http://127.0.0.1:8080/feed.rss", 30*time.Second); err != nil {
-		fmt.Printf("Caddy did not become ready in time: %v\n", err)
-		stopCaddy()
-		os.Exit(1)
-	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/feed.rss", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write(rss)
+	})
+	mux.HandleFunc("/feed.atom", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/atom+xml")
+		_, _ = w.Write(atom)
+	})
+	mux.HandleFunc("/cached-feed.rss", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("If-None-Match") != "" {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Content-Type", "application/rss+xml")
+		w.Header().Set("ETag", `"test-etag-123"`)
+		w.Header().Set("Last-Modified", "Wed, 01 Jan 2025 00:00:00 GMT")
+		_, _ = w.Write(rss)
+	})
+	mux.HandleFunc("/rate-limited.rss", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "60")
+		http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+	})
 
-	// Run tests
+	server := httptest.NewServer(mux)
+	integrationBaseURL = server.URL
 	code := m.Run()
-
-	// Stop Caddy
-	stopCaddy()
-
+	server.Close()
 	os.Exit(code)
 }
 
-func waitForCaddy(url string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	client := &http.Client{Timeout: 500 * time.Millisecond}
-	for time.Now().Before(deadline) {
-		resp, err := client.Get(url)
-		if err == nil {
-			resp.Body.Close()
-			return nil
-		}
-		time.Sleep(250 * time.Millisecond)
-	}
-	return fmt.Errorf("server not ready after %v", timeout)
-}
-
-func startCaddy() error {
-	caddyPath, err := exec.LookPath("caddy")
-	if err != nil {
-		return fmt.Errorf("caddy not found in PATH: %w", err)
-	}
-
-	caddyfile := filepath.Join("..", "fixtures", "Caddyfile")
-	caddyCmd = exec.Command(caddyPath, "run", "--config", caddyfile)
-	caddyCmd.Dir = filepath.Join("..", "fixtures")
-	caddyCmd.Stdout = os.Stdout
-	caddyCmd.Stderr = os.Stderr
-
-	if err := caddyCmd.Start(); err != nil {
-		return fmt.Errorf("failed to start caddy: %w", err)
-	}
-
-	return nil
-}
-
-func stopCaddy() {
-	if caddyCmd != nil && caddyCmd.Process != nil {
-		caddyCmd.Process.Kill()
-		caddyCmd.Wait()
-	}
-}
+func integrationURL(path string) string { return integrationBaseURL + path }
 
 func setupTestEnvironment(t *testing.T) (*storage.Store, *feed.Manager, func()) {
 	tmpDir, err := os.MkdirTemp("", "integration-test-*")
@@ -111,7 +89,7 @@ func TestIntegration_FetchRSSFeed(t *testing.T) {
 	defer cleanup()
 
 	// Test fetching RSS feed
-	feedURL := "http://127.0.0.1:8080/feed.rss"
+	feedURL := integrationURL("/feed.rss")
 	feed, err := manager.AddFeed(feedURL)
 	if err != nil {
 		t.Fatalf("Failed to add RSS feed: %v", err)
@@ -147,7 +125,7 @@ func TestIntegration_FetchAtomFeed(t *testing.T) {
 	defer cleanup()
 
 	// Test fetching Atom feed
-	feedURL := "http://127.0.0.1:8080/feed.atom"
+	feedURL := integrationURL("/feed.atom")
 	feed, err := manager.AddFeed(feedURL)
 	if err != nil {
 		t.Fatalf("Failed to add Atom feed: %v", err)
@@ -168,7 +146,7 @@ func TestIntegration_CachingHeaders(t *testing.T) {
 	defer cleanup()
 
 	// First fetch - should get content with ETag
-	feedURL := "http://127.0.0.1:8080/cached-feed.rss"
+	feedURL := integrationURL("/cached-feed.rss")
 	feed1, err := manager.AddFeed(feedURL)
 	if err != nil {
 		t.Fatalf("Failed to add cached feed: %v", err)
@@ -194,7 +172,7 @@ func TestIntegration_RateLimiting(t *testing.T) {
 	defer cleanup()
 
 	// Test rate limited endpoint
-	feedURL := "http://127.0.0.1:8080/rate-limited.rss"
+	feedURL := integrationURL("/rate-limited.rss")
 	_, err := manager.AddFeed(feedURL)
 
 	if err == nil {
@@ -206,7 +184,7 @@ func TestIntegration_MediaExtraction(t *testing.T) {
 	store, manager, cleanup := setupTestEnvironment(t)
 	defer cleanup()
 
-	feedURL := "http://127.0.0.1:8080/feed.rss"
+	feedURL := integrationURL("/feed.rss")
 	feed, err := manager.AddFeed(feedURL)
 	if err != nil {
 		t.Fatalf("Failed to add feed: %v", err)

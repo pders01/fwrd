@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -34,7 +35,12 @@ func (f *Fetcher) SetIgnoreCache(ignore bool) {
 }
 
 func (f *Fetcher) Fetch(feed *storage.Feed) (*http.Response, bool, error) {
-	req, err := http.NewRequest("GET", feed.URL, http.NoBody)
+	return f.FetchContext(context.Background(), feed)
+}
+
+// FetchContext fetches a feed and cancels the HTTP request when ctx ends.
+func (f *Fetcher) FetchContext(ctx context.Context, feed *storage.Feed) (*http.Response, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feed.URL, http.NoBody)
 	if err != nil {
 		return nil, false, fmt.Errorf("creating request: %w", err)
 	}

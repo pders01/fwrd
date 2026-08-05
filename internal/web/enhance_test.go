@@ -49,7 +49,7 @@ func newManagerServer(t *testing.T) (srv *Server, store *storage.Store, backend 
 	mgr := feed.NewManager(store, cfg)
 	mgr.SetPermissiveValidation(true)
 
-	srv, err = NewServer(store, mgr, nil, cfg)
+	srv, err = NewServer(store, mgr, nil, cfg, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -227,7 +227,7 @@ func newAuthServer(t *testing.T) http.Handler {
 	cfg := &config.Config{}
 	cfg.Web.Auth.Username = "alice"
 	cfg.Web.Auth.Password = "s3cret"
-	srv, err := NewServer(store, nil, nil, cfg)
+	srv, err := NewServer(store, nil, nil, cfg, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}

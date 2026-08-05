@@ -59,7 +59,7 @@ func newE2E(t *testing.T) *e2eEnv {
 	mgr := feed.NewManager(store, cfg)
 	mgr.SetPermissiveValidation(true)
 
-	srv, err := NewServer(store, mgr, nil, cfg)
+	srv, err := NewServer(store, mgr, nil, cfg, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}

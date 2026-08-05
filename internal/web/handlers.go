@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/pders01/fwrd/internal/opml"
-	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/storage"
 )
 
@@ -184,9 +183,7 @@ func (s *Server) handleAddFeed(w http.ResponseWriter, r *http.Request) {
 		redirect(w, r, "/feeds")
 		return
 	}
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	f, err := s.manager.AddFeed(feedURL)
+	f, err := s.addFeed(r.Context(), feedURL)
 	if err != nil {
 		setFlash(w, flashError, "Couldn't add "+feedURL+": "+err.Error())
 		redirect(w, r, "/feeds")
@@ -202,9 +199,7 @@ func (s *Server) handleRefreshFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	if err := s.manager.RefreshFeed(id); err != nil {
+	if err := s.refreshFeed(r.Context(), id); err != nil {
 		// The feed page shows the persisted error badge; the flash names it.
 		setFlash(w, flashError, "Refresh failed: "+err.Error())
 		redirect(w, r, "/feeds/"+id)
@@ -219,12 +214,10 @@ func (s *Server) handleRefreshAll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "feed management is disabled", http.StatusServiceUnavailable)
 		return
 	}
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
 	// Per-feed failures are expected (feeds go down) and are persisted as
 	// badges on /feeds, so a partial failure is not a page error — summarize
 	// it in a flash instead of replacing the UI with a raw 502.
-	summary, err := s.manager.RefreshAllFeeds()
+	summary, err := s.refreshAllFeeds(r.Context())
 	switch {
 	case len(summary.Errors) == 0 && err != nil:
 		// No per-feed errors but a returned error means a catastrophic
@@ -244,16 +237,10 @@ func (s *Server) handleRefreshAll(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	if err := s.store.DeleteFeed(id); err != nil {
+	if err := s.deleteFeed(r.Context(), id); err != nil {
 		setFlash(w, flashError, "Couldn't delete feed: "+err.Error())
 		redirect(w, r, "/feeds")
 		return
-	}
-	// Keep the search index in step with the deletion.
-	if dl, ok := s.searcher.(search.DeleteListener); ok {
-		dl.OnFeedDeleted(id)
 	}
 	setFlash(w, flashNotice, "Feed deleted.")
 	redirect(w, r, "/feeds")
@@ -295,7 +282,7 @@ func (s *Server) handleOPMLExport(w http.ResponseWriter, _ *http.Request) {
 // handleOPMLImport accepts an uploaded OPML file and adds each listed feed.
 // Like the CLI importer it skips feeds already present and reports failures
 // without aborting the rest. AddFeed notifies the search index, so this
-// holds writeMu like the other manager-driven mutations.
+// uses the coordinator for mutation serialization.
 func (s *Server) handleOPMLImport(w http.ResponseWriter, r *http.Request) {
 	if s.manager == nil {
 		http.Error(w, "feed management is disabled", http.StatusServiceUnavailable)
@@ -328,27 +315,15 @@ func (s *Server) handleOPMLImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-
-	existing, _ := s.store.GetAllFeeds()
-	have := make(map[string]bool, len(existing))
-	for _, f := range existing {
-		have[f.URL] = true
+	urls := make([]string, len(feeds))
+	for i, f := range feeds {
+		urls[i] = f.URL
 	}
-	added, skipped, failed := 0, 0, 0
-	for _, f := range feeds {
-		if have[f.URL] {
-			skipped++
-			continue
-		}
-		// Best-effort: a feed that fails to fetch is skipped so one bad
-		// entry doesn't abort the whole import.
-		if _, err := s.manager.AddFeed(f.URL); err != nil {
-			failed++
-			continue
-		}
-		added++
+	added, skipped, failed, importErr := s.importFeeds(r.Context(), urls)
+	if importErr != nil {
+		setFlash(w, flashError, "Import failed: "+importErr.Error())
+		redirect(w, r, "/feeds")
+		return
 	}
 	msg := fmt.Sprintf("Imported %d feed(s)", added)
 	if skipped > 0 {

@@ -23,6 +23,7 @@ import (
 
 	"github.com/pders01/fwrd/internal/audit"
 	"github.com/pders01/fwrd/internal/config"
+	"github.com/pders01/fwrd/internal/control"
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/storage"
@@ -34,12 +35,16 @@ import (
 // are forced closed.
 const shutdownGrace = 15 * time.Second
 
+// ShutdownGrace is the shared drain window used by the HTTP/IPC supervisor.
+const ShutdownGrace = shutdownGrace
+
 // Server holds the dependencies shared across handlers. It owns nothing
 // the caller doesn't already own: the store, manager, and searcher are
 // passed in and closed by the caller, mirroring how runTUI manages them.
 type Server struct {
 	store       *storage.Store
 	manager     *feed.Manager
+	coordinator *control.MutationCoordinator
 	searcher    search.Searcher
 	cfg         *config.Config
 	tmpl        *templates
@@ -56,11 +61,11 @@ type Server struct {
 	// status, client IP, TLS, auth user) as a JSON line. nil disables it.
 	audit *audit.Logger
 
-	// writeMu serializes operations that notify the search index. The
-	// DataListener/DeleteListener contract requires that notifications not
-	// arrive concurrently; net/http runs each request in its own goroutine,
-	// so without this two mutating requests could race the bleve batch.
-	writeMu sync.Mutex
+	// fallbackMu preserves listener serialization for callers that construct a
+	// Server without a cross-process coordinator (notably tests and embedded
+	// uses). Production serve shares the coordinator with IPC instead.
+	fallbackMu sync.Mutex
+	requestWG  sync.WaitGroup
 
 	// frontCache memoizes the front-page topic model and feed-name map. Both
 	// are pure functions of the corpus, which only changes on a store write;
@@ -75,7 +80,8 @@ type Server struct {
 // NewServer wires handlers over the given backends. manager drives feed
 // add/refresh and may be nil to disable those routes (they 503 instead).
 // searcher may be nil; the /search route then reports search unavailable.
-func NewServer(store *storage.Store, manager *feed.Manager, searcher search.Searcher, cfg *config.Config) (*Server, error) {
+// coordinator serializes mutating operations across HTTP and IPC.
+func NewServer(store *storage.Store, manager *feed.Manager, searcher search.Searcher, cfg *config.Config, coord *control.MutationCoordinator) (*Server, error) {
 	tmpl, err := loadTemplates()
 	if err != nil {
 		return nil, err
@@ -90,6 +96,7 @@ func NewServer(store *storage.Store, manager *feed.Manager, searcher search.Sear
 	return &Server{
 		store:       store,
 		manager:     manager,
+		coordinator: coord,
 		searcher:    searcher,
 		cfg:         cfg,
 		tmpl:        tmpl,
@@ -157,7 +164,15 @@ func (s *Server) Handler() http.Handler {
 	if s.audit != nil {
 		h = s.auditLog(h)
 	}
-	return h
+	return s.trackRequests(h)
+}
+
+func (s *Server) trackRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.requestWG.Add(1)
+		defer s.requestWG.Done()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // auditLog records every inbound request as a JSON line: method, request URI,
@@ -316,19 +331,17 @@ func (s *Server) ListenAndServe(addr string) error {
 	return s.Serve(ln)
 }
 
-// Serve runs the server on an already-bound listener with sane timeouts.
-// Read/write timeouts guard against slow-loris-style clients even on a
-// personal box. WriteTimeout is generous because a synchronous feed refresh
-// makes network calls within the request.
-//
-// On SIGINT/SIGTERM it shuts down gracefully: it stops accepting new
-// connections and drains in-flight requests for up to shutdownGrace before
-// returning, so the caller's deferred store/index Close runs and releases
-// the BoltDB and Bleve locks cleanly instead of relying on the OS to reap
-// them. Returns nil on a clean shutdown.
+// Serve retains the standalone signal-aware API. The command supervisor uses
+// ServeContext so HTTP and IPC share the same cancellation source.
 func (s *Server) Serve(ln net.Listener) error {
-	// When TLS is enabled, front the bound listener with the single-port mux
-	// so the same port answers HTTPS and redirects cleartext to https.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return s.ServeContext(ctx, ln)
+}
+
+// ServeContext runs HTTP until ctx is cancelled or the listener fails, then
+// drains in-flight requests before returning.
+func (s *Server) ServeContext(ctx context.Context, ln net.Listener) error {
 	if s.tlsConfig != nil {
 		ln = newTLSMux(ln, s.tlsConfig)
 	}
@@ -341,31 +354,126 @@ func (s *Server) Serve(ln net.Listener) error {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	serveErr := make(chan error, 1)
-	go func() {
-		serveErr <- srv.Serve(ln)
-	}()
+	go func() { serveErr <- srv.Serve(ln) }()
 
 	select {
 	case err := <-serveErr:
-		// Failed to bind, or otherwise stopped without a signal.
-		return err
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		// A listener can fail while accepted connections still have active
+		// handlers. Drain them before the caller closes Bleve or bbolt.
+		return s.drainHTTP(srv, err)
 	case <-ctx.Done():
-		stop() // restore default signal handling so a second ^C kills hard
-		fmt.Fprintln(os.Stderr, "\nshutting down… (waiting for in-flight requests)")
-		shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
-		defer cancel()
-		if err := srv.Shutdown(shutCtx); err != nil {
-			return fmt.Errorf("graceful shutdown: %w", err)
-		}
-		// Drain the goroutine's result; ListenAndServe returns
-		// ErrServerClosed once Shutdown completes.
+		drainErr := s.drainHTTP(srv, nil)
 		if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
+			drainErr = errors.Join(drainErr, err)
 		}
-		return nil
+		return drainErr
 	}
+}
+
+func (s *Server) drainHTTP(srv *http.Server, serveErr error) error {
+	if s.coordinator != nil {
+		s.coordinator.BeginShutdown()
+	}
+	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	shutdownErr := srv.Shutdown(shutCtx)
+	cancel()
+	if shutdownErr != nil {
+		if s.coordinator != nil {
+			s.coordinator.CancelOperations()
+		}
+		_ = srv.Close() // cancels request contexts for fallback manager calls
+	}
+	// All mutation paths honor cancellation, so this wait completes after a
+	// grace-timeout cancellation without allowing shared resources to close
+	// underneath a handler.
+	s.requestWG.Wait()
+	if shutdownErr != nil {
+		serveErr = errors.Join(serveErr, fmt.Errorf("graceful shutdown: %w", shutdownErr))
+	}
+	return serveErr
+}
+
+// ---- mutation helpers (use coordinator when available) ----
+
+func (s *Server) addFeed(ctx context.Context, url string) (*storage.Feed, error) {
+	if s.coordinator != nil {
+		return s.coordinator.AddFeed(ctx, url)
+	}
+	s.fallbackMu.Lock()
+	defer s.fallbackMu.Unlock()
+	return s.manager.AddFeedContext(ctx, url)
+}
+
+func (s *Server) refreshFeed(ctx context.Context, id string) error {
+	if s.coordinator != nil {
+		return s.coordinator.RefreshFeed(ctx, id, false)
+	}
+	s.fallbackMu.Lock()
+	defer s.fallbackMu.Unlock()
+	return s.manager.RefreshFeedContext(ctx, id)
+}
+
+func (s *Server) refreshAllFeeds(ctx context.Context) (feed.RefreshSummary, error) {
+	if s.coordinator != nil {
+		return s.coordinator.RefreshAllFeeds(ctx, false)
+	}
+	s.fallbackMu.Lock()
+	defer s.fallbackMu.Unlock()
+	return s.manager.RefreshAllFeedsContext(ctx)
+}
+
+func (s *Server) deleteFeed(ctx context.Context, id string) error {
+	if s.coordinator != nil {
+		return s.coordinator.DeleteFeed(ctx, id)
+	}
+	s.fallbackMu.Lock()
+	defer s.fallbackMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := s.store.DeleteFeed(id); err != nil {
+		return err
+	}
+	// Keep the search index in step with the deletion (legacy path).
+	if dl, ok := s.searcher.(search.DeleteListener); ok {
+		dl.OnFeedDeleted(id)
+	}
+	return nil
+}
+
+func (s *Server) importFeeds(ctx context.Context, urls []string) (added, skipped, failed int, err error) {
+	if s.coordinator != nil {
+		summary, importErr := s.coordinator.ImportFeeds(ctx, urls)
+		if importErr != nil {
+			return 0, 0, 0, importErr
+		}
+		return summary.Added, summary.Skipped, summary.Failed, nil
+	}
+
+	s.fallbackMu.Lock()
+	defer s.fallbackMu.Unlock()
+	existing, _ := s.store.GetAllFeeds()
+	have := make(map[string]bool, len(existing))
+	for _, f := range existing {
+		have[f.URL] = true
+	}
+	for _, u := range urls {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return added, skipped, failed, ctxErr
+		}
+		if have[u] {
+			skipped++
+			continue
+		}
+		if _, addErr := s.manager.AddFeedContext(ctx, u); addErr != nil {
+			failed++
+			continue
+		}
+		added++
+	}
+	return added, skipped, failed, nil
 }
