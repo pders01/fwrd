@@ -238,6 +238,12 @@ client never gets an address on a subnet it can't route to. Virtual interfaces
 restrict to specific interfaces with `--mdns-iface en0,en9`, or pin to a single
 address with `--mdns-ip <ip>` (which advertises that one subnet only).
 
+> **⚠️ Don't hardcode `--mdns-ip` in a launchd plist or systemd unit.** Your
+> LAN IP can change via DHCP, leaving the service advertising a stale address
+> and `fwrd.local` unreachable. Use `--mdns-iface` (interface names are stable)
+> to let fwrd auto-discover the current IP on each interface. The `service install`
+> command forwards both flags — see below.
+
 #### Run it as a background service
 
 Install `fwrd serve` as a per-user service — a systemd user unit on Linux, a
@@ -251,7 +257,17 @@ launchd LaunchAgent on macOS. No root; it writes under your home directory.
 `install` writes the unit/plist (pointing at the running binary, forwarding
 any `--config`/`--db` you pass), then enables and starts it. Override the bind,
 mDNS name, or TLS with the same `--addr` / `--mdns` / `--mdns-name` /
-`--tls` / `--tls-mode` flags — they are forwarded verbatim into the unit.
+`--mdns-iface` / `--tls` / `--tls-mode` flags — they are forwarded verbatim into the unit.
+
+```bash
+# Multi-homed host: auto-detect IPs on en0 and en9
+./fwrd service install --addr 0.0.0.0:5336 --mdns-iface en0,en9 --tls-mode local-ca
+```
+
+Using `--mdns-iface` instead of `--mdns-ip` keeps the service working across
+DHCP address changes — fwrd resolves each interface's current IP at startup.
+If you do need fixed addresses (e.g. alias IPs from `fwrd net up`), pass
+`--mdns-ip`; be aware those IPs must stay in sync with your network setup.
 Because the default bind is LAN-facing and unauthenticated, set `[web.auth]`
 (see above) when installing on a shared network; HTTPS (the default) keeps
 those credentials encrypted in transit.
