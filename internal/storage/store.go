@@ -1,64 +1,25 @@
 package storage
 
 import (
-	"bytes"
-	"encoding/binary"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"sort"
-	"strings"
 	"sync/atomic"
 	"time"
 
-	bolt "go.etcd.io/bbolt"
-	bolterrors "go.etcd.io/bbolt/errors"
+	"github.com/pders01/fwrd/internal/ipc"
 )
 
-// ErrDatabaseLocked is returned when bbolt cannot acquire the file lock
-// within the configured timeout — almost always because another fwrd
-// process already has the database open.
-var ErrDatabaseLocked = errors.New("database is locked by another fwrd process")
-
-// MemoryPath is the sentinel database path that requests an isolated,
-// process-local store backed by a unique temp file. bbolt has no real
-// in-memory mode, so the store creates the file in os.TempDir() and
-// deletes it on Close.
-const MemoryPath = ":memory:"
-
-var (
-	feedsBucket    = []byte("feeds")
-	articlesBucket = []byte("articles")
-	metaBucket     = []byte("metadata")
-	// Index bucket: articles_by_feed -> sub-bucket per feedID containing article IDs
-	articlesByFeedBucket = []byte("articles_by_feed")
-	// Index bucket: articles_by_date -> stores article IDs keyed by date for efficient date-sorted queries
-	articlesByDateBucket = []byte("articles_by_date")
-	// Index bucket: articles_unread_by_feed -> sub-bucket per feedID holding
-	// only the IDs of *unread* articles. Lets FeedStats count unread via
-	// Bucket.Stats().KeyN with zero JSON decode; maintained on every write.
-	articlesUnreadByFeedBucket = []byte("articles_unread_by_feed")
-)
-
-// unreadIndexFlag marks (in metaBucket) that the unread index has been
-// back-filled for a pre-existing database. Absence triggers a one-time
-// rebuild on Open.
-var unreadIndexFlag = []byte("unread_index_v1")
-
+// Store is the data-access facade used throughout the application. It
+// delegates to a storeBackend implementation and tracks a monotonically
+// increasing write generation so callers (e.g. the web front-page cache)
+// can detect stale derived state without coordinating with writers.
 type Store struct {
-	db       *bolt.DB
-	tempPath string // non-empty when the store owns a temp file (MemoryPath)
-
-	// writeGen increments on every mutation (article/feed save, read/star
-	// toggle, feed delete). Read-only callers (e.g. the web front-page cache)
-	// compare it to detect a stale cache without coordinating with writers.
+	backend  storeBackend
 	writeGen atomic.Uint64
 }
 
-// WriteGen returns a counter that strictly increases on every store mutation.
-// A caller can cache derived state and rebuild only when the value changes.
-// A nil store reports 0.
+// WriteGen returns a counter that strictly increases on every store
+// mutation. A caller can cache derived state and rebuild only when the
+// value changes. A nil store reports 0.
 func (s *Store) WriteGen() uint64 {
 	if s == nil {
 		return 0
@@ -66,627 +27,138 @@ func (s *Store) WriteGen() uint64 {
 	return s.writeGen.Load()
 }
 
-// FeedStat holds the cheap per-feed article counts surfaced on the feed-
-// management page.
-type FeedStat struct {
-	Unread int
-	Total  int
-}
-
-// makeDateIndexKey creates a key for the date index that ensures newest-first ordering
-// when iterated with a cursor. Uses reverse timestamp (max - timestamp) for descending order.
-func makeDateIndexKey(published time.Time, articleID string) []byte {
-	// Use nanoseconds since epoch, inverted for reverse order
-	timestamp := published.UnixNano()
-	reverseTimestamp := ^timestamp // Bitwise NOT for reverse ordering
-
-	key := make([]byte, 8+len(articleID))
-	binary.BigEndian.PutUint64(key[:8], uint64(reverseTimestamp))
-	copy(key[8:], articleID) // Append article ID for uniqueness
-	return key
-}
-
-// seekDateCursor positions a date-index cursor just past the entry identified
-// by the given article ID. The cursor is encoded as the article ID so callers
-// can pass back any article from a previous page; we look up the article's
-// Published timestamp once to reconstruct the composite index key, then use
-// bbolt's B+tree Seek (O(log n)) instead of a linear scan from First().
-//
-// Returns (nil, nil) when the cursor article has been deleted or when Seek
-// runs off the end. The deletion case is treated as "no more results" so a
-// concurrent DeleteFeed cannot silently restart pagination at page 1 for
-// callers that hold a stale cursor.
-//
-// Pass cursor == "" to start from the first entry.
-func seekDateCursor(ab *bolt.Bucket, dateCursor *bolt.Cursor, cursor string) (key, articleID []byte) {
-	if cursor == "" {
-		return dateCursor.First()
-	}
-	raw := ab.Get([]byte(cursor))
-	if raw == nil {
-		return nil, nil
-	}
-	var art Article
-	if err := json.Unmarshal(raw, &art); err != nil {
-		return nil, nil
-	}
-	want := makeDateIndexKey(art.Published, art.ID)
-	key, articleID = dateCursor.Seek(want)
-	if key == nil {
-		return nil, nil
-	}
-	// Seek lands on the cursor entry itself when present; advance past it.
-	if bytes.Equal(key, want) {
-		key, articleID = dateCursor.Next()
-	}
-	return key, articleID
-}
-
-// DefaultOpenTimeout is the bolt file-lock acquisition timeout used
-// when callers do not provide their own (NewStore).
-const DefaultOpenTimeout = 1 * time.Second
-
+// NewStore opens a local bbolt-backed store at dbPath with the default
+// file-lock timeout.
 func NewStore(dbPath string) (*Store, error) {
-	return NewStoreWithTimeout(dbPath, DefaultOpenTimeout)
+	return NewLocalStoreWithTimeout(dbPath, DefaultOpenTimeout)
 }
 
+// NewStoreWithTimeout opens a local bbolt-backed store with a custom
+// file-lock timeout.
 func NewStoreWithTimeout(dbPath string, timeout time.Duration) (*Store, error) {
-	tempPath := ""
-	if dbPath == MemoryPath {
-		// bbolt has no in-memory mode; route the sentinel to a unique
-		// temp file so callers passing MemoryPath always get an
-		// isolated store. Without this, every call would open a
-		// literal file named ":memory:" in the working directory and
-		// share state across the process.
-		f, err := os.CreateTemp("", "fwrd-mem-*.db")
-		if err != nil {
-			return nil, fmt.Errorf("creating temp database: %w", err)
-		}
-		tempPath = f.Name()
-		// bbolt opens the file itself; close our handle so it can.
-		_ = f.Close()
-		dbPath = tempPath
-	}
-
-	db, err := bolt.Open(dbPath, 0o600, &bolt.Options{Timeout: timeout})
-	if err != nil {
-		if tempPath != "" {
-			_ = os.Remove(tempPath)
-		}
-		if errors.Is(err, bolterrors.ErrTimeout) {
-			return nil, fmt.Errorf("%w (waited %s for %s)", ErrDatabaseLocked, timeout, dbPath)
-		}
-		return nil, fmt.Errorf("opening database: %w", err)
-	}
-
-	err = db.Update(func(tx *bolt.Tx) error {
-		for _, bucket := range [][]byte{feedsBucket, articlesBucket, metaBucket, articlesByFeedBucket, articlesByDateBucket, articlesUnreadByFeedBucket} {
-			if _, createErr := tx.CreateBucketIfNotExists(bucket); createErr != nil {
-				return createErr
-			}
-		}
-		return buildUnreadIndexIfNeeded(tx)
-	})
-
-	if err != nil {
-		_ = db.Close()
-		if tempPath != "" {
-			_ = os.Remove(tempPath)
-		}
-		return nil, fmt.Errorf("creating buckets: %w", err)
-	}
-
-	return &Store{db: db, tempPath: tempPath}, nil
+	return NewLocalStoreWithTimeout(dbPath, timeout)
 }
 
-// buildUnreadIndexIfNeeded back-fills the unread index for a database created
-// before the index existed. It runs at most once: the metaBucket flag is set
-// on completion, so subsequent opens skip the full-article scan. A fresh
-// database (no articles) sets the flag immediately and pays nothing.
-func buildUnreadIndexIfNeeded(tx *bolt.Tx) error {
-	meta := tx.Bucket(metaBucket)
-	if meta != nil && meta.Get(unreadIndexFlag) != nil {
-		return nil
-	}
-	ab := tx.Bucket(articlesBucket)
-	unreadRoot := tx.Bucket(articlesUnreadByFeedBucket)
-	if ab != nil && unreadRoot != nil {
-		err := ab.ForEach(func(_, v []byte) error {
-			var a Article
-			if json.Unmarshal(v, &a) != nil || a.Read {
-				return nil
-			}
-			fb, err := unreadRoot.CreateBucketIfNotExists([]byte(a.FeedID))
-			if err != nil {
-				return err
-			}
-			return fb.Put([]byte(a.ID), []byte{1})
-		})
-		if err != nil {
-			return err
-		}
-	}
-	if meta != nil {
-		return meta.Put(unreadIndexFlag, []byte{1})
-	}
-	return nil
-}
-
-// setUnreadMembership adds or removes an article's ID from its feed's unread
-// sub-bucket so FeedStats can count unread without decoding. Call within a
-// write tx whenever an article's Read state is established or changes.
-func setUnreadMembership(tx *bolt.Tx, feedID, articleID string, unread bool) error {
-	unreadRoot := tx.Bucket(articlesUnreadByFeedBucket)
-	if unreadRoot == nil {
-		return nil
-	}
-	if unread {
-		fb, err := unreadRoot.CreateBucketIfNotExists([]byte(feedID))
-		if err != nil {
-			return err
-		}
-		return fb.Put([]byte(articleID), []byte{1})
-	}
-	if fb := unreadRoot.Bucket([]byte(feedID)); fb != nil {
-		return fb.Delete([]byte(articleID))
-	}
-	return nil
-}
-
-func (s *Store) Close() error {
-	closeErr := s.db.Close()
-	if s.tempPath != "" {
-		if rmErr := os.Remove(s.tempPath); rmErr != nil && !os.IsNotExist(rmErr) && closeErr == nil {
-			closeErr = rmErr
-		}
-	}
-	return closeErr
-}
-
-func (s *Store) SaveFeed(feed *Feed) error {
-	err := s.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(feedsBucket)
-		data, err := json.Marshal(feed)
-		if err != nil {
-			return err
-		}
-		return b.Put([]byte(feed.ID), data)
-	})
-	if err == nil {
-		s.writeGen.Add(1)
-	}
-	return err
-}
-
-func (s *Store) GetFeed(id string) (*Feed, error) {
-	var feed Feed
-	err := s.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(feedsBucket)
-		data := b.Get([]byte(id))
-		if data == nil {
-			return fmt.Errorf("feed not found")
-		}
-		return json.Unmarshal(data, &feed)
-	})
-	return &feed, err
-}
-
-func (s *Store) GetAllFeeds() ([]*Feed, error) {
-	if s == nil || s.db == nil {
-		return []*Feed{}, nil
-	}
-	var feeds []*Feed
-	err := s.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(feedsBucket)
-		return b.ForEach(func(_ []byte, v []byte) error {
-			var feed Feed
-			if err := json.Unmarshal(v, &feed); err != nil {
-				return err
-			}
-			feeds = append(feeds, &feed)
-			return nil
-		})
-	})
-	// Sort feeds by Title (case-insensitive), fallback to URL
-	sort.Slice(feeds, func(i, j int) bool {
-		ti := feeds[i].Title
-		tj := feeds[j].Title
-		if ti == "" {
-			ti = feeds[i].URL
-		}
-		if tj == "" {
-			tj = feeds[j].URL
-		}
-		return strings.ToLower(ti) < strings.ToLower(tj)
-	})
-	return feeds, err
-}
-
-// FeedStats returns per-feed unread and total article counts for every feed
-// that has articles, in a single read transaction. Both counts come from
-// Bucket.Stats().KeyN on the per-feed index sub-buckets, so no article JSON
-// is decoded — the feed-management page no longer scans the whole corpus.
-// Feeds with no articles are absent from the map (callers default to zero).
-func (s *Store) FeedStats() (map[string]FeedStat, error) {
-	stats := map[string]FeedStat{}
-	if s == nil || s.db == nil {
-		return stats, nil
-	}
-	err := s.db.View(func(tx *bolt.Tx) error {
-		if idxRoot := tx.Bucket(articlesByFeedBucket); idxRoot != nil {
-			if err := idxRoot.ForEach(func(feedID, _ []byte) error {
-				if fb := idxRoot.Bucket(feedID); fb != nil {
-					st := stats[string(feedID)]
-					st.Total = fb.Stats().KeyN
-					stats[string(feedID)] = st
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-		}
-		if unreadRoot := tx.Bucket(articlesUnreadByFeedBucket); unreadRoot != nil {
-			return unreadRoot.ForEach(func(feedID, _ []byte) error {
-				if fb := unreadRoot.Bucket(feedID); fb != nil {
-					st := stats[string(feedID)]
-					st.Unread = fb.Stats().KeyN
-					stats[string(feedID)] = st
-				}
-				return nil
-			})
-		}
-		return nil
-	})
-	return stats, err
-}
-
-func (s *Store) SaveArticles(articles []*Article) error {
-	err := s.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(articlesBucket)
-		idxRoot := tx.Bucket(articlesByFeedBucket)
-		dateIdx := tx.Bucket(articlesByDateBucket)
-		for _, article := range articles {
-			data, err := json.Marshal(article)
-			if err != nil {
-				return err
-			}
-			// Capture the prior record before overwriting. The date index
-			// is keyed by timestamp, so if a re-saved article's Published
-			// changed (e.g. a feed adds a pubDate to a previously undated
-			// item) the old key is orphaned: the article then surfaces
-			// twice in newest-first pagination, and a stale zero-time key
-			// floats to the very top. Delete the old key below.
-			var prevPublished time.Time
-			hadPrev := false
-			if dateIdx != nil {
-				if existing := b.Get([]byte(article.ID)); existing != nil {
-					var old Article
-					if json.Unmarshal(existing, &old) == nil {
-						prevPublished, hadPrev = old.Published, true
-					}
-				}
-			}
-			if err := b.Put([]byte(article.ID), data); err != nil {
-				return err
-			}
-
-			// Update feed index: ensure sub-bucket for this feed exists and record article ID
-			if idxRoot != nil {
-				fb, err := idxRoot.CreateBucketIfNotExists([]byte(article.FeedID))
-				if err != nil {
-					return err
-				}
-				if err := fb.Put([]byte(article.ID), []byte{1}); err != nil {
-					return err
-				}
-			}
-
-			// Maintain the unread index. Setting membership to !Read is
-			// idempotent and correct without knowing the prior state: a new
-			// unread article is added, and a re-saved now-read article is
-			// removed.
-			if err := setUnreadMembership(tx, article.FeedID, article.ID, !article.Read); err != nil {
-				return err
-			}
-
-			// Update date index: store article ID with reverse timestamp key for newest-first ordering
-			if dateIdx != nil {
-				if hadPrev && !prevPublished.Equal(article.Published) {
-					_ = dateIdx.Delete(makeDateIndexKey(prevPublished, article.ID))
-				}
-				dateKey := makeDateIndexKey(article.Published, article.ID)
-				if err := dateIdx.Put(dateKey, []byte(article.ID)); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	})
-	if err == nil {
-		s.writeGen.Add(1)
-	}
-	return err
-}
-
-func (s *Store) GetArticles(feedID string, limit int) ([]*Article, error) {
-	return s.GetArticlesWithCursor(feedID, limit, "")
-}
-
-// GetArticle fetches a single article by ID. Articles are keyed by ID in
-// the articles bucket, so this is a direct point lookup. Returns an error
-// if no article with that ID exists.
-func (s *Store) GetArticle(id string) (*Article, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("store not initialized")
-	}
-	var article Article
-	err := s.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(articlesBucket)
-		if b == nil {
-			return fmt.Errorf("article not found")
-		}
-		data := b.Get([]byte(id))
-		if data == nil {
-			return fmt.Errorf("article not found")
-		}
-		return json.Unmarshal(data, &article)
-	})
+// NewLocalStoreWithTimeout opens a local bbolt-backed store with a custom
+// file-lock timeout. This is the explicit local-only constructor; serve
+// must use this (never an IPC fallback) to guarantee it owns the database.
+func NewLocalStoreWithTimeout(dbPath string, timeout time.Duration) (*Store, error) {
+	be, err := newBoltBackend(dbPath, timeout)
 	if err != nil {
 		return nil, err
 	}
-	return &article, nil
+	return &Store{backend: be}, nil
 }
 
-// GetArticlesWithCursor provides cursor-based pagination for efficient large dataset traversal.
-// cursor should be the article ID of the last article from the previous page, or empty for the first page.
-func (s *Store) GetArticlesWithCursor(feedID string, limit int, cursor string) ([]*Article, error) {
-	if s == nil || s.db == nil {
-		return []*Article{}, nil
-	}
-	var articles []*Article
-
-	err := s.db.View(func(tx *bolt.Tx) error {
-		ab := tx.Bucket(articlesBucket)
-		if ab == nil {
-			return nil
-		}
-
-		if feedID != "" {
-			// Feed-scoped query: iterate the feed's own bucket. The
-			// global date index would force us to scan every article
-			// in the database to filter for one feed; the per-feed
-			// bucket is bounded by len(articles_in_feed) and is
-			// strictly cheaper for typical feed sizes.
-			return s.getArticlesForFeed(tx, ab, feedID, limit, cursor, &articles)
-		}
-
-		// No feed specified: use date index for efficient sorted retrieval
-		return s.getArticlesGlobalOptimized(tx, ab, limit, cursor, &articles)
-	})
-
-	return articles, err
+// NewRPCStore constructs a Store backed by an already-connected IPC client.
+// The backend remains private so callers cannot depend on implementation
+// details of the Store facade.
+func NewRPCStore(client *ipc.Client) *Store {
+	return &Store{backend: newRPCBackend(client)}
 }
 
-// getArticlesForFeed collects all articles in feedID's per-feed bucket,
-// sorts them by Published descending, then applies cursor + limit. The
-// scan is O(len(feed)) regardless of how many other feeds exist.
-func (s *Store) getArticlesForFeed(tx *bolt.Tx, ab *bolt.Bucket, feedID string, limit int, cursor string, articles *[]*Article) error {
-	idxRoot := tx.Bucket(articlesByFeedBucket)
-	if idxRoot == nil {
+// Close releases underlying resources. For a local store this closes the
+// database and removes any temp file (MemoryPath).
+func (s *Store) Close() error {
+	if s == nil || s.backend == nil {
 		return nil
 	}
-
-	fb := idxRoot.Bucket([]byte(feedID))
-	if fb == nil {
-		return nil
-	}
-
-	// Collect articles for this feed
-	c := fb.Cursor()
-	for k, _ := c.First(); k != nil; k, _ = c.Next() {
-		v := ab.Get(k)
-		if v == nil {
-			continue
-		}
-
-		var article Article
-		if err := json.Unmarshal(v, &article); err != nil {
-			continue
-		}
-
-		*articles = append(*articles, &article)
-	}
-
-	// Sort by date (newest first), with article ID as a deterministic
-	// tie-breaker. Many feeds publish multiple items with identical
-	// pubDate values; without a secondary key the ordering of ties is
-	// arbitrary, which causes pagination to drop or duplicate articles
-	// across pages.
-	sort.SliceStable(*articles, func(i, j int) bool {
-		ai, aj := (*articles)[i], (*articles)[j]
-		if !ai.Published.Equal(aj.Published) {
-			return ai.Published.After(aj.Published)
-		}
-		return ai.ID < aj.ID
-	})
-
-	// Apply cursor-based filtering after sorting
-	if cursor != "" {
-		// Find cursor position and slice from there
-		cursorIndex := -1
-		for i, article := range *articles {
-			if article.ID == cursor {
-				cursorIndex = i
-				break
-			}
-		}
-		if cursorIndex >= 0 && cursorIndex+1 < len(*articles) {
-			*articles = (*articles)[cursorIndex+1:] // Start after cursor
-		} else {
-			*articles = []*Article{} // Cursor not found or no more articles
-		}
-	}
-
-	// Apply limit after cursor filtering
-	if limit > 0 && len(*articles) > limit {
-		*articles = (*articles)[:limit]
-	}
-
-	return nil
+	return s.backend.Close()
 }
 
-// getArticlesGlobalOptimized efficiently retrieves articles across all feeds using date index
-func (s *Store) getArticlesGlobalOptimized(tx *bolt.Tx, ab *bolt.Bucket, limit int, cursor string, articles *[]*Article) error {
-	dateIdx := tx.Bucket(articlesByDateBucket)
-	if dateIdx == nil {
-		// Fallback to scanning all articles
-		return ab.ForEach(func(_ []byte, v []byte) error {
-			var article Article
-			if err := json.Unmarshal(v, &article); err != nil {
-				return nil // Skip invalid articles
-			}
-			*articles = append(*articles, &article)
-			return nil
-		})
-	}
-
-	// Use date index cursor to iterate in date order (newest first)
-	c := dateIdx.Cursor()
-	count := 0
-
-	k, articleID := seekDateCursor(ab, c, cursor)
-
-	for ; k != nil && (limit <= 0 || count < limit); k, articleID = c.Next() {
-		v := ab.Get(articleID)
-		if v == nil {
-			continue
-		}
-
-		var article Article
-		if err := json.Unmarshal(v, &article); err != nil {
-			continue
-		}
-
-		*articles = append(*articles, &article)
-		count++
-	}
-
-	return nil
-}
-
-// mutateArticle loads the article by id, applies fn, and writes it back in a
-// single transaction. The secondary date index and search index are left
-// untouched, so callers that change an indexed field must update those
-// themselves. A change to the Read flag is reflected in the unread index here
-// so FeedStats stays correct (the star toggle keys no index).
-func (s *Store) mutateArticle(id string, fn func(*Article)) error {
-	err := s.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(articlesBucket)
-		data := b.Get([]byte(id))
-		if data == nil {
-			return fmt.Errorf("article not found")
-		}
-
-		var article Article
-		if err := json.Unmarshal(data, &article); err != nil {
-			return err
-		}
-
-		wasRead := article.Read
-		fn(&article)
-
-		data, err := json.Marshal(article)
-		if err != nil {
-			return err
-		}
-
-		if article.Read != wasRead {
-			if err := setUnreadMembership(tx, article.FeedID, article.ID, !article.Read); err != nil {
-				return err
-			}
-		}
-
-		return b.Put([]byte(id), data)
-	})
+// SaveFeed persists a feed. On success writeGen is incremented.
+func (s *Store) SaveFeed(feed *Feed) error {
+	err := s.backend.SaveFeed(feed)
 	if err == nil {
 		s.writeGen.Add(1)
 	}
 	return err
 }
 
+// GetFeed retrieves a single feed by ID.
+func (s *Store) GetFeed(id string) (*Feed, error) {
+	return s.backend.GetFeed(id)
+}
+
+// GetAllFeeds returns every stored feed, sorted by title (case-insensitive).
+// Returns an empty slice when the store is nil or the database is unset.
+func (s *Store) GetAllFeeds() ([]*Feed, error) {
+	if s == nil || s.backend == nil {
+		return []*Feed{}, nil
+	}
+	return s.backend.GetAllFeeds()
+}
+
+// FeedStats returns per-feed unread and total article counts from indexed
+// sub-buckets. Feeds with no articles are absent from the map.
+func (s *Store) FeedStats() (map[string]FeedStat, error) {
+	stats := map[string]FeedStat{}
+	if s == nil || s.backend == nil {
+		return stats, nil
+	}
+	return s.backend.FeedStats()
+}
+
+// SaveArticles persists articles. On success writeGen is incremented.
+func (s *Store) SaveArticles(articles []*Article) error {
+	err := s.backend.SaveArticles(articles)
+	if err == nil {
+		s.writeGen.Add(1)
+	}
+	return err
+}
+
+// GetArticle fetches a single article by ID.
+func (s *Store) GetArticle(id string) (*Article, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("store not initialized")
+	}
+	return s.backend.GetArticle(id)
+}
+
+// GetArticles returns articles for a feed (or all if feedID is ""),
+// limited to limit results (0 means unlimited).
+func (s *Store) GetArticles(feedID string, limit int) ([]*Article, error) {
+	if s == nil || s.backend == nil {
+		return []*Article{}, nil
+	}
+	return s.backend.GetArticles(feedID, limit)
+}
+
+// GetArticlesWithCursor provides cursor-based pagination. cursor should
+// be the article ID of the last article from the previous page, or empty
+// for the first page.
+func (s *Store) GetArticlesWithCursor(feedID string, limit int, cursor string) ([]*Article, error) {
+	if s == nil || s.backend == nil {
+		return []*Article{}, nil
+	}
+	return s.backend.GetArticlesWithCursor(feedID, limit, cursor)
+}
+
+// MarkArticleRead sets the Read flag on an article. On success writeGen
+// is incremented.
 func (s *Store) MarkArticleRead(id string, read bool) error {
-	return s.mutateArticle(id, func(a *Article) { a.Read = read })
+	err := s.backend.MarkArticleRead(id, read)
+	if err == nil {
+		s.writeGen.Add(1)
+	}
+	return err
 }
 
-// MarkArticleStarred flips an article's Starred flag. Like MarkArticleRead it
-// rewrites the document in place; no index keys on read/star state.
+// MarkArticleStarred flips an article's Starred flag. On success writeGen
+// is incremented.
 func (s *Store) MarkArticleStarred(id string, starred bool) error {
-	return s.mutateArticle(id, func(a *Article) { a.Starred = starred })
+	err := s.backend.MarkArticleStarred(id, starred)
+	if err == nil {
+		s.writeGen.Add(1)
+	}
+	return err
 }
 
+// DeleteFeed removes a feed and all its articles and index entries. On
+// success writeGen is incremented.
 func (s *Store) DeleteFeed(id string) error {
-	err := s.db.Update(func(tx *bolt.Tx) error {
-		feedBucket := tx.Bucket(feedsBucket)
-		if err := feedBucket.Delete([]byte(id)); err != nil {
-			return err
-		}
-
-		// Drop the feed's unread sub-bucket if present. DeleteBucket errors
-		// when the bucket is absent, so guard with a lookup first.
-		if unreadRoot := tx.Bucket(articlesUnreadByFeedBucket); unreadRoot != nil {
-			if unreadRoot.Bucket([]byte(id)) != nil {
-				if err := unreadRoot.DeleteBucket([]byte(id)); err != nil {
-					return fmt.Errorf("deleting per-feed unread index bucket: %w", err)
-				}
-			}
-		}
-
-		ab := tx.Bucket(articlesBucket)
-		dateIdx := tx.Bucket(articlesByDateBucket)
-		idxRoot := tx.Bucket(articlesByFeedBucket)
-		if idxRoot == nil {
-			return nil
-		}
-
-		fb := idxRoot.Bucket([]byte(id))
-		if fb == nil {
-			return nil
-		}
-
-		// Walk the per-feed sub-bucket once; for each article ID, look
-		// up its full record before deleting so we can reconstruct the
-		// composite date-index key and remove that entry by Seek/Delete
-		// instead of a linear scan.
-		c := fb.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
-			articleID := append([]byte(nil), k...) // Cursor keys are tx-scoped; copy.
-			if ab != nil && dateIdx != nil {
-				if data := ab.Get(articleID); data != nil {
-					var art Article
-					if err := json.Unmarshal(data, &art); err == nil {
-						dateKey := makeDateIndexKey(art.Published, art.ID)
-						if err := dateIdx.Delete(dateKey); err != nil {
-							return fmt.Errorf("deleting date-index entry: %w", err)
-						}
-					}
-				}
-			}
-			if ab != nil {
-				if err := ab.Delete(articleID); err != nil {
-					return fmt.Errorf("deleting article %s: %w", articleID, err)
-				}
-			}
-		}
-
-		// Drop the per-feed sub-bucket. Propagating the error here is
-		// load-bearing: the surrounding tx will roll back every prior
-		// delete, so the post-failure state is the original feed +
-		// articles + indexes, not a half-deleted carcass.
-		if err := idxRoot.DeleteBucket([]byte(id)); err != nil {
-			return fmt.Errorf("deleting per-feed index bucket: %w", err)
-		}
-		return nil
-	})
+	err := s.backend.DeleteFeed(id)
 	if err == nil {
 		s.writeGen.Add(1)
 	}

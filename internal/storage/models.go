@@ -34,3 +34,10 @@ type Article struct {
 	Starred     bool      `json:"starred"`
 	MediaURLs   []string  `json:"media_urls"`
 }
+
+// FeedStat holds the cheap per-feed article counts surfaced on the
+// feed-management page.
+type FeedStat struct {
+	Unread int
+	Total  int
+}

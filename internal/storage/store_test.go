@@ -543,11 +543,13 @@ func TestNewStore_MemoryPath_IsolatedAndCleaned(t *testing.T) {
 		t.Fatalf("NewStore(MemoryPath) second: %v", err)
 	}
 
-	if a.tempPath == "" || b.tempPath == "" {
+	aPath := a.backend.(*boltBackend).tempPath
+	bPath := b.backend.(*boltBackend).tempPath
+	if aPath == "" || bPath == "" {
 		t.Fatal("expected both stores to have a tempPath set")
 	}
-	if a.tempPath == b.tempPath {
-		t.Fatalf("two MemoryPath stores share a path: %s", a.tempPath)
+	if aPath == bPath {
+		t.Fatalf("two MemoryPath stores share a path: %s", aPath)
 	}
 
 	// No literal ":memory:" file should appear in CWD.
@@ -568,7 +570,7 @@ func TestNewStore_MemoryPath_IsolatedAndCleaned(t *testing.T) {
 	}
 
 	// Close cleans up the backing file.
-	pathA := a.tempPath
+	pathA := aPath
 	if closeErr := a.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -609,7 +611,7 @@ func TestStore_DeleteFeed_RemovesIndexAndDateEntries(t *testing.T) {
 		t.Fatalf("DeleteFeed: %v", err)
 	}
 
-	err := store.db.View(func(tx *bolt.Tx) error {
+	err := store.backend.(*boltBackend).db.View(func(tx *bolt.Tx) error {
 		if idxRoot := tx.Bucket(articlesByFeedBucket); idxRoot != nil {
 			if sub := idxRoot.Bucket([]byte("f1")); sub != nil {
 				t.Error("per-feed sub-bucket for f1 still exists")

@@ -53,8 +53,9 @@ func BenchmarkCountDecodeAll(b *testing.B) {
 // BenchmarkCountKeysOnly = totals via KeyN, no JSON decode at all.
 func BenchmarkCountKeysOnly(b *testing.B) {
 	s := benchDB(b)
+	db := s.backend.(*boltBackend).db
 	for b.Loop() {
-		_ = s.db.View(func(tx *bolt.Tx) error {
+		_ = db.View(func(tx *bolt.Tx) error {
 			idxRoot := tx.Bucket(articlesByFeedBucket)
 			if idxRoot == nil {
 				return nil
@@ -73,9 +74,10 @@ func BenchmarkCountKeysOnly(b *testing.B) {
 // tally unread by FeedID. No per-feed sort, no repeated transactions.
 func BenchmarkCountUnreadDecodeOnce(b *testing.B) {
 	s := benchDB(b)
+	db := s.backend.(*boltBackend).db
 	for b.Loop() {
 		counts := map[string]int{}
-		_ = s.db.View(func(tx *bolt.Tx) error {
+		_ = db.View(func(tx *bolt.Tx) error {
 			ab := tx.Bucket(articlesBucket)
 			if ab == nil {
 				return nil
