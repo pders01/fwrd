@@ -5,6 +5,7 @@ package service
 import (
 	"bytes"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 )
 
 const label = "com.fwrd.serve"
@@ -83,12 +85,9 @@ func Install(o *Options) (string, error) {
 		return "", fmt.Errorf("writing plist: %w", err)
 	}
 	if _, err := exec.LookPath("launchctl"); err != nil {
-		return path, fmt.Errorf("launchctl not found; load manually: launchctl load -w %q", path)
+		return path, fmt.Errorf("launchctl not found; load manually: launchctl bootstrap gui/%d %q", os.Getuid(), path)
 	}
-	// Unload first so a re-install picks up changes; ignore the error when it
-	// was not previously loaded.
-	_ = run("launchctl", "unload", "-w", path)
-	if err := run("launchctl", "load", "-w", path); err != nil {
+	if err := reloadLaunchAgent(path, os.Getuid(), runLaunchctl, time.Sleep); err != nil {
 		return path, err
 	}
 	return path, nil
@@ -101,7 +100,9 @@ func Uninstall() (string, error) {
 		return "", err
 	}
 	if _, err := exec.LookPath("launchctl"); err == nil {
-		_ = run("launchctl", "unload", "-w", path)
+		target := launchTarget(os.Getuid())
+		_, _ = runLaunchctl("bootout", target)
+		_, _ = runLaunchctl("disable", target)
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return path, fmt.Errorf("removing plist: %w", err)
@@ -156,11 +157,79 @@ func plistContent(o *Options, logDir string) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-func run(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+type launchctlRunner func(args ...string) ([]byte, error)
+
+type sleepFunc func(time.Duration)
+
+func launchDomain(uid int) string { return fmt.Sprintf("gui/%d", uid) }
+
+func launchTarget(uid int) string { return launchDomain(uid) + "/" + label }
+
+func reloadLaunchAgent(path string, uid int, runner launchctlRunner, sleep sleepFunc) error {
+	domain, target := launchDomain(uid), launchTarget(uid)
+
+	out, err := runner("bootout", target)
+	switch {
+	case err == nil:
+		// bootout can return before launchd has fully removed a busy job. Wait
+		// until print confirms removal before registering its replacement.
+		for attempt := 0; attempt < 100; attempt++ {
+			out, err = runner("print", target)
+			if err != nil && launchctlJobMissing(out) {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("checking launch agent removal: %w", err)
+			}
+			if attempt == 99 {
+				return errors.New("timed out waiting for launch agent removal")
+			}
+			sleep(50 * time.Millisecond)
+		}
+	case launchctlJobMissing(out):
+		// First install: there is no old job to remove.
+	default:
+		return fmt.Errorf("stopping existing launch agent: %w", err)
+	}
+
+	if _, err = runner("enable", target); err != nil {
+		return fmt.Errorf("enabling launch agent: %w", err)
+	}
+
+	// launchd occasionally reports EIO while finalizing a preceding bootout.
+	// Retry only that transient result, and always verify registration below.
+	for attempt := 0; ; attempt++ {
+		out, err = runner("bootstrap", domain, path)
+		if err == nil {
+			break
+		}
+		if !launchctlTransient(out) || attempt == 49 {
+			return fmt.Errorf("starting launch agent: %w", err)
+		}
+		sleep(100 * time.Millisecond)
+	}
+
+	if _, err = runner("print", target); err != nil {
+		return fmt.Errorf("verifying launch agent: %w", err)
 	}
 	return nil
+}
+
+func launchctlJobMissing(out []byte) bool {
+	message := strings.ToLower(string(out))
+	return strings.Contains(message, "could not find service") ||
+		strings.Contains(message, "no such process")
+}
+
+func launchctlTransient(out []byte) bool {
+	return strings.Contains(strings.ToLower(string(out)), "input/output error")
+}
+
+func runLaunchctl(args ...string) ([]byte, error) {
+	cmd := exec.Command("launchctl", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return out, fmt.Errorf("launchctl %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return out, nil
 }

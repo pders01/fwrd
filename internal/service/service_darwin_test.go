@@ -4,9 +4,123 @@ package service
 
 import (
 	"encoding/xml"
+	"errors"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestReloadLaunchAgentFirstInstall(t *testing.T) {
+	var calls []string
+	runner := func(args ...string) ([]byte, error) {
+		calls = append(calls, strings.Join(args, " "))
+		if args[0] == "bootout" {
+			return []byte("Boot-out failed: 3: No such process"), errors.New("exit status 3")
+		}
+		return nil, nil
+	}
+
+	if err := reloadLaunchAgent("/tmp/fwrd.plist", 501, runner, func(time.Duration) {}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"bootout gui/501/com.fwrd.serve",
+		"enable gui/501/com.fwrd.serve",
+		"bootstrap gui/501 /tmp/fwrd.plist",
+		"print gui/501/com.fwrd.serve",
+	}
+	if !slices.Equal(calls, want) {
+		t.Fatalf("launchctl calls = %q, want %q", calls, want)
+	}
+}
+
+func TestReloadLaunchAgentWaitsForBootout(t *testing.T) {
+	var calls []string
+	removalChecks, sleeps := 0, 0
+	bootstrapped := false
+	runner := func(args ...string) ([]byte, error) {
+		calls = append(calls, strings.Join(args, " "))
+		switch args[0] {
+		case "print":
+			if bootstrapped {
+				return nil, nil
+			}
+			removalChecks++
+			if removalChecks < 3 {
+				return nil, nil
+			}
+			return []byte("Could not find service"), errors.New("exit status 113")
+		case "bootstrap":
+			bootstrapped = true
+		}
+		return nil, nil
+	}
+
+	if err := reloadLaunchAgent("/tmp/fwrd.plist", 501, runner, func(time.Duration) { sleeps++ }); err != nil {
+		t.Fatal(err)
+	}
+	if removalChecks != 3 || sleeps != 2 {
+		t.Fatalf("removal checks = %d, sleeps = %d; want 3, 2", removalChecks, sleeps)
+	}
+	want := []string{
+		"bootout gui/501/com.fwrd.serve",
+		"print gui/501/com.fwrd.serve",
+		"print gui/501/com.fwrd.serve",
+		"print gui/501/com.fwrd.serve",
+		"enable gui/501/com.fwrd.serve",
+		"bootstrap gui/501 /tmp/fwrd.plist",
+		"print gui/501/com.fwrd.serve",
+	}
+	if !slices.Equal(calls, want) {
+		t.Fatalf("launchctl calls = %q, want %q", calls, want)
+	}
+}
+
+func TestReloadLaunchAgentRetriesTransientBootstrap(t *testing.T) {
+	attempts, sleeps := 0, 0
+	runner := func(args ...string) ([]byte, error) {
+		switch args[0] {
+		case "bootout":
+			return []byte("No such process"), errors.New("exit status 3")
+		case "bootstrap":
+			attempts++
+			if attempts < 3 {
+				return []byte("Bootstrap failed: 5: Input/output error"), errors.New("exit status 5")
+			}
+		}
+		return nil, nil
+	}
+
+	if err := reloadLaunchAgent("/tmp/fwrd.plist", 501, runner, func(time.Duration) { sleeps++ }); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 3 || sleeps != 2 {
+		t.Fatalf("bootstrap attempts = %d, sleeps = %d; want 3, 2", attempts, sleeps)
+	}
+}
+
+func TestReloadLaunchAgentRejectsNonTransientBootstrapError(t *testing.T) {
+	attempts := 0
+	runner := func(args ...string) ([]byte, error) {
+		if args[0] == "bootout" {
+			return []byte("No such process"), errors.New("exit status 3")
+		}
+		if args[0] == "bootstrap" {
+			attempts++
+			return []byte("Bootstrap failed: 1: Operation not permitted"), errors.New("exit status 1")
+		}
+		return nil, nil
+	}
+
+	err := reloadLaunchAgent("/tmp/fwrd.plist", 501, runner, func(time.Duration) {})
+	if err == nil || !strings.Contains(err.Error(), "starting launch agent") {
+		t.Fatalf("reloadLaunchAgent error = %v", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("bootstrap attempts = %d, want 1", attempts)
+	}
+}
 
 func TestPlistContent_WellFormedAndComplete(t *testing.T) {
 	// A path with an XML metacharacter must not break the document.
