@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -168,13 +169,16 @@ func (a *App) addFeed(url string) tea.Cmd {
 			url = "https://" + url
 		}
 
-		newFeed, err := a.manager.AddFeed(url)
+		if a.feedOps == nil {
+			return feedAddedMsg{err: fmt.Errorf("feed operations are unavailable")}
+		}
+		newFeed, err := a.feedOps.AddFeed(context.Background(), url)
 		if err != nil {
 			return feedAddedMsg{err: wrapErr("add feed", err)}
 		}
 
-		// Pull article count from the store; the manager has already
-		// persisted them and notified search-index listeners.
+		// Pull article count from the store; the active local/remote operation
+		// has already persisted them and notified search-index listeners.
 		articles, _ := a.store.GetArticles(newFeed.ID, 0)
 		return feedAddedMsg{err: nil, added: len(articles), title: newFeed.Title}
 	}
@@ -204,7 +208,13 @@ func (a *App) renameFeed(newTitle string) tea.Cmd {
 
 func (a *App) refreshFeeds() tea.Cmd {
 	return func() tea.Msg {
-		summary, _ := a.manager.RefreshAllFeeds()
+		if a.feedOps == nil {
+			return errorMsg{err: fmt.Errorf("feed operations are unavailable")}
+		}
+		summary, err := a.feedOps.RefreshAllFeeds(context.Background(), a.forceRefresh)
+		if err != nil && len(summary.Errors) == 0 {
+			return errorMsg{err: wrapErr("refresh feeds", err)}
+		}
 
 		docCount := -1
 		if ds, ok := a.searchEngine.(search.DebugStatser); ok {
@@ -256,7 +266,10 @@ func (a *App) markArticleRead(article *storage.Article) tea.Cmd {
 
 func (a *App) deleteFeed(feedID string) tea.Cmd {
 	return func() tea.Msg {
-		if err := a.store.DeleteFeed(feedID); err != nil {
+		if a.feedOps == nil {
+			return feedDeletedMsg{err: fmt.Errorf("feed operations are unavailable")}
+		}
+		if err := a.feedOps.DeleteFeed(context.Background(), feedID); err != nil {
 			return feedDeletedMsg{err: wrapErr("delete feed", err)}
 		}
 		if dl, ok := a.searchEngine.(search.DeleteListener); ok {
