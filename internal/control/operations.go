@@ -95,9 +95,10 @@ func (l *LocalOps) ImportFeeds(ctx context.Context, urls []string) (ImportSummar
 	if err != nil {
 		return ImportSummary{}, err
 	}
-	have := make(map[string]bool, len(existing))
+	have := make(map[string]bool, 2*len(existing))
 	for _, f := range existing {
 		have[f.URL] = true
+		have[f.SubscriptionURL()] = true
 	}
 
 	var summary ImportSummary

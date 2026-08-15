@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -212,11 +213,16 @@ func (m *Manager) AddFeedContext(ctx context.Context, url string) (*storage.Feed
 		actualFeedURL = normalizedURL
 	}
 
+	subscribedAt := time.Now()
 	feed := &storage.Feed{
-		ID:        generateFeedID(actualFeedURL),
-		URL:       actualFeedURL,
-		Title:     feedInfo.Title,
-		UpdatedAt: time.Now(),
+		ID:              generateFeedID(actualFeedURL),
+		URL:             actualFeedURL,
+		SubscribedURL:   normalizedURL,
+		SubscribedTitle: feedInfo.Title,
+		SubscribedAt:    subscribedAt,
+		Title:           feedInfo.Title,
+		Description:     feedInfo.Description,
+		UpdatedAt:       subscribedAt,
 	}
 
 	resp, updated, err := m.fetcher.FetchContext(ctx, feed)
@@ -228,17 +234,16 @@ func (m *Manager) AddFeedContext(ctx context.Context, url string) (*storage.Feed
 	}
 	defer resp.Body.Close()
 
-	articles, err := m.parser.Parse(io.LimitReader(contextReader{ctx: ctx, reader: resp.Body}, maxFeedBodySize), feed.ID)
+	parsed, err := m.parser.ParseFeed(io.LimitReader(contextReader{ctx: ctx, reader: resp.Body}, maxFeedBodySize), feed.ID)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
 		return nil, fmt.Errorf("parsing feed: %w", err)
 	}
-
-	if feed.Title == "" && len(articles) > 0 {
-		feed.Title = extractFeedTitleFromArticles(articles)
-	}
+	articles := parsed.Articles
+	applyParsedIdentity(feed, parsed)
+	applyOnboardingState(feed, articles)
 
 	m.fetcher.UpdateFeedMetadata(feed, resp)
 	if err := ctx.Err(); err != nil {
@@ -308,7 +313,7 @@ func (m *Manager) refreshFeedByIDContext(ctx context.Context, feedID string, not
 	}
 	defer resp.Body.Close()
 
-	articles, err := m.parser.Parse(io.LimitReader(contextReader{ctx: ctx, reader: resp.Body}, maxFeedBodySize), feedID)
+	parsed, err := m.parser.ParseFeed(io.LimitReader(contextReader{ctx: ctx, reader: resp.Body}, maxFeedBodySize), feedID)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return feed, nil, ctxErr
@@ -317,6 +322,8 @@ func (m *Manager) refreshFeedByIDContext(ctx context.Context, feedID string, not
 		_ = m.store.SaveFeed(feed)
 		return feed, nil, fmt.Errorf("parsing feed: %w", err)
 	}
+	articles := parsed.Articles
+	applyParsedIdentity(feed, parsed)
 
 	m.fetcher.UpdateFeedMetadata(feed, resp)
 	feed.UpdatedAt = time.Now()
@@ -328,8 +335,9 @@ func (m *Manager) refreshFeedByIDContext(ctx context.Context, feedID string, not
 	if err := m.store.SaveFeed(feed); err != nil {
 		return feed, nil, fmt.Errorf("saving feed: %w", err)
 	}
-	// Feed parsers do not know fwrd's local reading state. Merge it from
-	// existing records before a refresh re-saves matching article IDs.
+	// Apply the subscription cutoff to newly discovered history, then merge
+	// existing state so an explicit reader action always wins.
+	applyOnboardingState(feed, articles)
 	m.preserveLocalArticleState(articles)
 	if err := m.store.SaveArticles(articles); err != nil {
 		return feed, nil, fmt.Errorf("saving articles: %w", err)
@@ -339,6 +347,24 @@ func (m *Manager) refreshFeedByIDContext(ctx context.Context, feedID string, not
 		m.notifyDataUpdated(feed, articles)
 	}
 	return feed, articles, nil
+}
+
+// applyOnboardingState marks pre-subscription history read for feeds created
+// under the explicit cutoff policy. A zero cutoff identifies a legacy feed and
+// intentionally preserves the old behavior; no existing database is migrated
+// or reset implicitly.
+func applyOnboardingState(feed *storage.Feed, articles []*storage.Article) {
+	if feed == nil || feed.SubscribedAt.IsZero() {
+		return
+	}
+	for _, article := range articles {
+		if article == nil {
+			continue
+		}
+		if article.Published.IsZero() || !article.Published.After(feed.SubscribedAt) {
+			article.Read = true
+		}
+	}
 }
 
 // preserveLocalArticleState keeps refreshes from resetting state owned by the
@@ -475,12 +501,26 @@ func generateFeedID(url string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(url)))
 }
 
-func extractFeedTitleFromArticles(articles []*storage.Article) string {
-	if len(articles) > 0 && articles[0].URL != "" {
-		parts := strings.SplitN(articles[0].URL, "/", 4)
-		if len(parts) >= 3 {
-			return parts[2]
-		}
+func applyParsedIdentity(feed *storage.Feed, parsed *ParsedFeed) {
+	if feed == nil || parsed == nil {
+		return
+	}
+	if feed.SubscribedTitle != "" {
+		feed.Title = feed.SubscribedTitle
+	} else if strings.TrimSpace(parsed.Title) != "" {
+		feed.Title = strings.TrimSpace(parsed.Title)
+	}
+	if feed.Title == "" {
+		feed.Title = feedTitleFromURL(feed.SubscriptionURL())
+	}
+	if strings.TrimSpace(parsed.Description) != "" && feed.Description == "" {
+		feed.Description = strings.TrimSpace(parsed.Description)
+	}
+}
+
+func feedTitleFromURL(raw string) string {
+	if parsed, err := url.Parse(raw); err == nil && parsed.Hostname() != "" {
+		return strings.TrimPrefix(parsed.Hostname(), "www.")
 	}
 	return "Unknown Feed"
 }

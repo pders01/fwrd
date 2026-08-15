@@ -29,6 +29,7 @@ import (
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/control"
 	"github.com/pders01/fwrd/internal/debuglog"
+	"github.com/pders01/fwrd/internal/editorial"
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/ipc"
 	"github.com/pders01/fwrd/internal/opml"
@@ -111,6 +112,7 @@ var (
 	logsFollow     bool
 	logsLines      int
 	logsService    bool
+	editionJSON    bool
 )
 
 var rootCmd = &cobra.Command{
@@ -182,6 +184,7 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(feedCmd)
+	rootCmd.AddCommand(editionCmd)
 	rootCmd.AddCommand(pluginsCmd)
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(serviceCmd)
@@ -335,6 +338,13 @@ import. Pass "-" as the path to write to stdout.`,
 	Run:  exportFeeds,
 }
 
+var feedDeskCmd = &cobra.Command{
+	Use:   "desk [URL or ID] [desk]",
+	Short: "Assign a feed to a stable editorial desk",
+	Args:  cobra.ExactArgs(2),
+	Run:   setFeedDesk,
+}
+
 var feedImportCmd = &cobra.Command{
 	Use:   "import [path]",
 	Short: "Import feeds from an OPML file",
@@ -344,6 +354,17 @@ fail to fetch are reported and skipped; the rest still import. Pass "-" to
 read from stdin.`,
 	Args: cobra.ExactArgs(1),
 	Run:  importFeeds,
+}
+
+var editionCmd = &cobra.Command{
+	Use:   "edition",
+	Short: "Inspect editorial composition",
+}
+
+var editionDiagnosticsCmd = &cobra.Command{
+	Use:   "diagnostics",
+	Short: "Report source, desk, topic, fallback, and lead composition",
+	Run:   reportEditionDiagnostics,
 }
 
 var pluginsCmd = &cobra.Command{
@@ -365,6 +386,9 @@ func init() {
 	feedCmd.AddCommand(feedRefreshCmd)
 	feedCmd.AddCommand(feedExportCmd)
 	feedCmd.AddCommand(feedImportCmd)
+	feedCmd.AddCommand(feedDeskCmd)
+	editionCmd.AddCommand(editionDiagnosticsCmd)
+	editionDiagnosticsCmd.Flags().BoolVar(&editionJSON, "json", false, "emit machine-readable JSON")
 	pluginsCmd.AddCommand(pluginsListCmd)
 
 	// Add force flag to refresh command (with a deprecated alias matching
@@ -1191,8 +1215,16 @@ func listFeeds(_ *cobra.Command, _ []string) {
 		fmt.Printf("Found %d feeds:\n\n", len(feeds))
 		for _, feed := range feeds {
 			fmt.Printf("Title: %s\n", feed.Title)
-			fmt.Printf("URL:   %s\n", feed.URL)
+			fmt.Printf("URL:   %s\n", feed.SubscriptionURL())
+			if feed.URL != feed.SubscriptionURL() {
+				fmt.Printf("Fetch: %s\n", feed.URL)
+			}
 			fmt.Printf("ID:    %s\n", feed.ID)
+			desk, _ := editorial.DeskByID(feed.DeskID)
+			fmt.Printf("Desk:  %s (%s)\n", desk.Label, desk.ID)
+			if !feed.SubscribedAt.IsZero() {
+				fmt.Printf("Subscribed: %s\n", feed.SubscribedAt.Format("2006-01-02 15:04:05"))
+			}
 
 			fmt.Printf("Articles: %d\n", stats[feed.ID].Total)
 
@@ -1204,6 +1236,71 @@ func listFeeds(_ *cobra.Command, _ []string) {
 				fmt.Printf("Last-Modified: %s\n", feed.LastModified)
 			}
 			fmt.Println()
+		}
+		return nil
+	}); err != nil {
+		exitWithError(err)
+	}
+}
+
+func setFeedDesk(_ *cobra.Command, args []string) {
+	if err := withSession(false, func(sess *control.Session) error {
+		feed, desk, err := assignFeedDesk(sess.Store, args[0], args[1])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Filed %s under %s (%s).\n", feed.Title, desk.Label, desk.ID)
+		return nil
+	}); err != nil {
+		exitWithError(err)
+	}
+}
+
+func assignFeedDesk(store *storage.Store, urlOrID, deskID string) (*storage.Feed, editorial.Desk, error) {
+	desk, ok := editorial.DeskByID(deskID)
+	if !ok {
+		valid := make([]string, 0, len(editorial.Desks()))
+		for _, candidate := range editorial.Desks() {
+			valid = append(valid, candidate.ID)
+		}
+		return nil, editorial.Desk{}, fmt.Errorf("unknown desk %q (choose: %s)", deskID, strings.Join(valid, ", "))
+	}
+	feeds, err := store.GetAllFeeds()
+	if err != nil {
+		return nil, editorial.Desk{}, fmt.Errorf("get feeds: %w", err)
+	}
+	var target *storage.Feed
+	for _, feed := range feeds {
+		if feed.ID == urlOrID || feed.MatchesURL(urlOrID) {
+			target = feed
+			break
+		}
+	}
+	if target == nil {
+		return nil, editorial.Desk{}, fmt.Errorf("feed not found: %s", urlOrID)
+	}
+	target.DeskID = desk.ID
+	if err := store.SaveFeed(target); err != nil {
+		return nil, editorial.Desk{}, fmt.Errorf("save feed: %w", err)
+	}
+	return target, desk, nil
+}
+
+func reportEditionDiagnostics(_ *cobra.Command, _ []string) {
+	if err := withSession(false, func(sess *control.Session) error {
+		articles, err := sess.Store.GetArticles("", editorial.DefaultCandidateLimit)
+		if err != nil {
+			return fmt.Errorf("get diagnostic candidates: %w", err)
+		}
+		feeds, err := sess.Store.GetAllFeeds()
+		if err != nil {
+			return fmt.Errorf("get feeds: %w", err)
+		}
+		opts := editorial.DefaultOptions()
+		opts.Now = time.Now()
+		edition := editorial.Build(articles, feeds, opts)
+		if err := editorial.WriteDiagnostics(os.Stdout, edition, opts, editionJSON); err != nil {
+			return fmt.Errorf("write diagnostics: %w", err)
 		}
 		return nil
 	}); err != nil {
@@ -1248,7 +1345,7 @@ func deleteFeed(_ *cobra.Command, args []string) {
 
 		var targetFeed *storage.Feed
 		for _, feed := range feeds {
-			if feed.ID == urlOrID || feed.URL == urlOrID {
+			if feed.ID == urlOrID || feed.MatchesURL(urlOrID) {
 				targetFeed = feed
 				break
 			}
@@ -1320,9 +1417,10 @@ func importFeeds(_ *cobra.Command, args []string) {
 		}
 
 		existing, _ := sess.Store.GetAllFeeds()
-		have := make(map[string]bool, len(existing))
+		have := make(map[string]bool, 2*len(existing))
 		for _, value := range existing {
 			have[value.URL] = true
+			have[value.SubscriptionURL()] = true
 		}
 
 		urls := make([]string, len(feeds))
@@ -1343,9 +1441,10 @@ func importFeeds(_ *cobra.Command, args []string) {
 		if err != nil {
 			return fmt.Errorf("failed to restore OPML desk metadata: %w", err)
 		}
-		byURL := make(map[string]*storage.Feed, len(stored))
+		byURL := make(map[string]*storage.Feed, 2*len(stored))
 		for _, value := range stored {
 			byURL[value.URL] = value
+			byURL[value.SubscriptionURL()] = value
 		}
 		for _, imported := range feeds {
 			value := byURL[imported.URL]

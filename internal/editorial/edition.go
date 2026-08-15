@@ -66,20 +66,20 @@ type LeadScore struct {
 
 // Share is a diagnostic count and fraction of the selected edition.
 type Share struct {
-	ID    string
-	Label string
-	Count int
-	Share float64
+	ID    string  `json:"id"`
+	Label string  `json:"label"`
+	Count int     `json:"count"`
+	Share float64 `json:"share"`
 }
 
 // TopicDiagnostic makes source support inspectable while tuning fixtures and
 // a live corpus.
 type TopicDiagnostic struct {
-	DeskID      string
-	Slug        string
-	Label       string
-	Articles    int
-	SourceCount int
+	DeskID      string `json:"desk_id"`
+	Slug        string `json:"slug"`
+	Label       string `json:"label"`
+	Articles    int    `json:"articles"`
+	SourceCount int    `json:"source_count"`
 }
 
 // Diagnostics reports the composition signals called out by the editorial
@@ -323,12 +323,12 @@ func feedDeskID(feed *storage.Feed) string {
 	return feed.DeskID
 }
 
-// sourceKey groups category feeds from one publication by host. Explicit
-// source identity can replace this fallback later without changing the desk
-// taxonomy; domains are never used to assign desks.
+// sourceKey groups category feeds from one publication by the subscribed
+// identity's host, before plugin resolution can obscure provenance. Domains
+// are never used to assign desks.
 func sourceKey(feed *storage.Feed, fallback string) string {
 	if feed != nil {
-		if parsed, err := url.Parse(feed.URL); err == nil {
+		if parsed, err := url.Parse(feed.SubscriptionURL()); err == nil {
 			host := strings.ToLower(strings.TrimPrefix(parsed.Hostname(), "www."))
 			if host != "" {
 				return host

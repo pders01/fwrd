@@ -476,9 +476,10 @@ func (s *Server) importFeeds(ctx context.Context, urls []string) (added, skipped
 	s.fallbackMu.Lock()
 	defer s.fallbackMu.Unlock()
 	existing, _ := s.store.GetAllFeeds()
-	have := make(map[string]bool, len(existing))
+	have := make(map[string]bool, 2*len(existing))
 	for _, f := range existing {
 		have[f.URL] = true
+		have[f.SubscriptionURL()] = true
 	}
 	for _, u := range urls {
 		if ctxErr := ctx.Err(); ctxErr != nil {

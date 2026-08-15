@@ -15,11 +15,31 @@ import (
 // safe for concurrent use, so we allocate one per call.
 type Parser struct{}
 
+// ParsedFeed carries channel-level identity separately from its articles.
+// Feed titles must not be inferred from the first linked article: aggregator
+// feeds routinely link to unrelated publishers.
+type ParsedFeed struct {
+	Title       string
+	Description string
+	Articles    []*storage.Article
+}
+
 func NewParser() *Parser {
 	return &Parser{}
 }
 
+// Parse retains the article-only API used by callers that do not need channel
+// metadata.
 func (p *Parser) Parse(reader io.Reader, feedID string) ([]*storage.Article, error) {
+	parsed, err := p.ParseFeed(reader, feedID)
+	if err != nil {
+		return nil, err
+	}
+	return parsed.Articles, nil
+}
+
+// ParseFeed returns channel identity and articles from one parser pass.
+func (p *Parser) ParseFeed(reader io.Reader, feedID string) (*ParsedFeed, error) {
 	feed, err := gofeed.NewParser().Parse(reader)
 	if err != nil {
 		return nil, fmt.Errorf("parsing feed: %w", err)
@@ -48,7 +68,11 @@ func (p *Parser) Parse(reader io.Reader, feedID string) ([]*storage.Article, err
 		articles = append(articles, article)
 	}
 
-	return articles, nil
+	return &ParsedFeed{
+		Title:       feed.Title,
+		Description: feed.Description,
+		Articles:    articles,
+	}, nil
 }
 
 func getContent(item *gofeed.Item) string {

@@ -91,7 +91,7 @@ func runStoreContract(t *testing.T, store *storage.Store) {
 
 	for _, value := range []*storage.Feed{
 		{ID: "b", URL: "https://example.com/b", Title: "Beta"},
-		{ID: "a", URL: "https://example.com/a", Title: "alpha", DeskID: "technology"},
+		{ID: "a", URL: "https://resolved.example/a", SubscribedURL: "https://example.com/a", SubscribedTitle: "Alpha source", SubscribedAt: time.Unix(123, 0), Title: "alpha", DeskID: "technology"},
 	} {
 		if saveErr := store.SaveFeed(value); saveErr != nil {
 			t.Fatal(saveErr)
@@ -102,8 +102,8 @@ func runStoreContract(t *testing.T, store *storage.Store) {
 		t.Fatalf("sorted feeds = %#v, %v", feeds, feedsErr)
 	}
 	feedA, getErr := store.GetFeed("a")
-	if getErr != nil || feedA.DeskID != "technology" {
-		t.Fatalf("GetFeed(a) desk metadata = %#v, %v", feedA, getErr)
+	if getErr != nil || feedA.DeskID != "technology" || feedA.SubscriptionURL() != "https://example.com/a" || feedA.SubscribedTitle != "Alpha source" || !feedA.SubscribedAt.Equal(time.Unix(123, 0)) {
+		t.Fatalf("GetFeed(a) subscription metadata = %#v, %v", feedA, getErr)
 	}
 	if _, getErr := store.GetFeed("missing"); getErr == nil {
 		t.Fatal("GetFeed(missing) returned nil error")

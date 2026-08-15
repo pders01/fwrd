@@ -163,12 +163,26 @@ func TestFeedLabelFallsBackOnDegenerateTitle(t *testing.T) {
 		{"whitespace title falls back to host", storage.Feed{Title: "  ", URL: "https://example.com/rss"}, "example.com"},
 		{"short non-digit title kept", storage.Feed{Title: "Go", URL: "https://go.dev/blog/feed.atom"}, "Go"},
 		{"normal title kept", storage.Feed{Title: "Phoronix", URL: "https://phoronix.com/rss.php"}, "Phoronix"},
+		{"subscribed host wins over resolved host", storage.Feed{SubscribedURL: "https://news.example/", URL: "https://resolver.example/rss"}, "news.example"},
 		{"digit title, unparseable URL keeps title", storage.Feed{Title: "04", URL: "not a url"}, "04"},
 	}
 	for _, c := range cases {
 		if got := feedLabel(&c.feed); got != c.want {
 			t.Errorf("%s: feedLabel = %q, want %q", c.name, got, c.want)
 		}
+	}
+}
+
+func TestFeedSourceSeparatesSubscribedAndResolvedEndpoints(t *testing.T) {
+	feed := &storage.Feed{
+		SubscribedURL: "https://news.example/category/world",
+		URL:           "https://resolver.example/generated.xml",
+	}
+	if got := feedSource(feed); got != "news.example/category/world" {
+		t.Fatalf("feedSource = %q", got)
+	}
+	if got := feedFetchSource(feed); got != "resolver.example/generated.xml" {
+		t.Fatalf("feedFetchSource = %q", got)
 	}
 }
 

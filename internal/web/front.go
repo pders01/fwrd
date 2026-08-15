@@ -19,7 +19,7 @@ const frontCorpus = 400
 
 // frontCandidates is intentionally larger than the final edition: editorial
 // diversity caps must be able to skip a prolific source and keep scanning.
-const frontCandidates = 2000
+const frontCandidates = editorial.DefaultCandidateLimit
 
 // headlinesPerSection caps how many articles a front-page desk block shows
 // before linking to its full desk page.
@@ -314,7 +314,7 @@ func isAllDigits(s string) bool {
 // feedHost is the feed URL's host with a leading "www." trimmed, or "" if
 // the URL has no parseable host. It is the bare-host fallback label.
 func feedHost(f *storage.Feed) string {
-	if u, err := url.Parse(f.URL); err == nil && u.Host != "" {
+	if u, err := url.Parse(f.SubscriptionURL()); err == nil && u.Host != "" {
 		return strings.TrimPrefix(u.Host, "www.")
 	}
 	return ""
@@ -325,12 +325,25 @@ func feedHost(f *storage.Feed) string {
 // "arXiv" feeds sharing a title and host are still distinguishable by path
 // (arxiv.org/rss/cs.AI vs cs.LG). Empty when the URL has no parseable host.
 func feedSource(f *storage.Feed) string {
-	u, err := url.Parse(f.URL)
+	u, err := url.Parse(f.SubscriptionURL())
 	if err != nil || u.Host == "" {
 		return ""
 	}
 	s := strings.TrimPrefix(u.Host, "www.") + u.Path
 	return strings.TrimSuffix(s, "/")
+}
+
+// feedFetchSource exposes plugin resolution only when it differs from the
+// subscribed identity. It is shown in the source file, not every byline.
+func feedFetchSource(f *storage.Feed) string {
+	if f == nil || f.URL == "" || f.URL == f.SubscriptionURL() {
+		return ""
+	}
+	u, err := url.Parse(f.URL)
+	if err != nil || u.Host == "" {
+		return f.URL
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(u.Host, "www.")+u.Path, "/")
 }
 
 func containsArticle(arts []*storage.Article, id string) bool {

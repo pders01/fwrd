@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pders01/fwrd/internal/config"
+	"github.com/pders01/fwrd/internal/plugins"
 	"github.com/pders01/fwrd/internal/storage"
 )
 
@@ -261,6 +263,37 @@ func TestRefreshFeed(t *testing.T) {
 	})
 }
 
+type resolvingTestPlugin struct {
+	resolved string
+	title    string
+}
+
+func (p resolvingTestPlugin) Name() string          { return "resolver" }
+func (p resolvingTestPlugin) CanHandle(string) bool { return true }
+func (p resolvingTestPlugin) Priority() int         { return 100 }
+func (p resolvingTestPlugin) EnhanceFeed(_ context.Context, original string, _ *http.Client) (*plugins.FeedInfo, error) {
+	return &plugins.FeedInfo{OriginalURL: original, FeedURL: p.resolved, Title: p.title}, nil
+}
+
+func TestAddFeedPreservesSubscribedAndResolvedIdentity(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `<rss version="2.0"><channel><title>Hacker News</title><item><title>External</title><link>https://unrelated.example/story</link><guid>one</guid></item></channel></rss>`)
+	}))
+	defer backend.Close()
+	store, err := storage.NewStore(storage.MemoryPath)
+	require.NoError(t, err)
+	defer store.Close()
+	manager := NewManager(store, config.TestConfig())
+	manager.PluginRegistry().Register(resolvingTestPlugin{resolved: backend.URL})
+
+	const subscribed = "https://news.example.org/front"
+	feed, err := manager.AddFeed(subscribed)
+	require.NoError(t, err)
+	assert.Equal(t, subscribed, feed.SubscribedURL)
+	assert.Equal(t, backend.URL, feed.URL)
+	assert.Equal(t, "Hacker News", feed.Title)
+}
+
 func TestAddFeedWithMockServer(t *testing.T) {
 	// Create a test server that returns RSS feed content
 	feedContent := `<?xml version="1.0" encoding="UTF-8"?>
@@ -298,8 +331,15 @@ func TestAddFeedWithMockServer(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, feed)
 	assert.Equal(t, server.URL, feed.URL)
+	assert.Equal(t, server.URL, feed.SubscribedURL)
 	assert.NotEmpty(t, feed.ID)
-	assert.NotEmpty(t, feed.Title)
+	assert.Equal(t, "Test Feed", feed.Title)
+	assert.Equal(t, "A test RSS feed", feed.Description)
+	assert.False(t, feed.SubscribedAt.IsZero())
+	articles, err := store.GetArticles(feed.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, articles, 1)
+	assert.True(t, articles[0].Read, "pre-subscription history should start read")
 }
 
 func TestRefreshFeedWithMockServer(t *testing.T) {
@@ -354,6 +394,7 @@ func TestRefreshFeedWithMockServer(t *testing.T) {
 	updatedFeed, err := store.GetFeed(feed.ID)
 	require.NoError(t, err)
 	assert.True(t, updatedFeed.LastFetched.After(feed.LastFetched))
+	assert.Equal(t, "Updated Test Feed", updatedFeed.Title, "refresh should use channel identity")
 	assert.Equal(t, "technology", updatedFeed.DeskID, "refresh must preserve user-assigned desk")
 
 	articles, err := store.GetArticles(feed.ID, 10)
@@ -620,53 +661,40 @@ func TestGenerateFeedID(t *testing.T) {
 	}
 }
 
-func TestExtractFeedTitleFromArticles(t *testing.T) {
-	tests := []struct {
-		name     string
-		articles []*storage.Article
-		expected string
-	}{
-		{
-			name:     "empty articles",
-			articles: []*storage.Article{},
-			expected: "Unknown Feed",
-		},
-		{
-			name: "article with URL",
-			articles: []*storage.Article{
-				{URL: "https://example.com/path/article"},
-			},
-			expected: "example.com",
-		},
-		{
-			name: "article with simple URL",
-			articles: []*storage.Article{
-				{URL: "https://test.org/feed"},
-			},
-			expected: "test.org",
-		},
-		{
-			name: "article with no URL",
-			articles: []*storage.Article{
-				{URL: ""},
-			},
-			expected: "Unknown Feed",
-		},
-		{
-			name: "article with malformed URL",
-			articles: []*storage.Article{
-				{URL: "not-a-url"},
-			},
-			expected: "Unknown Feed",
-		},
-	}
+func TestFeedTitleFromURL(t *testing.T) {
+	assert.Equal(t, "example.com", feedTitleFromURL("https://www.example.com/feed"))
+	assert.Equal(t, "Unknown Feed", feedTitleFromURL("not-a-url"))
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := extractFeedTitleFromArticles(tt.articles)
-			assert.Equal(t, tt.expected, result)
-		})
+func TestApplyOnboardingStateUsesExplicitCutoff(t *testing.T) {
+	cutoff := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	articles := []*storage.Article{
+		{ID: "old", Published: cutoff.Add(-time.Minute)},
+		{ID: "new", Published: cutoff.Add(time.Minute)},
+		{ID: "undated"},
 	}
+	applyOnboardingState(&storage.Feed{SubscribedAt: cutoff}, articles)
+	assert.True(t, articles[0].Read)
+	assert.False(t, articles[1].Read)
+	assert.True(t, articles[2].Read)
+
+	legacy := []*storage.Article{{ID: "legacy"}}
+	applyOnboardingState(&storage.Feed{}, legacy)
+	assert.False(t, legacy[0].Read, "zero cutoff must not migrate legacy state")
+}
+
+func TestApplyParsedIdentityDoesNotUseLinkedArticleHost(t *testing.T) {
+	feed := &storage.Feed{URL: "https://news.example/rss"}
+	parsed := &ParsedFeed{
+		Title:    "Hacker News",
+		Articles: []*storage.Article{{URL: "https://unrelated.example/story"}},
+	}
+	applyParsedIdentity(feed, parsed)
+	assert.Equal(t, "Hacker News", feed.Title)
+
+	feed.SubscribedTitle = "My News Wire"
+	applyParsedIdentity(feed, &ParsedFeed{Title: "Resolved Channel"})
+	assert.Equal(t, "My News Wire", feed.Title, "plugin-provided subscribed identity should win")
 }
 
 func TestManagerErrorHandling(t *testing.T) {

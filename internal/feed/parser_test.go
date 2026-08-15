@@ -8,6 +8,23 @@ import (
 	"github.com/pders01/fwrd/internal/storage"
 )
 
+func TestParser_ParseFeedPreservesChannelIdentity(t *testing.T) {
+	parsed, err := NewParser().ParseFeed(strings.NewReader(`
+<rss version="2.0"><channel>
+<title>Hacker News</title><description>Links from the community</description>
+<item><title>External story</title><link>https://unrelated.example/story</link><guid>one</guid></item>
+</channel></rss>`), "hn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Title != "Hacker News" || parsed.Description != "Links from the community" {
+		t.Fatalf("channel identity = %q / %q", parsed.Title, parsed.Description)
+	}
+	if len(parsed.Articles) != 1 || parsed.Articles[0].URL != "https://unrelated.example/story" {
+		t.Fatalf("articles = %+v", parsed.Articles)
+	}
+}
+
 func TestParser_Parse(t *testing.T) {
 	parser := NewParser()
 

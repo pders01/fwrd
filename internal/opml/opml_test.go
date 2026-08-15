@@ -10,7 +10,7 @@ import (
 
 func TestExportParseRoundTrip(t *testing.T) {
 	feeds := []*storage.Feed{
-		{URL: "http://a.example/feed", Title: "Alpha", DeskID: "world"},
+		{URL: "http://resolved.example/a", SubscribedURL: "http://a.example/feed", Title: "Alpha", DeskID: "world"},
 		{URL: "http://b.example/feed", Title: "Beta", DeskID: "technology"},
 	}
 	data, err := Export(feeds, time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC))

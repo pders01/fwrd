@@ -36,15 +36,18 @@ func TestStore_SaveAndGetFeed(t *testing.T) {
 	defer cleanup()
 
 	feed := &Feed{
-		ID:           "test-feed-1",
-		URL:          "http://example.com/feed.xml",
-		Title:        "Test Feed",
-		Description:  "A test feed",
-		LastFetched:  time.Now(),
-		ETag:         "\"abc123\"",
-		LastModified: "Wed, 01 Jan 2025 00:00:00 GMT",
-		UpdatedAt:    time.Now(),
-		DeskID:       "technology",
+		ID:              "test-feed-1",
+		URL:             "http://resolved.example/feed.xml",
+		SubscribedURL:   "http://example.com/feed.xml",
+		SubscribedTitle: "Test Feed subscription",
+		SubscribedAt:    time.Now().Add(-24 * time.Hour),
+		Title:           "Test Feed",
+		Description:     "A test feed",
+		LastFetched:     time.Now(),
+		ETag:            "\"abc123\"",
+		LastModified:    "Wed, 01 Jan 2025 00:00:00 GMT",
+		UpdatedAt:       time.Now(),
+		DeskID:          "technology",
 	}
 
 	err := store.SaveFeed(feed)
@@ -62,6 +65,12 @@ func TestStore_SaveAndGetFeed(t *testing.T) {
 	}
 	if retrieved.URL != feed.URL {
 		t.Errorf("expected URL %s, got %s", feed.URL, retrieved.URL)
+	}
+	if retrieved.SubscriptionURL() != feed.SubscribedURL || retrieved.SubscribedTitle != feed.SubscribedTitle || !retrieved.SubscribedAt.Equal(feed.SubscribedAt) {
+		t.Errorf("subscription identity was not preserved: %+v", retrieved)
+	}
+	if !retrieved.MatchesURL(feed.URL) || !retrieved.MatchesURL(feed.SubscribedURL) {
+		t.Errorf("feed should match resolved and subscribed URLs: %+v", retrieved)
 	}
 	if retrieved.Title != feed.Title {
 		t.Errorf("expected Title %s, got %s", feed.Title, retrieved.Title)

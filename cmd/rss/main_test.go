@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pders01/fwrd/internal/editorial"
 	"github.com/pders01/fwrd/internal/ipc"
 	"github.com/pders01/fwrd/internal/storage"
 )
@@ -125,6 +126,33 @@ func TestGenerateConfigCommand(t *testing.T) {
 	// Check output message
 	if !strings.Contains(out, "Generated default configuration at:") {
 		t.Errorf("Expected output to contain 'Generated default configuration at:', got: %s", out)
+	}
+}
+
+func TestAssignFeedDesk(t *testing.T) {
+	store, err := storage.NewStore(storage.MemoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	feed := &storage.Feed{ID: "feed-1", URL: "https://news.example/rss", Title: "News"}
+	if err := store.SaveFeed(feed); err != nil {
+		t.Fatal(err)
+	}
+
+	got, desk, err := assignFeedDesk(store, feed.URL, editorial.DeskWorld)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if desk.ID != editorial.DeskWorld || got.DeskID != editorial.DeskWorld {
+		t.Fatalf("assignment = feed %+v, desk %+v", got, desk)
+	}
+	persisted, err := store.GetFeed(feed.ID)
+	if err != nil || persisted.DeskID != editorial.DeskWorld {
+		t.Fatalf("persisted feed = %+v, %v", persisted, err)
+	}
+	if _, _, err := assignFeedDesk(store, feed.ID, "made-up"); err == nil || !strings.Contains(err.Error(), editorial.DeskTechnology) {
+		t.Fatalf("invalid desk error = %v; want valid choices", err)
 	}
 }
 

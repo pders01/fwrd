@@ -75,12 +75,13 @@ func Export(feeds []*storage.Feed, created time.Time) ([]byte, error) {
 		doc.Head.DateCreated = created.Format(time.RFC1123Z)
 	}
 	for _, f := range feeds {
-		if f == nil || strings.TrimSpace(f.URL) == "" {
+		if f == nil || strings.TrimSpace(f.SubscriptionURL()) == "" {
 			continue
 		}
+		subscriptionURL := f.SubscriptionURL()
 		title := f.Title
 		if title == "" {
-			title = f.URL
+			title = subscriptionURL
 		}
 		deskID, ok := editorial.NormalizeDeskID(f.DeskID)
 		category := ""
@@ -91,7 +92,7 @@ func Export(feeds []*storage.Feed, created time.Time) ([]byte, error) {
 			Text:     title,
 			Title:    title,
 			Type:     "rss",
-			XMLURL:   f.URL,
+			XMLURL:   subscriptionURL,
 			Category: category,
 		})
 	}

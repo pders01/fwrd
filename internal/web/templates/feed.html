@@ -26,6 +26,7 @@
 <p class="page-kicker">Editorial filing</p>
 <h2 id="source-filing-title">{{.Desk.Label}}</h2>
 <p class="muted">Stories from this subscription are filed here by your explicit source assignment.</p>
+<p class="muted source-provenance">Subscribed source: {{.Source}}{{if not .Feed.SubscribedAt.IsZero}} · since {{date .Feed.SubscribedAt}}{{end}}{{if .FetchSource}} · resolved fetch: {{.FetchSource}}{{end}}</p>
 </div>
 <form action="/feeds/{{.Feed.ID}}/desk" method="post" class="desk-picker">
 <label for="feed-desk">Desk</label>

@@ -42,15 +42,16 @@ type indexData struct {
 
 type feedData struct {
 	pageBase
-	Feed       *storage.Feed
-	Label      string
-	Source     string
-	Desk       editorial.Desk
-	Desks      []editorial.Desk
-	Articles   []*storage.Article
-	Total      int
-	Unread     int
-	NextCursor string
+	Feed        *storage.Feed
+	Label       string
+	Source      string
+	FetchSource string
+	Desk        editorial.Desk
+	Desks       []editorial.Desk
+	Articles    []*storage.Article
+	Total       int
+	Unread      int
+	NextCursor  string
 }
 
 type articleData struct {
@@ -85,7 +86,7 @@ func (s *Server) handleFeeds(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(feeds, func(i, j int) bool {
 		li, lj := feedLabel(feeds[i]), feedLabel(feeds[j])
 		if strings.EqualFold(li, lj) {
-			return feeds[i].URL < feeds[j].URL
+			return feeds[i].SubscriptionURL() < feeds[j].SubscriptionURL()
 		}
 		return strings.ToLower(li) < strings.ToLower(lj)
 	})
@@ -145,15 +146,16 @@ func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
 	}
 	desk, _ := editorial.DeskByID(feed.DeskID)
 	data := feedData{
-		Feed:       feed,
-		Label:      feedLabel(feed),
-		Source:     feedSource(feed),
-		Desk:       desk,
-		Desks:      editorial.Desks(),
-		Articles:   articles,
-		Total:      stat.Total,
-		Unread:     stat.Unread,
-		NextCursor: next,
+		Feed:        feed,
+		Label:       feedLabel(feed),
+		Source:      feedSource(feed),
+		FetchSource: feedFetchSource(feed),
+		Desk:        desk,
+		Desks:       editorial.Desks(),
+		Articles:    articles,
+		Total:       stat.Total,
+		Unread:      stat.Unread,
+		NextCursor:  next,
 	}
 	data.Flash = takeFlash(w, r)
 	s.render(w, "feed.html", data)
@@ -410,9 +412,10 @@ func (s *Server) applyImportedDeskMetadata(r *http.Request, imported []opml.Feed
 	if err != nil {
 		return err
 	}
-	byURL := make(map[string]*storage.Feed, len(stored))
+	byURL := make(map[string]*storage.Feed, 2*len(stored))
 	for _, feed := range stored {
 		byURL[feed.URL] = feed
+		byURL[feed.SubscriptionURL()] = feed
 	}
 	for _, item := range imported {
 		if item.DeskID == "" {
