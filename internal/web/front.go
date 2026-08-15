@@ -21,29 +21,42 @@ const frontCorpus = 400
 // shows before linking to its full topic page.
 const headlinesPerSection = 6
 
-// deckLen bounds the lead story's plain-text deck.
-const deckLen = 220
+// deckLen bounds the lead story's plain-text deck. sectionDeckLen keeps the
+// one expanded story in each topic compact enough to preserve scanability.
+const (
+	deckLen        = 220
+	sectionDeckLen = 150
+)
 
 type headlineView struct {
 	Article *storage.Article
 	Feed    string
+	Deck    string
 }
 
 type sectionView struct {
 	Slug      string
 	Label     string
+	Spotlight *headlineView
 	Headlines []headlineView
+	Total     int
+	Unread    int
 	More      int // articles beyond those shown, for the "+N more" link
 }
 
 type frontData struct {
 	pageBase
-	Now        time.Time
-	HasContent bool
-	Lead       *storage.Article
-	LeadFeed   string
-	LeadDeck   string
-	Sections   []sectionView
+	Now           time.Time
+	HasContent    bool
+	Lead          *storage.Article
+	LeadFeed      string
+	LeadDeck      string
+	LeadTopic     string
+	LeadTopicSlug string
+	ArticleCount  int
+	UnreadCount   int
+	SourceCount   int
+	Sections      []sectionView
 }
 
 type topicData struct {
@@ -109,28 +122,61 @@ func (s *Server) handleFront(w http.ResponseWriter, r *http.Request) {
 		data.LeadDeck = excerpt(articleBody(model.Lead), deckLen)
 	}
 
+	// Summarize the bounded front-page corpus rather than the complete
+	// archive. This makes the brief truthful and keeps it useful: it tells
+	// the reader how much is in this edition, not how large BoltDB is.
+	seenArticles := make(map[string]bool)
+	seenSources := make(map[string]bool)
 	for _, t := range model.Topics {
-		sv := sectionView{Slug: t.Slug, Label: t.Label}
+		sv := sectionView{Slug: t.Slug, Label: t.Label, Total: len(t.Articles)}
 		for _, a := range t.Articles {
+			if !seenArticles[a.ID] {
+				seenArticles[a.ID] = true
+				data.ArticleCount++
+				if !a.Read {
+					data.UnreadCount++
+				}
+				seenSources[a.FeedID] = true
+			}
+			if !a.Read {
+				sv.Unread++
+			}
+
 			// The lead is shown prominently above; don't repeat it in a
-			// section block (it still belongs to the topic page).
+			// section block (it still belongs to the topic page and counts).
 			if model.Lead != nil && a.ID == model.Lead.ID {
+				data.LeadTopic, data.LeadTopicSlug = t.Label, t.Slug
 				continue
 			}
-			if len(sv.Headlines) < headlinesPerSection {
-				sv.Headlines = append(sv.Headlines, headlineView{Article: a, Feed: names[a.FeedID]})
+			if sv.Spotlight == nil {
+				sv.Spotlight = &headlineView{
+					Article: a,
+					Feed:    names[a.FeedID],
+					Deck:    excerpt(articleBody(a), sectionDeckLen),
+				}
+				continue
+			}
+			if len(sv.Headlines) < headlinesPerSection-1 {
+				sv.Headlines = append(sv.Headlines, headlineView{
+					Article: a,
+					Feed:    names[a.FeedID],
+				})
 			}
 		}
 		shown := len(sv.Headlines)
-		total := len(t.Articles)
-		if model.Lead != nil && containsArticle(t.Articles, model.Lead.ID) {
-			total--
+		if sv.Spotlight != nil {
+			shown++
 		}
-		sv.More = total - shown
+		totalWithoutLead := sv.Total
+		if model.Lead != nil && containsArticle(t.Articles, model.Lead.ID) {
+			totalWithoutLead--
+		}
+		sv.More = totalWithoutLead - shown
 		if shown > 0 {
 			data.Sections = append(data.Sections, sv)
 		}
 	}
+	data.SourceCount = len(seenSources)
 	s.render(w, "front.html", data)
 }
 
@@ -235,11 +281,12 @@ func excerpt(s string, n int) string {
 	// <tags>; without this the lead story shows a literal "&mdash;".
 	plain = html.UnescapeString(plain)
 	plain = strings.Join(strings.Fields(plain), " ") // collapse whitespace
-	if len(plain) <= n {
+	runes := []rune(plain)
+	if len(runes) <= n {
 		return plain
 	}
-	cut := plain[:n]
-	if i := strings.LastIndexByte(cut, ' '); i > n/2 {
+	cut := string(runes[:n])
+	if i := strings.LastIndexByte(cut, ' '); i > len(cut)/2 {
 		cut = cut[:i]
 	}
 	return strings.TrimRight(cut, " ,.;:") + "…"

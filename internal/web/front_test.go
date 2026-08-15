@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/pders01/fwrd/internal/storage"
 	"github.com/pders01/fwrd/internal/topics"
@@ -41,7 +42,17 @@ func TestFrontPageRenders(t *testing.T) {
 		t.Fatalf("status %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"nameplate", "Kubernetes scheduling internals", "Example Blog", "/topic/"} {
+	for _, want := range []string{
+		"nameplate",
+		"Current edition",
+		"4</strong> stories",
+		"4</strong> unread",
+		"1</strong> source",
+		"section-lead",
+		"Kubernetes scheduling internals",
+		"Example Blog",
+		"/topic/",
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("front page missing %q", want)
 		}
@@ -142,5 +153,15 @@ func TestExcerptDecodesEntities(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("excerpt %q missing decoded %q", got, want)
 		}
+	}
+}
+
+func TestExcerptDoesNotSplitMultibyteText(t *testing.T) {
+	got := excerpt(strings.Repeat("café ", 20), 31)
+	if !utf8.ValidString(got) {
+		t.Errorf("excerpt split a UTF-8 sequence: %q", got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("expected a shortened excerpt, got %q", got)
 	}
 }

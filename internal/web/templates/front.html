@@ -12,17 +12,47 @@
 
 {{if .HasContent}}
 <main class="front">
-<article class="lead">
+<aside class="edition-brief" aria-label="Current edition summary">
+<div class="edition-summary">
+<p class="edition-label">Current edition</p>
+<p class="edition-stats"><strong>{{.ArticleCount}}</strong> {{plural .ArticleCount "story" "stories"}} <span aria-hidden="true">/</span> <strong>{{.UnreadCount}}</strong> unread <span aria-hidden="true">/</span> <strong>{{.SourceCount}}</strong> {{plural .SourceCount "source" "sources"}}</p>
+</div>
+{{if .Sections}}
+<nav class="edition-index" aria-label="Sections in this edition">
+<span class="edition-index-label">In this edition</span>
+{{range .Sections}}<a href="#topic-{{.Slug}}">{{.Label}} <small>{{.Total}}</small></a>{{end}}
+</nav>
+{{end}}
+</aside>
+
+<article class="lead {{if .Lead.Read}}read{{end}}{{if .Lead.Starred}} starred{{end}}">
+<div class="lead-primary">
+{{if .LeadTopic}}<p class="story-kicker"><a href="/topic/{{.LeadTopicSlug}}">{{.LeadTopic}}</a> <span>Lead story</span></p>{{end}}
 <a class="lead-link" href="/article?id={{.Lead.ID}}"><h1 class="lead-hl">{{if .Lead.Title}}{{.Lead.Title}}{{else}}(untitled){{end}}</h1></a>
 <p class="byline">{{.LeadFeed}}{{if not .Lead.Published.IsZero}} · <time>{{date .Lead.Published}}</time>{{end}}</p>
+</div>
+<div class="lead-summary">
 {{if .LeadDeck}}<p class="deck">{{.LeadDeck}}</p>{{end}}
+<p class="story-state">{{if not .Lead.Read}}<span class="unread-state">Unread</span>{{else}}Read{{end}}{{if .Lead.Starred}} <span aria-hidden="true">·</span> <span class="saved-state">★ Saved</span>{{end}}</p>
+</div>
 </article>
 
 <div class="sections">
 {{range .Sections}}
-<section class="topic-block">
+<section class="topic-block" id="topic-{{.Slug}}">
+<header class="section-head">
 <h2 class="section-label"><a href="/topic/{{.Slug}}">{{.Label}}</a></h2>
-<ul class="headlines">
+<p class="section-count">{{.Total}} {{plural .Total "story" "stories"}}{{if gt .Unread 0}} · {{.Unread}} unread{{end}}</p>
+</header>
+{{with .Spotlight}}
+<article class="section-lead {{if .Article.Read}}read{{end}}{{if .Article.Starred}} starred{{end}}">
+<a href="/article?id={{.Article.ID}}"><h3>{{if .Article.Title}}{{.Article.Title}}{{else}}(untitled){{end}}</h3></a>
+<p class="byline">{{.Feed}}{{if not .Article.Published.IsZero}} · {{date .Article.Published}}{{end}}</p>
+{{if .Deck}}<p class="section-deck">{{.Deck}}</p>{{end}}
+</article>
+{{end}}
+{{if .Headlines}}
+<ul class="headlines compact">
 {{range .Headlines}}
 <li class="{{if .Article.Read}}read{{end}}{{if .Article.Starred}} starred{{end}}">
 <a href="/article?id={{.Article.ID}}">{{if .Article.Title}}{{.Article.Title}}{{else}}(untitled){{end}}</a>
@@ -30,7 +60,8 @@
 </li>
 {{end}}
 </ul>
-{{if gt .More 0}}<p class="more"><a href="/topic/{{.Slug}}">+{{.More}} more →</a></p>{{end}}
+{{end}}
+{{if gt .More 0}}<p class="more"><a href="/topic/{{.Slug}}">Explore {{.More}} more →</a></p>{{end}}
 </section>
 {{end}}
 </div>

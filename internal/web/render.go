@@ -59,6 +59,12 @@ func funcMap() template.FuncMap {
 			}
 			return tm.Format("Monday, January 2, 2006")
 		},
+		"plural": func(n int, singular, plural string) string {
+			if n == 1 {
+				return singular
+			}
+			return plural
+		},
 	}
 }
 

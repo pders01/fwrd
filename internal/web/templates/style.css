@@ -31,7 +31,8 @@ body {
 }
 /* UI chrome uses a system sans for crisp controls; prose keeps the serif. */
 .brand, .search input, button, input, .badge, .crumbs, .row-meta,
-.feed-actions, .mast-nav, .front-nav, .dateline, .byline, .more {
+.feed-actions, .mast-nav, .front-nav, .dateline, .byline, .more,
+.edition-brief, .section-count, .story-kicker, .story-state {
   font-family: var(--ui-font, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
 }
 a { color: var(--fg); text-decoration: none; }
@@ -84,30 +85,109 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
 }
 .front-nav a { color: var(--accent); }
 
-.front { padding-top: 1.5rem; }
+.front { padding-top: 0; }
 
-/* lead story — the broadsheet's above-the-fold headline */
-.lead {
-  padding-bottom: 1.5rem;
-  margin-bottom: 1.5rem;
-  border-bottom: 1px solid var(--ink-rule);
+/* The edition brief is an information scent layer: scale, unread load, source
+   diversity, and jump links before the first headline. It compresses the
+   corpus into one glance without competing with the lead story. */
+.edition-brief {
+  display: grid;
+  grid-template-columns: minmax(11rem, 0.7fr) minmax(0, 2fr);
+  gap: 1.5rem;
+  align-items: center;
+  padding: 0.85rem 0 1rem;
+  margin-bottom: 1.75rem;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.78rem;
 }
+.edition-summary { min-width: 0; }
+.edition-label {
+  margin: 0;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.edition-stats { margin: 0.15rem 0 0; color: var(--muted); }
+.edition-stats strong { color: var(--fg); font-variant-numeric: tabular-nums; }
+.edition-stats span { padding: 0 0.25rem; color: var(--rule); }
+.edition-index {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0.35rem 0.9rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.edition-index-label {
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.edition-index a { color: var(--fg); font-weight: 650; white-space: nowrap; }
+.edition-index a:hover { color: var(--accent); text-decoration: none; }
+.edition-index small {
+  margin-left: 0.1rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Lead story: headline and abstract sit side-by-side on a broadsheet, then
+   collapse into reading order on narrow screens. */
+.lead {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(15rem, 0.75fr);
+  gap: 2rem;
+  padding-bottom: 2rem;
+  margin-bottom: 2rem;
+  border-bottom: 3px double var(--ink-rule);
+}
+.lead-primary { min-width: 0; }
+.story-kicker {
+  display: flex;
+  gap: 0.65rem;
+  align-items: baseline;
+  margin: 0 0 0.6rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.story-kicker a { color: var(--accent); font-weight: 800; }
+.story-kicker a:hover { text-decoration: none; }
+.story-kicker span::before { content: "— "; }
 .lead-link:hover { text-decoration: none; }
 .lead-hl {
-  margin: 0 0 0.5rem;
-  font-size: clamp(1.8rem, 5.5vw, 3.1rem);
-  line-height: 1.08;
-  letter-spacing: -0.02em;
-  font-weight: 800;
+  margin: 0 0 0.65rem;
+  font-size: clamp(2rem, 5.8vw, 3.45rem);
+  line-height: 1.03;
+  letter-spacing: -0.035em;
+  font-weight: 850;
+  text-wrap: balance;
 }
 .lead-link:hover .lead-hl { color: var(--accent); }
+.lead-summary {
+  align-self: stretch;
+  padding-left: 1.5rem;
+  border-left: 1px solid var(--rule);
+}
 .deck {
-  margin: 0.6rem 0 0;
-  font-size: 1.15rem;
+  margin: 0;
+  font-size: 1.08rem;
   line-height: 1.5;
   color: var(--fg);
-  max-width: 40rem;
 }
+.story-state {
+  margin: 1rem 0 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.unread-state { color: var(--accent); font-weight: 800; }
+.unread-state::before { content: "●"; margin-right: 0.35rem; font-size: 0.6em; vertical-align: 0.1em; }
+.saved-state { color: var(--accent); }
 .byline {
   display: block;
   font-size: 0.74rem;
@@ -116,47 +196,88 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0
   color: var(--muted);
 }
 
-/* topical sections flow as true newspaper columns with a rule between. */
+/* Semantic zoom inside every section: one story gets a title + abstract,
+   while the rest collapse to headline + provenance. This preserves density
+   without turning the page into an undifferentiated list. */
 .sections {
-  column-count: 2;
-  column-gap: 2.5rem;
-  column-rule: 1px solid var(--rule);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2.5rem;
+  counter-reset: front-section;
 }
-@media (max-width: 38rem) { .sections { column-count: 1; } }
 .topic-block {
-  break-inside: avoid;
-  margin: 0 0 1.75rem;
+  min-width: 0;
+  padding-top: 0.65rem;
+  border-top: 3px solid var(--ink-rule);
+  counter-increment: front-section;
+}
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--rule);
 }
 .section-label {
-  margin: 0 0 0.6rem;
-  padding-bottom: 0.3rem;
-  border-bottom: 2px solid var(--ink-rule);
-  font-size: 0.95rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 850;
+  letter-spacing: 0.055em;
   text-transform: uppercase;
+}
+.section-label::before {
+  content: counter(front-section, decimal-leading-zero) " / ";
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 500;
 }
 .section-label a { color: var(--fg); }
 .section-label a:hover { color: var(--accent); text-decoration: none; }
+.section-count {
+  flex: none;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.025em;
+  white-space: nowrap;
+}
+.section-lead { padding: 0.95rem 0 1rem; border-bottom: 1px solid var(--border); }
+.section-lead h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1.38rem;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.section-lead > a:hover { color: var(--accent); text-decoration: none; }
+.section-deck {
+  margin: 0.55rem 0 0;
+  color: var(--muted);
+  font-size: 0.94rem;
+  line-height: 1.45;
+}
+.section-lead.read h3 { color: var(--muted); font-weight: 500; }
+.section-lead.starred h3::before { content: "★ "; color: var(--accent); }
 .headlines { list-style: none; margin: 0; padding: 0; }
-.headlines li {
-  padding: 0.55rem 0;
-  border-bottom: 1px solid var(--border);
-}
-.headlines li:last-child { border-bottom: none; }
-.headlines li > a {
-  font-weight: 600;
-  font-size: 1.05rem;
-  line-height: 1.25;
-}
+.headlines li { padding: 0.62rem 0; border-bottom: 1px solid var(--border); }
+.headlines li > a { display: block; font-weight: 650; font-size: 1rem; line-height: 1.22; }
 .headlines li > a:hover { color: var(--accent); }
 .headlines li .byline { margin-top: 0.2rem; }
 .headlines li.read > a { color: var(--muted); font-weight: 400; }
 .headlines li.starred > a::before,
 ul.article-list li.starred > a::before { content: "★ "; color: var(--accent); }
-.more { margin: 0.5rem 0 0; font-size: 0.8rem; letter-spacing: 0.04em; }
+.more { margin: 0.65rem 0 0; font-size: 0.78rem; letter-spacing: 0.04em; }
 .more a { color: var(--accent); }
 .empty { margin-top: 2rem; font-size: 1.05rem; }
+
+@media (max-width: 44rem) {
+  .edition-brief { grid-template-columns: 1fr; gap: 0.7rem; }
+  .edition-index { justify-content: flex-start; }
+  .lead { grid-template-columns: 1fr; gap: 1rem; }
+  .lead-summary { padding: 0; border-left: 0; }
+  .sections { grid-template-columns: 1fr; gap: 2rem; }
+}
 
 /* ============================ inner pages =========================== */
 
