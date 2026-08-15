@@ -10,8 +10,8 @@ import (
 
 func TestExportParseRoundTrip(t *testing.T) {
 	feeds := []*storage.Feed{
-		{URL: "http://a.example/feed", Title: "Alpha"},
-		{URL: "http://b.example/feed", Title: "Beta"},
+		{URL: "http://a.example/feed", Title: "Alpha", DeskID: "world"},
+		{URL: "http://b.example/feed", Title: "Beta", DeskID: "technology"},
 	}
 	data, err := Export(feeds, time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC))
 	if err != nil {
@@ -28,8 +28,11 @@ func TestExportParseRoundTrip(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("round-trip recovered %d feeds, want 2", len(got))
 	}
-	if got[0].URL != "http://a.example/feed" || got[0].Title != "Alpha" {
-		t.Errorf("first feed = %+v, want Alpha", got[0])
+	if got[0].URL != "http://a.example/feed" || got[0].Title != "Alpha" || got[0].DeskID != "world" {
+		t.Errorf("first feed = %+v, want Alpha filed under World", got[0])
+	}
+	if got[1].DeskID != "technology" {
+		t.Errorf("second desk = %q, want technology", got[1].DeskID)
 	}
 }
 

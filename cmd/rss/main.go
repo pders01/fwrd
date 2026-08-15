@@ -1337,6 +1337,26 @@ func importFeeds(_ *cobra.Command, args []string) {
 		if err != nil {
 			return fmt.Errorf("failed to import: %w", err)
 		}
+		// Restore fwrd's stable desk metadata after subscriptions have been
+		// fetched. This also updates already-present feeds from a round-trip.
+		stored, err := sess.Store.GetAllFeeds()
+		if err != nil {
+			return fmt.Errorf("failed to restore OPML desk metadata: %w", err)
+		}
+		byURL := make(map[string]*storage.Feed, len(stored))
+		for _, value := range stored {
+			byURL[value.URL] = value
+		}
+		for _, imported := range feeds {
+			value := byURL[imported.URL]
+			if imported.DeskID == "" || value == nil || value.DeskID == imported.DeskID {
+				continue
+			}
+			value.DeskID = imported.DeskID
+			if err := sess.Store.SaveFeed(value); err != nil {
+				return fmt.Errorf("failed to restore desk for %s: %w", imported.URL, err)
+			}
+		}
 		for _, failure := range summary.Failures {
 			fmt.Fprintf(os.Stderr, "  %s failed: %s\n", failure.URL, failure.Error)
 		}

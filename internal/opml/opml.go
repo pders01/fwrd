@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pders01/fwrd/internal/editorial"
 	"github.com/pders01/fwrd/internal/storage"
 )
 
@@ -47,17 +48,20 @@ type outline struct {
 	Type     string    `xml:"type,attr,omitempty"`
 	XMLURL   string    `xml:"xmlUrl,attr,omitempty"`
 	HTMLURL  string    `xml:"htmlUrl,attr,omitempty"`
+	Category string    `xml:"category,attr,omitempty"`
 	Children []outline `xml:"outline"`
 }
 
-// Feed is a single subscription recovered from an OPML document: the feed
-// URL and a human-readable title. It is intentionally smaller than
-// storage.Feed — import only knows the URL and title; the rest is filled
-// in when the feed is actually fetched.
+// Feed is a subscription recovered from OPML. DeskID is restored from fwrd's
+// standard category attribute value (fwrd/desk/<stable-id>); other readers
+// safely ignore it. Fetching still fills the remaining storage.Feed fields.
 type Feed struct {
-	URL   string
-	Title string
+	URL    string
+	Title  string
+	DeskID string
 }
+
+const deskCategoryPrefix = "fwrd/desk/"
 
 // Export renders feeds as an OPML 2.0 document. created stamps the head's
 // dateCreated (RFC 1123); pass the zero time to omit it. Feeds without a
@@ -78,11 +82,17 @@ func Export(feeds []*storage.Feed, created time.Time) ([]byte, error) {
 		if title == "" {
 			title = f.URL
 		}
+		deskID, ok := editorial.NormalizeDeskID(f.DeskID)
+		category := ""
+		if ok {
+			category = deskCategoryPrefix + deskID
+		}
 		doc.Body.Outlines = append(doc.Body.Outlines, outline{
-			Text:   title,
-			Title:  title,
-			Type:   "rss",
-			XMLURL: f.URL,
+			Text:     title,
+			Title:    title,
+			Type:     "rss",
+			XMLURL:   f.URL,
+			Category: category,
 		})
 	}
 
@@ -123,7 +133,18 @@ func Parse(r io.Reader) ([]Feed, error) {
 				if title == "" {
 					title = o.Text
 				}
-				feeds = append(feeds, Feed{URL: url, Title: strings.TrimSpace(title)})
+				deskID := ""
+				for _, category := range strings.Split(o.Category, ",") {
+					candidate := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(category), deskCategoryPrefix))
+					if !strings.HasPrefix(strings.TrimSpace(category), deskCategoryPrefix) {
+						continue
+					}
+					if normalized, ok := editorial.NormalizeDeskID(candidate); ok {
+						deskID = normalized
+						break
+					}
+				}
+				feeds = append(feeds, Feed{URL: url, Title: strings.TrimSpace(title), DeskID: deskID})
 			}
 			if len(o.Children) > 0 {
 				walk(o.Children)
