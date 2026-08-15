@@ -29,10 +29,10 @@ func TestBuildDeterministicDiverseEdition(t *testing.T) {
 	}
 	opts := DefaultOptions()
 	opts.Now = now
-	first := Build(articles, feeds, opts)
+	first := Build(articles, feeds, &opts)
 	reversed := slices.Clone(articles)
 	slices.Reverse(reversed)
-	second := Build(reversed, feeds, opts)
+	second := Build(reversed, feeds, &opts)
 
 	if got, want := deskIDs(first), deskIDs(second); !slices.Equal(got, want) {
 		t.Fatalf("desk order depends on insertion: %v vs %v", got, want)
@@ -84,7 +84,7 @@ func TestLeadTopicSupportPointsAreCapped(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Now = now
 	opts.TopicOptions.MaxDocFraction = 1
-	edition := Build(articles, feeds, opts)
+	edition := Build(articles, feeds, &opts)
 	if edition.LeadScore.TopicSources != 5 {
 		t.Fatalf("topic source count = %d, want 5", edition.LeadScore.TopicSources)
 	}
@@ -102,9 +102,11 @@ func TestBuildAppliesDocumentedSourceCaps(t *testing.T) {
 	}
 	var articles []*storage.Article
 	for i := range 10 {
-		articles = append(articles, article("lw"+string(rune('a'+i)), "loud-world", "World dispatch", now.Add(-time.Duration(i)*time.Minute)))
-		articles = append(articles, article("lt"+string(rune('a'+i)), "loud-tech", "Technology dispatch", now.Add(-time.Duration(i)*time.Minute-time.Second)))
-		articles = append(articles, article("o"+string(rune('a'+i)), "other", "Other dispatch", now.Add(-time.Duration(i)*time.Minute-2*time.Second)))
+		articles = append(articles,
+			article("lw"+string(rune('a'+i)), "loud-world", "World dispatch", now.Add(-time.Duration(i)*time.Minute)),
+			article("lt"+string(rune('a'+i)), "loud-tech", "Technology dispatch", now.Add(-time.Duration(i)*time.Minute-time.Second)),
+			article("o"+string(rune('a'+i)), "other", "Other dispatch", now.Add(-time.Duration(i)*time.Minute-2*time.Second)),
+		)
 	}
 	opts := DefaultOptions()
 	opts.Now = now
@@ -112,7 +114,7 @@ func TestBuildAppliesDocumentedSourceCaps(t *testing.T) {
 	opts.MaxPerSource = 3
 	opts.MaxPerSourceInDesk = 2
 	opts.MaxPerDesk = 8
-	edition := Build(articles, feeds, opts)
+	edition := Build(articles, feeds, &opts)
 
 	for _, source := range edition.Diagnostics.Sources {
 		if source.Count > opts.MaxPerSource {

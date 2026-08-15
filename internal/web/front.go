@@ -99,6 +99,11 @@ func editorialOptions() editorial.Options {
 	return o
 }
 
+func buildEditorial(articles []*storage.Article, feeds []*storage.Feed) *editorial.Edition {
+	opts := editorialOptions()
+	return editorial.Build(articles, feeds, &opts)
+}
+
 // editorialView returns the stable-desk edition, cached against WriteGen just
 // like the compatibility topic model. It loads a wider candidate window so
 // composition can apply source caps before selecting the final 400 stories.
@@ -115,20 +120,20 @@ func (s *Server) editorialView() (edition *editorial.Edition, names map[string]s
 		if s.editionValid {
 			return s.editionModel, s.editionNames
 		}
-		return editorial.Build(nil, nil, editorialOptions()), map[string]string{}
+		return buildEditorial(nil, nil), map[string]string{}
 	}
 	feeds, err := s.store.GetAllFeeds()
 	if err != nil {
 		if s.editionValid {
 			return s.editionModel, s.editionNames
 		}
-		return editorial.Build(nil, nil, editorialOptions()), map[string]string{}
+		return buildEditorial(nil, nil), map[string]string{}
 	}
 	names = make(map[string]string, len(feeds))
 	for _, feed := range feeds {
 		names[feed.ID] = feedLabel(feed)
 	}
-	edition = editorial.Build(articles, feeds, editorialOptions())
+	edition = buildEditorial(articles, feeds)
 	s.editionModel, s.editionNames, s.editionGen, s.editionValid = edition, names, gen, true
 	return edition, names
 }

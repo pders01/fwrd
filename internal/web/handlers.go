@@ -397,11 +397,12 @@ func (s *Server) handleOPMLImport(w http.ResponseWriter, r *http.Request) {
 	if skipped > 0 {
 		msg += fmt.Sprintf(", %d already present", skipped)
 	}
-	if failed > 0 {
+	switch {
+	case failed > 0:
 		setFlash(w, flashError, msg+fmt.Sprintf(", %d failed to fetch.", failed))
-	} else if metadataErr != nil {
+	case metadataErr != nil:
 		setFlash(w, flashError, msg+"; couldn't restore desk assignments: "+metadataErr.Error())
-	} else {
+	default:
 		setFlash(w, flashNotice, msg+".")
 	}
 	redirect(w, r, "/feeds")

@@ -4,7 +4,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/pders01/fwrd/internal/editorial"
 	"github.com/pders01/fwrd/internal/storage"
 )
 
@@ -64,7 +63,7 @@ func BenchmarkFrontPage(b *testing.B) {
 		if err != nil {
 			b.Fatalf("get feeds: %v", err)
 		}
-		_ = editorial.Build(arts, feeds, editorialOptions())
+		_ = buildEditorial(arts, feeds)
 	}
 }
 

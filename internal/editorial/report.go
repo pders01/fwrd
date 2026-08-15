@@ -51,8 +51,8 @@ type DiagnosticReport struct {
 }
 
 // NewDiagnosticReport snapshots an edition and its effective policy.
-func NewDiagnosticReport(edition *Edition, opts Options) DiagnosticReport {
-	opts = normalizeOptions(opts)
+func NewDiagnosticReport(edition *Edition, options *Options) DiagnosticReport {
+	opts := normalizeOptions(options)
 	report := DiagnosticReport{
 		Policy: DiagnosticPolicy{
 			MaxArticles:        opts.MaxArticles,
@@ -88,8 +88,8 @@ func NewDiagnosticReport(edition *Edition, opts Options) DiagnosticReport {
 }
 
 // WriteDiagnostics writes either an inspectable text report or indented JSON.
-func WriteDiagnostics(w io.Writer, edition *Edition, opts Options, jsonOutput bool) error {
-	report := NewDiagnosticReport(edition, opts)
+func WriteDiagnostics(w io.Writer, edition *Edition, options *Options, jsonOutput bool) error {
+	report := NewDiagnosticReport(edition, options)
 	if jsonOutput {
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")

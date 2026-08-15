@@ -1298,8 +1298,8 @@ func reportEditionDiagnostics(_ *cobra.Command, _ []string) {
 		}
 		opts := editorial.DefaultOptions()
 		opts.Now = time.Now()
-		edition := editorial.Build(articles, feeds, opts)
-		if err := editorial.WriteDiagnostics(os.Stdout, edition, opts, editionJSON); err != nil {
+		edition := editorial.Build(articles, feeds, &opts)
+		if err := editorial.WriteDiagnostics(os.Stdout, edition, &opts, editionJSON); err != nil {
 			return fmt.Errorf("write diagnostics: %w", err)
 		}
 		return nil

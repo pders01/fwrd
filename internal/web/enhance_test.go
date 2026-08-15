@@ -149,9 +149,9 @@ func TestStarCrossOriginRejected(t *testing.T) {
 func TestOPMLExport(t *testing.T) {
 	srv, store := newTestServer(t)
 	feedID, _ := seed(t, store) // feed "Example" at http://example.com/feed
-	feed, _ := store.GetFeed(feedID)
-	feed.DeskID = "technology"
-	if err := store.SaveFeed(feed); err != nil {
+	storedFeed, _ := store.GetFeed(feedID)
+	storedFeed.DeskID = "technology"
+	if err := store.SaveFeed(storedFeed); err != nil {
 		t.Fatal(err)
 	}
 	rec := httptest.NewRecorder()

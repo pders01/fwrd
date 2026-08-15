@@ -136,8 +136,8 @@ func TestAssignFeedDesk(t *testing.T) {
 	}
 	defer store.Close()
 	feed := &storage.Feed{ID: "feed-1", URL: "https://news.example/rss", Title: "News"}
-	if err := store.SaveFeed(feed); err != nil {
-		t.Fatal(err)
+	if saveErr := store.SaveFeed(feed); saveErr != nil {
+		t.Fatal(saveErr)
 	}
 
 	got, desk, err := assignFeedDesk(store, feed.URL, editorial.DeskWorld)

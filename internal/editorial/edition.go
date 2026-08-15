@@ -111,8 +111,8 @@ type Edition struct {
 // not matter. Callers should provide a candidate window larger than
 // MaxArticles so diversity limits can skip prolific sources before the edition
 // is filled.
-func Build(articles []*storage.Article, feeds []*storage.Feed, opts Options) *Edition {
-	opts = normalizeOptions(opts)
+func Build(articles []*storage.Article, feeds []*storage.Feed, options *Options) *Edition {
+	opts := normalizeOptions(options)
 	if opts.Now.IsZero() {
 		// A zero reference means "no future check" without introducing wall
 		// clock nondeterminism: score relative to the freshest dated input.
@@ -211,8 +211,12 @@ func Build(articles []*storage.Article, feeds []*storage.Feed, opts Options) *Ed
 	return edition
 }
 
-func normalizeOptions(opts Options) Options {
+func normalizeOptions(options *Options) Options {
 	defaults := DefaultOptions()
+	if options == nil {
+		return defaults
+	}
+	opts := *options
 	if opts.MaxArticles <= 0 {
 		opts.MaxArticles = defaults.MaxArticles
 	}

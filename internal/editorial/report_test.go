@@ -24,10 +24,10 @@ func TestWriteDiagnosticsTextAndJSON(t *testing.T) {
 	}
 	opts := DefaultOptions()
 	opts.Now = now
-	edition := Build(articles, feeds, opts)
+	edition := Build(articles, feeds, &opts)
 
 	var text bytes.Buffer
-	if err := WriteDiagnostics(&text, edition, opts, false); err != nil {
+	if err := WriteDiagnostics(&text, edition, &opts, false); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"Edition: 3 selected", "Fallback: 0", "World", "SOURCES", "TOPICS", "topic="} {
@@ -37,7 +37,7 @@ func TestWriteDiagnosticsTextAndJSON(t *testing.T) {
 	}
 
 	var encoded bytes.Buffer
-	if err := WriteDiagnostics(&encoded, edition, opts, true); err != nil {
+	if err := WriteDiagnostics(&encoded, edition, &opts, true); err != nil {
 		t.Fatal(err)
 	}
 	var report DiagnosticReport

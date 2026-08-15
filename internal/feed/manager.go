@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
+	neturl "net/url"
 	"strings"
 	"sync"
 	"time"
@@ -519,7 +519,7 @@ func applyParsedIdentity(feed *storage.Feed, parsed *ParsedFeed) {
 }
 
 func feedTitleFromURL(raw string) string {
-	if parsed, err := url.Parse(raw); err == nil && parsed.Hostname() != "" {
+	if parsed, err := neturl.Parse(raw); err == nil && parsed.Hostname() != "" {
 		return strings.TrimPrefix(parsed.Hostname(), "www.")
 	}
 	return "Unknown Feed"

@@ -89,11 +89,11 @@ func TestStore_FeedDeskSurvivesReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SaveFeed(&Feed{ID: "desk-feed", URL: "https://news.example/feed", DeskID: "world"}); err != nil {
-		t.Fatal(err)
+	if saveErr := store.SaveFeed(&Feed{ID: "desk-feed", URL: "https://news.example/feed", DeskID: "world"}); saveErr != nil {
+		t.Fatal(saveErr)
 	}
-	if err := store.Close(); err != nil {
-		t.Fatal(err)
+	if closeErr := store.Close(); closeErr != nil {
+		t.Fatal(closeErr)
 	}
 
 	store, err = NewStore(dbPath)
