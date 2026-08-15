@@ -77,6 +77,11 @@ func TestValidateAndNormalize(t *testing.T) {
 			expected: "https://github.com/feed",
 		},
 		{
+			name:     "legitimate four-label BBC feed hostname",
+			input:    "https://feeds.bbci.co.uk/news/rss.xml",
+			expected: "https://feeds.bbci.co.uk/news/rss.xml",
+		},
+		{
 			name:        "URL too long",
 			input:       "https://github.com/" + strings.Repeat("a", 3000),
 			shouldError: true,
@@ -505,6 +510,11 @@ func TestIsSuspiciousHostname(t *testing.T) {
 			name:     "hex hostname pattern",
 			hostname: "deadbeef.cafebabe.12345678.abcdef01",
 			expected: true,
+		},
+		{
+			name:     "BBC feed hostname regression",
+			hostname: "feeds.bbci.co.uk",
+			expected: false,
 		},
 	}
 

@@ -206,7 +206,10 @@ func isSuspiciousHostname(hostname string) bool {
 		parts := strings.Split(hostname, ".")
 		hexPattern := true
 		for _, part := range parts {
-			if len(part) > 6 && !isHexString(part) {
+			// Every label must be a substantial hexadecimal run. Previously
+			// short labels were skipped, leaving hexPattern true for ordinary
+			// four-label hosts such as feeds.bbci.co.uk.
+			if len(part) <= 6 || !isHexString(part) {
 				hexPattern = false
 				break
 			}
