@@ -19,6 +19,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/pders01/fwrd/internal/config"
+	"github.com/pders01/fwrd/internal/control"
 	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/media"
@@ -38,7 +39,9 @@ func (debugLogger) Warnf(format string, args ...any) { debuglog.Warnf(format, ar
 type App struct {
 	config           *config.Config
 	store            *storage.Store
-	manager          *feed.Manager
+	manager          *feed.Manager // local sessions only; remote work goes through feedOps
+	feedOps          control.FeedOperations
+	forceRefresh     bool
 	launcher         *media.Launcher
 	searchEngine     search.Searcher
 	searchEngineType string // "bleve" or "basic" - for UI display
@@ -120,6 +123,25 @@ type App struct {
 }
 
 func NewApp(store *storage.Store, cfg *config.Config) *App {
+	manager := feed.NewManager(store, cfg)
+	return newApp(store, cfg, manager, &control.LocalOps{Store: store, Manager: manager}, false)
+}
+
+// NewAppWithSession constructs a TUI over either a local database or the IPC
+// session owned by a running `fwrd serve`. Remote sessions deliberately do not
+// open Bleve or create a second feed manager: reads use the RPC-backed Store,
+// while feed mutations execute in the database-owning serve process.
+func NewAppWithSession(session *control.Session, cfg *config.Config) *App {
+	if session == nil {
+		return NewApp(nil, cfg)
+	}
+	if !session.IsRemote() {
+		return NewApp(session.Store, cfg)
+	}
+	return newApp(session.Store, cfg, nil, session.Feeds, true)
+}
+
+func newApp(store *storage.Store, cfg *config.Config, manager *feed.Manager, feedOps control.FeedOperations, remote bool) *App {
 	feedList := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	feedList.Title = ""
 	feedList.SetShowStatusBar(false)
@@ -162,7 +184,8 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 	app := &App{
 		config:   cfg,
 		store:    store,
-		manager:  feed.NewManager(store, cfg),
+		manager:  manager,
+		feedOps:  feedOps,
 		launcher: media.NewLauncher(cfg),
 		// searchEngine set below (Bleve if available, otherwise fallback)
 		feedList:             feedList,
@@ -207,56 +230,66 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 			idxPath = base + ".bleve"
 		}
 	}
-	// Initialize search engine with fallback strategy
-	debuglog.Infof("Initializing search engine with index path: %s", idxPath)
-	if be, err := search.NewBleveEngine(store, idxPath); err == nil && be != nil {
-		app.searchEngine = be
-		app.searchEngineType = "bleve"
-		debuglog.Infof("Successfully initialized Bleve search engine")
-	} else {
-		debuglog.Errorf("Bleve search engine initialization failed: %v", err)
-		debuglog.Infof("Falling back to basic search engine")
+	// A remote TUI cannot open the serve process's Bleve index a second time.
+	// Use the store-backed search fallback for now; all database reads still go
+	// through IPC. Local sessions retain the normal Bleve-first strategy.
+	if remote {
 		app.searchEngine = search.NewEngine(store)
 		app.searchEngineType = "basic"
-	}
-
-	// Wire the search engine into the manager so it receives index updates
-	// after every successful add/refresh without the TUI re-implementing the
-	// dispatch.
-	if dl, ok := app.searchEngine.(feed.DataListener); ok {
-		app.manager.RegisterDataListener(dl)
-	}
-	if bs, ok := app.searchEngine.(feed.BatchScope); ok {
-		app.manager.RegisterBatchScope(bs)
-	}
-
-	pluginDir := pluginlua.DefaultPluginDir()
-	if err := pluginlua.EnsureDefaults(pluginDir); err != nil {
-		debuglog.Errorf("seeding default lua plugins in %s: %v", pluginDir, err)
-	}
-	bindings := pluginlua.Bindings{
-		HTTPClient: app.manager.PluginHTTPClient(),
-		Logger:     debugLogger{},
-	}
-	if n, err := pluginlua.LoadAndRegister(app.manager.PluginRegistry(), pluginDir, bindings); err != nil {
-		debuglog.Errorf("loading lua plugins from %s: %v", pluginDir, err)
-	} else if n > 0 {
-		debuglog.Infof("loaded %d lua plugin(s) from %s", n, pluginDir)
-	}
-
-	if pluginDir != "" {
-		if watcher, err := pluginlua.NewWatcher(app.manager.PluginRegistry(), pluginDir, bindings); err != nil {
-			debuglog.Warnf("plugin hot-reload disabled: %v", err)
+		debuglog.Infof("Using IPC-backed basic search; serve owns the Bleve index")
+	} else {
+		debuglog.Infof("Initializing search engine with index path: %s", idxPath)
+		if be, err := search.NewBleveEngine(store, idxPath); err == nil && be != nil {
+			app.searchEngine = be
+			app.searchEngineType = "bleve"
+			debuglog.Infof("Successfully initialized Bleve search engine")
 		} else {
-			ctx, cancel := context.WithCancel(context.Background())
-			app.pluginWatcherCancel = cancel
-			app.pluginWatcherWG.Add(1)
-			go func() {
-				defer app.pluginWatcherWG.Done()
-				if rerr := watcher.Run(ctx); rerr != nil && !errors.Is(rerr, context.Canceled) {
-					debuglog.Warnf("plugin watcher exited: %v", rerr)
-				}
-			}()
+			debuglog.Errorf("Bleve search engine initialization failed: %v", err)
+			debuglog.Infof("Falling back to basic search engine")
+			app.searchEngine = search.NewEngine(store)
+			app.searchEngineType = "basic"
+		}
+	}
+
+	// Only a local TUI owns a feed manager and plugin watcher. A remote TUI
+	// sends lifecycle operations to serve, whose manager already owns plugins,
+	// search notifications, and mutation serialization.
+	if app.manager != nil {
+		if dl, ok := app.searchEngine.(feed.DataListener); ok {
+			app.manager.RegisterDataListener(dl)
+		}
+		if bs, ok := app.searchEngine.(feed.BatchScope); ok {
+			app.manager.RegisterBatchScope(bs)
+		}
+
+		pluginDir := pluginlua.DefaultPluginDir()
+		if err := pluginlua.EnsureDefaults(pluginDir); err != nil {
+			debuglog.Errorf("seeding default lua plugins in %s: %v", pluginDir, err)
+		}
+		bindings := pluginlua.Bindings{
+			HTTPClient: app.manager.PluginHTTPClient(),
+			Logger:     debugLogger{},
+		}
+		if n, err := pluginlua.LoadAndRegister(app.manager.PluginRegistry(), pluginDir, bindings); err != nil {
+			debuglog.Errorf("loading lua plugins from %s: %v", pluginDir, err)
+		} else if n > 0 {
+			debuglog.Infof("loaded %d lua plugin(s) from %s", n, pluginDir)
+		}
+
+		if pluginDir != "" {
+			if watcher, err := pluginlua.NewWatcher(app.manager.PluginRegistry(), pluginDir, bindings); err != nil {
+				debuglog.Warnf("plugin hot-reload disabled: %v", err)
+			} else {
+				ctx, cancel := context.WithCancel(context.Background())
+				app.pluginWatcherCancel = cancel
+				app.pluginWatcherWG.Add(1)
+				go func() {
+					defer app.pluginWatcherWG.Done()
+					if rerr := watcher.Run(ctx); rerr != nil && !errors.Is(rerr, context.Canceled) {
+						debuglog.Warnf("plugin watcher exited: %v", rerr)
+					}
+				}()
+			}
 		}
 	}
 
@@ -273,6 +306,7 @@ func NewApp(store *storage.Store, cfg *config.Config) *App {
 
 // SetForceRefresh configures the fetcher to ignore ETag/Last-Modified headers
 func (a *App) SetForceRefresh(force bool) {
+	a.forceRefresh = force
 	if a.manager != nil {
 		a.manager.SetForceRefresh(force)
 	}

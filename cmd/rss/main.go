@@ -474,6 +474,12 @@ func getStore(cfg *config.Config) (*storage.Store, error) {
 // withSession creates a local or IPC session. Mutating local sessions also
 // load plugins and own the Bleve listeners, matching serve-side semantics.
 func withSession(mutating bool, fn func(*control.Session) error) error {
+	return withSessionAndConfig(mutating, func(session *control.Session, _ *config.Config) error {
+		return fn(session)
+	})
+}
+
+func withSessionAndConfig(mutating bool, fn func(*control.Session, *config.Config) error) error {
 	cfg, err := loadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -516,7 +522,7 @@ func withSession(mutating bool, fn func(*control.Session) error) error {
 		return fmt.Errorf("failed to open session: %w", err)
 	}
 	defer sess.Close()
-	return fn(sess)
+	return fn(sess, cfg)
 }
 
 // withStoreAndConfig provides access to both store and config with proper cleanup
@@ -545,11 +551,11 @@ func runTUI(_ *cobra.Command, _ []string) {
 		debuglog.SetupWithBool(true)
 	}
 
-	if err := withStoreAndConfig(func(store *storage.Store, cfg *config.Config) error {
+	if err := withSessionAndConfig(false, func(session *control.Session, cfg *config.Config) error {
 		for _, w := range config.Warnings(cfg) {
 			logger.Warn(w)
 		}
-		app := tui.NewApp(store, cfg)
+		app := tui.NewAppWithSession(session, cfg)
 		defer app.Close()
 
 		// Pass force refresh option to TUI

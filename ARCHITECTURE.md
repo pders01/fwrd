@@ -109,9 +109,11 @@ it. It reaches near-parity with the other front-ends:
   before being marked `template.HTML` — the security boundary for untrusted
   feed content. The web view is strictly *less* lossy than the TUI, which must
   degrade HTML to terminal markdown
-- **Concurrency note**: the server holds the BoltDB file and the Bleve index
-  open for its lifetime, so `serve` is mutually exclusive with a TUI or second
-  `serve` on the same `--db`/index
+- **Concurrency note**: the server is the single owner of the BoltDB file and
+  Bleve index for its lifetime. A TUI or feed CLI command on the same `--db`
+  connects to it over per-database local IPC; reads use an RPC-backed store and
+  mutations run through the serve-side manager/coordinator. A second `serve`
+  on the same database remains mutually exclusive
 
 ### internal/validation
 Provides comprehensive security validation:

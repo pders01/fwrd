@@ -121,9 +121,11 @@ check, so the page works without JavaScript while rejecting cross-site
 the read/star toggles to update in place (no full reload) when JavaScript
 is available; with it off, the forms fall back to the same POST endpoints.
 
-The server holds the database open for its lifetime, so it cannot run
-against the same `--db` (or search index) as a concurrent TUI or second
-`serve` — BoltDB and the Bleve index are single-process.
+The server holds the database and search index open for its lifetime. A TUI or
+feed CLI command targeting the same `--db` automatically connects to that
+`serve` process over local IPC, so they can run concurrently without bypassing
+its feed plugins or search-index updates. A second `serve` for the same database
+is still rejected because BoltDB and Bleve each require a single owner.
 
 #### Exposing the web view
 
