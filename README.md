@@ -5,7 +5,7 @@ A fast, terminal-based RSS feed aggregator with full-text search capabilities, b
 ## Features
 
 - **Triple Interface**: Interactive TUI (Bubble Tea) + Command-line interface (Cobra) + web view (`fwrd serve`)
-- **Newspaper web view**: The web front page is a newspaper — a lead story plus emergent topic sections clustered from recent articles; feeds are managed at `/feeds`
+- **Newspaper web view**: The web front page is a source-balanced newspaper — a scored lead, stable editorial desks, and cross-source developing topics; feeds are managed at `/feeds`
 - **Auto light/dark**: Every front-end follows the system light/dark setting — the web view via CSS, the TUI by detecting the terminal/OS appearance (override with `[ui] theme`)
 - **Zero-config LAN access**: `serve --mdns` advertises the web view at `https://fwrd.local:8080` over mDNS; `fwrd service install` runs it as a systemd/launchd background service; `fwrd net up` exposes it at a bare `https://fwrd.local` (ports 80+443) via a dedicated alias IP + firewall redirect, without colliding with the host's own privileged ports
 - **Full‑text search**: Bleve‑powered search across feeds and articles with debounced input
@@ -127,6 +127,48 @@ check, so the page works without JavaScript while rejecting cross-site
 (CSRF) form submissions. A small progressive-enhancement script upgrades
 the read/star toggles to update in place (no full reload) when JavaScript
 is available; with it off, the forms fall back to the same POST endpoints.
+
+#### Editorial desks and composition
+
+Every subscription has an explicit stable desk assignment. The available desk
+IDs are `world`, `politics-society`, `business`, `culture`, `science-health`,
+`climate`, `food-travel`, `sport`, `technology`, and `unfiled`. New and legacy
+subscriptions remain Unfiled until assigned; fwrd does not infer user intent
+from a publisher domain. Change a source's desk on its page under `/feeds`, or
+use either its URL or ID from the CLI:
+
+```bash
+fwrd feed desk <URL-or-ID> science-health
+```
+
+Desk metadata survives refreshes and local IPC access. OPML export records it
+as `category="fwrd/desk/<stable-id>"`, and import restores it; other OPML
+readers can safely ignore that category.
+
+The front page considers the newest 2,000 candidate articles and selects up to
+400 under explicit diversity ceilings: 24 stories per source identity, 60 per
+assigned desk, and 10 from one source within one desk. These are ceilings, not
+quotas, so a fully filed edition can contain fewer than 400 stories rather than
+relax its balancing rules. Unfiled is a compatibility fallback that may fill
+otherwise unused room while an older database is being organized.
+
+Developing topics are clustered from article titles and descriptions *inside*
+each desk and are promoted only when at least two distinct sources support
+them. Lead ranking combines recency, topic support, desk-source support, and a
+small starred signal; future and undated stories cannot lead. Inspect every
+active limit, source/desk share, promoted-topic source count, fallback share,
+and lead-score component with:
+
+```bash
+fwrd edition diagnostics
+fwrd edition diagnostics --json
+```
+
+For new subscriptions, fwrd preserves both the URL entered by the user and any
+resolved plugin/fetch URL so source provenance remains inspectable. It records
+the subscription time and marks older or undated imported history read; this
+onboarding rule is not retroactively applied to existing feeds, and refreshes
+preserve existing read/star state.
 
 The server holds the database and search index open for its lifetime. A TUI or
 feed CLI command targeting the same `--db` automatically connects to that
