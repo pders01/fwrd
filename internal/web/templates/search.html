@@ -1,13 +1,27 @@
 {{define "title"}}Search{{end}}
 {{define "content"}}
 {{template "masthead" .Query}}
-<main>
+<main class="edition-page">
+<nav class="crumbs"><a href="/">Front page</a> / Archive search</nav>
+<header class="page-heading search-heading">
+<div>
+<p class="page-kicker">Archive desk</p>
+<h1>{{if .Query}}Search results{{else}}Search the archive{{end}}</h1>
+{{if .Query}}<p class="standfirst">Dispatches matching “{{.Query}}”.</p>{{else}}<p class="standfirst">Find a story, publication, or idea across every filed edition.</p>{{end}}
+</div>
+{{if and .Available .Query}}<p class="page-folio page-action">{{len .Results}} match{{if ne (len .Results) 1}}es{{end}}</p>{{end}}
+</header>
+
+<section class="dispatches" aria-labelledby="search-file">
+<header class="list-heading">
+<h2 id="search-file">{{if .Query}}Search file{{else}}Query desk{{end}}</h2>
+{{if .Query}}<p>Ranked by relevance</p>{{else}}<p>Use the ruled field above</p>{{end}}
+</header>
 {{if not .Available}}
-<p class="muted">Search is unavailable (index failed to initialize).</p>
+<p class="muted empty-note">Search is unavailable (index failed to initialize).</p>
 {{else if .Query}}
 {{if .Results}}
-<p class="muted">Results for “{{.Query}}” — {{len .Results}} match{{if ne (len .Results) 1}}es{{end}}</p>
-<ul class="article-list">
+<ul class="article-list dispatch-list search-results">
 {{range .Results}}
 <li class="{{if .Article.Read}}read{{end}}{{if .Article.Starred}} starred{{end}}">
 <a href="/article?id={{.Article.ID}}">{{if .Article.Title}}{{.Article.Title}}{{else}}(untitled){{end}}</a>
@@ -18,10 +32,11 @@
 {{end}}
 </ul>
 {{else}}
-<p class="muted">Results for “{{.Query}}” — no matches.</p>
+<p class="muted empty-note">No matches were filed for “{{.Query}}”.</p>
 {{end}}
 {{else}}
-<p class="muted">Type a query above.</p>
+<p class="muted empty-note">Type a query in the masthead to begin.</p>
 {{end}}
+</section>
 </main>
 {{end}}

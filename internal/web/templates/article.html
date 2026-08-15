@@ -4,13 +4,15 @@
 <main class="reading">
 <nav class="crumbs">
 <a href="/">Front page</a>
-{{if .Feed}} / <a href="/feeds/{{.Feed.ID}}">{{if .Feed.Title}}{{.Feed.Title}}{{else}}{{.Feed.URL}}{{end}}</a>{{end}}
+{{if .Feed}} / <a href="/feeds/{{.Feed.ID}}">{{.FeedLabel}}</a>{{end}}
 </nav>
 <article class="reader">
+<header class="article-head">
+<p class="page-kicker">{{if .Feed}}From <a href="/feeds/{{.Feed.ID}}">{{.FeedLabel}}</a>{{if .FeedSource}} · {{.FeedSource}}{{end}}{{else}}Filed story{{end}}</p>
 <h1>{{if .Article.Title}}{{.Article.Title}}{{else}}(untitled){{end}}</h1>
-<div class="meta muted">
+<div class="meta article-meta">
 {{if not .Article.Published.IsZero}}<time>{{date .Article.Published}}</time>{{end}}
-{{if .Article.URL}}<a href="{{.Article.URL}}" rel="noopener noreferrer">Original</a>{{end}}
+{{if .Article.URL}}<a href="{{.Article.URL}}" rel="noopener noreferrer">Read original ↗</a>{{end}}
 <form action="/read" method="post" class="inline js-toggle" data-kind="read">
 <input type="hidden" name="id" value="{{.Article.ID}}">
 <input type="hidden" name="read" value="{{if .Article.Read}}0{{else}}1{{end}}">
@@ -21,15 +23,17 @@
 <input type="hidden" name="id" value="{{.Article.ID}}">
 <input type="hidden" name="starred" value="{{if .Article.Starred}}0{{else}}1{{end}}">
 <input type="hidden" name="return" value="/article?id={{.Article.ID}}">
-<button type="submit" class="link" aria-pressed="{{if .Article.Starred}}true{{else}}false{{end}}">{{if .Article.Starred}}unstar{{else}}star{{end}}</button>
+<button type="submit" class="link" aria-pressed="{{if .Article.Starred}}true{{else}}false{{end}}">{{if .Article.Starred}}★ saved{{else}}☆ save{{end}}</button>
 </form>
 </div>
+</header>
 <div class="content">
 {{.Body}}
 </div>
 {{if .Article.MediaURLs}}
 <section class="media">
-<h2>Media</h2>
+<p class="page-kicker">Attachments</p>
+<h2>Media file</h2>
 <ul>{{range .Article.MediaURLs}}<li><a href="{{.}}" rel="noopener noreferrer">{{.}}</a></li>{{end}}</ul>
 </section>
 {{end}}

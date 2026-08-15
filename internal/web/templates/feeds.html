@@ -1,28 +1,52 @@
 {{define "title"}}Feeds{{end}}
 {{define "content"}}
 {{template "masthead" ""}}
-<main>
-<nav class="crumbs"><a href="/">Front page</a> / Feeds</nav>
-<div class="page-head">
+<main class="edition-page source-desk">
+<nav class="crumbs"><a href="/">Front page</a> / Source desk</nav>
+<header class="page-heading">
+<div>
+<p class="page-kicker">Source desk</p>
 <h1>Feeds</h1>
-<form action="/refresh" method="post"><button type="submit">Refresh all</button></form>
+<p class="standfirst">The publications shaping your current edition, with their filing status and unread load.</p>
 </div>
+<form action="/refresh" method="post" class="page-action"><button type="submit">Refresh all</button></form>
+</header>
 
+<dl class="folio-stats" aria-label="Source desk summary">
+<div><dt>Publications</dt><dd>{{len .Feeds}}</dd></div>
+<div><dt>Filed stories</dt><dd>{{.TotalArticles}}</dd></div>
+<div><dt>Unread</dt><dd>{{.TotalUnread}}</dd></div>
+<div><dt>Wire errors</dt><dd>{{.FailedFeeds}}</dd></div>
+</dl>
+
+<section class="management-panel" aria-labelledby="manage-wire">
+<header class="desk-section-head">
+<div><p class="page-kicker">Operations</p><h2 id="manage-wire">Manage the wire</h2></div>
+<p>Add, arrange, import, or export sources without leaving the edition.</p>
+</header>
 <div class="feed-toolbar">
+<div class="tool-block">
+<p class="tool-label">Add a publication</p>
 <form action="/feeds" method="post" class="add-feed">
 <input type="url" name="url" placeholder="https://example.com/feed.xml" required aria-label="Feed URL">
 <button type="submit">Add feed</button>
 </form>
+</div>
 
-<div class="toolbar-ctrls js-only">
+<div class="tool-block toolbar-ctrls js-only">
+<p class="tool-label">Arrange the directory</p>
+<div class="tool-fields">
 <input type="search" id="feed-filter" class="feed-filter" placeholder="Filter feeds…" autocomplete="off" aria-label="Filter feeds">
 <select id="feed-sort" class="feed-sort" aria-label="Sort feeds">
 <option value="title">A–Z</option>
 <option value="unread">Most unread</option>
-<option value="updated">Recently updated</option>
+<option value="updated">Recently fetched</option>
 </select>
 </div>
+</div>
 
+<div class="tool-block">
+<p class="tool-label">Subscription file</p>
 <div class="opml-bar">
 <a href="/opml/export" class="link">Export OPML</a>
 <form action="/opml/import" method="post" enctype="multipart/form-data" class="opml-import">
@@ -31,15 +55,24 @@
 </form>
 </div>
 </div>
+</div>
+</section>
 
+<section class="directory" aria-labelledby="source-directory">
+<header class="list-heading">
+<h2 id="source-directory">Source directory</h2>
+<p>{{len .Feeds}} publication{{if ne (len .Feeds) 1}}s{{end}}, filed A–Z</p>
+</header>
 {{if .Feeds}}
 <ul class="feed-list" id="feed-list">
 {{range .Feeds}}
 <li class="feed-item" data-unread="{{.Unread}}" data-updated="{{if not .Feed.LastFetched.IsZero}}{{.Feed.LastFetched.Unix}}{{else}}0{{end}}">
 <div class="feed-row">
 <a class="feed-title" href="/feeds/{{.Feed.ID}}">{{.Label}}</a>
+<span class="feed-status">
 {{if gt .Unread 0}}<span class="badge">{{.Unread}} unread</span>{{end}}
 {{if .Feed.LastError}}<span class="badge error" title="{{.Feed.LastError}}">fetch failed</span>{{end}}
+</span>
 <span class="feed-actions">
 <form action="/feeds/{{.Feed.ID}}/refresh" method="post"><button type="submit" class="link">refresh</button></form>
 <details class="confirm"><summary class="as-link">delete</summary>
@@ -61,7 +94,8 @@
 </ul>
 <p class="muted" id="feed-no-match" hidden>No feeds match your filter.</p>
 {{else}}
-<p class="muted">No feeds yet. Add one above, or via <code>fwrd feed add &lt;url&gt;</code>.</p>
+<p class="muted empty-note">No feeds yet. Add one above, or via <code>fwrd feed add &lt;url&gt;</code>.</p>
 {{end}}
+</section>
 </main>
 {{end}}

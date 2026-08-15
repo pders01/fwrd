@@ -103,7 +103,16 @@ func TestFeedsManagePage(t *testing.T) {
 		t.Fatalf("status %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Refresh all", "Example Blog", "Export OPML"} {
+	for _, want := range []string{
+		"Source desk",
+		"Refresh all",
+		"Filed stories",
+		"4</dd>",
+		"Manage the wire",
+		"Source directory",
+		"Example Blog",
+		"Export OPML",
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/feeds missing %q", want)
 		}

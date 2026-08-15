@@ -1,11 +1,16 @@
-{{define "title"}}{{if .Feed.Title}}{{.Feed.Title}}{{else}}Feed{{end}}{{end}}
+{{define "title"}}{{.Label}}{{end}}
 {{define "content"}}
 {{template "masthead" ""}}
-<main>
-<nav class="crumbs"><a href="/">Front page</a> / <a href="/feeds">Feeds</a> / {{if .Feed.Title}}{{.Feed.Title}}{{else}}{{.Feed.URL}}{{end}}</nav>
-<div class="page-head">
-<h1>{{if .Feed.Title}}{{.Feed.Title}}{{else}}{{.Feed.URL}}{{end}}</h1>
-<span class="feed-actions">
+<main class="edition-page">
+<nav class="crumbs"><a href="/">Front page</a> / <a href="/feeds">Source desk</a> / {{.Label}}</nav>
+<header class="page-heading source-heading">
+<div>
+<p class="page-kicker">Source file{{if .Source}} · {{.Source}}{{end}}</p>
+<h1>{{.Label}}</h1>
+{{if .Feed.Description}}<p class="standfirst">{{.Feed.Description}}</p>{{end}}
+<p class="page-folio">{{.Total}} filed · {{.Unread}} unread{{if not .Feed.LastFetched.IsZero}} · last fetched {{date .Feed.LastFetched}}{{end}}</p>
+</div>
+<span class="feed-actions page-action">
 <form action="/feeds/{{.Feed.ID}}/refresh" method="post"><button type="submit">Refresh</button></form>
 <details class="confirm"><summary class="as-button">Delete</summary>
 <form action="/feeds/{{.Feed.ID}}/delete" method="post" class="confirm-form">
@@ -14,10 +19,15 @@
 </form>
 </details>
 </span>
-</div>
-{{if .Feed.Description}}<p class="muted">{{.Feed.Description}}</p>{{end}}
+</header>
+
+<section class="dispatches" aria-labelledby="latest-dispatches">
+<header class="list-heading">
+<h2 id="latest-dispatches">Latest dispatches</h2>
+<p>{{len .Articles}} on this page</p>
+</header>
 {{if .Articles}}
-<ul class="article-list">
+<ul class="article-list dispatch-list">
 {{range .Articles}}
 <li class="{{if .Read}}read{{end}}{{if .Starred}} starred{{end}}">
 <a href="/article?id={{.ID}}">{{if .Title}}{{.Title}}{{else}}(untitled){{end}}</a>
@@ -40,10 +50,11 @@
 {{end}}
 </ul>
 {{if .NextCursor}}
-<p class="pager"><a href="/feeds/{{.Feed.ID}}?cursor={{.NextCursor}}">Older articles →</a></p>
+<p class="pager"><a href="/feeds/{{.Feed.ID}}?cursor={{.NextCursor}}">Older dispatches →</a></p>
 {{end}}
 {{else}}
-<p class="muted">No articles stored. Refresh above, or run <code>fwrd feed refresh</code>.</p>
+<p class="muted empty-note">No articles stored. Refresh above, or run <code>fwrd feed refresh</code>.</p>
 {{end}}
+</section>
 </main>
 {{end}}

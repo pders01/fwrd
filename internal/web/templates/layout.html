@@ -23,10 +23,13 @@
      query to pre-fill, or "". */}}
 {{define "masthead"}}
 <header class="masthead">
+<div class="mast-identity">
 <a href="/" class="brand" aria-label="fwrd home">fwrd</a>
-<form action="/search" method="get" class="search" role="search">
-<input type="search" name="q" value="{{.}}" placeholder="Search…" autocomplete="off" aria-label="Search articles">
+<span class="mast-tagline">forward, through time</span>
+</div>
+<form action="/search" method="get" class="search mast-search" role="search">
+<input type="search" name="q" value="{{.}}" placeholder="Search the archive…" autocomplete="off" aria-label="Search articles">
 </form>
-<nav class="mast-nav"><a href="/feeds">Feeds</a></nav>
+<nav class="mast-nav" aria-label="Primary"><a href="/">Front page</a><a href="/feeds">Sources</a></nav>
 </header>
 {{end}}

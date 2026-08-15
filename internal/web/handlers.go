@@ -32,21 +32,30 @@ type feedView struct {
 
 type indexData struct {
 	pageBase
-	Feeds []feedView
+	Feeds         []feedView
+	TotalArticles int
+	TotalUnread   int
+	FailedFeeds   int
 }
 
 type feedData struct {
 	pageBase
 	Feed       *storage.Feed
+	Label      string
+	Source     string
 	Articles   []*storage.Article
+	Total      int
+	Unread     int
 	NextCursor string
 }
 
 type articleData struct {
 	pageBase
-	Article *storage.Article
-	Feed    *storage.Feed
-	Body    template.HTML
+	Article    *storage.Article
+	Feed       *storage.Feed
+	FeedLabel  string
+	FeedSource string
+	Body       template.HTML
 }
 
 type searchData struct {
@@ -84,6 +93,7 @@ func (s *Server) handleFeeds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	views := make([]feedView, 0, len(feeds))
+	data := indexData{}
 	for _, f := range feeds {
 		st := stats[f.ID]
 		views = append(views, feedView{
@@ -93,8 +103,13 @@ func (s *Server) handleFeeds(w http.ResponseWriter, r *http.Request) {
 			Unread: st.Unread,
 			Total:  st.Total,
 		})
+		data.TotalArticles += st.Total
+		data.TotalUnread += st.Unread
+		if f.LastError != "" {
+			data.FailedFeeds++
+		}
 	}
-	data := indexData{Feeds: views}
+	data.Feeds = views
 	data.Flash = takeFlash(w, r)
 	s.render(w, "feeds.html", data)
 }
@@ -118,7 +133,19 @@ func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
 		articles = articles[:articlesPerPage]
 		next = articles[len(articles)-1].ID
 	}
-	data := feedData{Feed: feed, Articles: articles, NextCursor: next}
+	stat := storage.FeedStat{}
+	if stats, statErr := s.store.FeedStats(); statErr == nil {
+		stat = stats[id]
+	}
+	data := feedData{
+		Feed:       feed,
+		Label:      feedLabel(feed),
+		Source:     feedSource(feed),
+		Articles:   articles,
+		Total:      stat.Total,
+		Unread:     stat.Unread,
+		NextCursor: next,
+	}
 	data.Flash = takeFlash(w, r)
 	s.render(w, "feed.html", data)
 }
@@ -138,7 +165,12 @@ func (s *Server) handleArticle(w http.ResponseWriter, r *http.Request) {
 	// feed record has gone missing.
 	feed, _ := s.store.GetFeed(article.FeedID)
 	body := template.HTML(getSanitizer().Sanitize(articleBody(article))) //nolint:gosec // sanitized
-	s.render(w, "article.html", articleData{Article: article, Feed: feed, Body: body})
+	data := articleData{Article: article, Feed: feed, Body: body}
+	if feed != nil {
+		data.FeedLabel = feedLabel(feed)
+		data.FeedSource = feedSource(feed)
+	}
+	s.render(w, "article.html", data)
 }
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {

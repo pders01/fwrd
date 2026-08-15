@@ -1,12 +1,24 @@
 {{define "title"}}{{.Label}}{{end}}
 {{define "content"}}
 {{template "masthead" ""}}
-<main>
+<main class="edition-page">
 <nav class="crumbs"><a href="/">Front page</a> / {{.Label}}</nav>
-<div class="page-head"><h1 class="topic-title">{{.Label}}</h1></div>
+<header class="page-heading">
+<div>
+<p class="page-kicker">Edition section</p>
+<h1 class="topic-title">{{.Label}}</h1>
+<p class="standfirst">A complete file of the stories gathered under this emerging topic.</p>
+</div>
+<p class="page-folio page-action">{{len .Articles}} stor{{if eq (len .Articles) 1}}y{{else}}ies{{end}}</p>
+</header>
 
+<section class="dispatches" aria-labelledby="section-file">
+<header class="list-heading">
+<h2 id="section-file">Section file</h2>
+<p>Newest first</p>
+</header>
 {{if .Articles}}
-<ul class="article-list">
+<ul class="article-list dispatch-list">
 {{range .Articles}}
 <li class="{{if .Article.Read}}read{{end}}{{if .Article.Starred}} starred{{end}}">
 <a href="/article?id={{.Article.ID}}">{{if .Article.Title}}{{.Article.Title}}{{else}}(untitled){{end}}</a>
@@ -29,7 +41,8 @@
 {{end}}
 </ul>
 {{else}}
-<p class="muted">No articles in this topic.</p>
+<p class="muted empty-note">No articles in this topic.</p>
 {{end}}
+</section>
 </main>
 {{end}}
