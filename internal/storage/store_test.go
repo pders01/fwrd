@@ -44,6 +44,7 @@ func TestStore_SaveAndGetFeed(t *testing.T) {
 		ETag:         "\"abc123\"",
 		LastModified: "Wed, 01 Jan 2025 00:00:00 GMT",
 		UpdatedAt:    time.Now(),
+		DeskID:       "technology",
 	}
 
 	err := store.SaveFeed(feed)
@@ -67,6 +68,36 @@ func TestStore_SaveAndGetFeed(t *testing.T) {
 	}
 	if retrieved.ETag != feed.ETag {
 		t.Errorf("expected ETag %s, got %s", feed.ETag, retrieved.ETag)
+	}
+	if retrieved.DeskID != feed.DeskID {
+		t.Errorf("expected DeskID %s, got %s", feed.DeskID, retrieved.DeskID)
+	}
+}
+
+func TestStore_FeedDeskSurvivesReopen(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "desk.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveFeed(&Feed{ID: "desk-feed", URL: "https://news.example/feed", DeskID: "world"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err = NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	feed, err := store.GetFeed("desk-feed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if feed.DeskID != "world" {
+		t.Fatalf("DeskID after reopen = %q, want world", feed.DeskID)
 	}
 }
 

@@ -339,6 +339,7 @@ func TestRefreshFeedWithMockServer(t *testing.T) {
 		ID:          generateFeedID(server.URL),
 		URL:         server.URL,
 		Title:       "Old Title",
+		DeskID:      "technology",
 		LastFetched: time.Now().Add(-2 * time.Hour), // Old enough to need refresh
 		UpdatedAt:   time.Now().Add(-2 * time.Hour),
 	}
@@ -353,6 +354,7 @@ func TestRefreshFeedWithMockServer(t *testing.T) {
 	updatedFeed, err := store.GetFeed(feed.ID)
 	require.NoError(t, err)
 	assert.True(t, updatedFeed.LastFetched.After(feed.LastFetched))
+	assert.Equal(t, "technology", updatedFeed.DeskID, "refresh must preserve user-assigned desk")
 
 	articles, err := store.GetArticles(feed.ID, 10)
 	require.NoError(t, err)

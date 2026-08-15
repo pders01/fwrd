@@ -13,6 +13,9 @@ type Feed struct {
 	ETag         string    `json:"etag"`
 	LastModified string    `json:"last_modified"`
 	UpdatedAt    time.Time `json:"updated_at"`
+	// DeskID is the stable, user-assigned editorial desk. An empty value is
+	// retained for backward compatibility and is presented as "unfiled".
+	DeskID string `json:"desk_id,omitempty"`
 	// LastError holds the message from the most recent failed refresh, or
 	// "" when the last attempt succeeded. LastErrorAt timestamps that
 	// failure. LastFetched still tracks the last *successful* fetch, so the
