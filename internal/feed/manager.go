@@ -328,6 +328,9 @@ func (m *Manager) refreshFeedByIDContext(ctx context.Context, feedID string, not
 	if err := m.store.SaveFeed(feed); err != nil {
 		return feed, nil, fmt.Errorf("saving feed: %w", err)
 	}
+	// Feed parsers do not know fwrd's local reading state. Merge it from
+	// existing records before a refresh re-saves matching article IDs.
+	m.preserveLocalArticleState(articles)
 	if err := m.store.SaveArticles(articles); err != nil {
 		return feed, nil, fmt.Errorf("saving articles: %w", err)
 	}
@@ -336,6 +339,23 @@ func (m *Manager) refreshFeedByIDContext(ctx context.Context, feedID string, not
 		m.notifyDataUpdated(feed, articles)
 	}
 	return feed, articles, nil
+}
+
+// preserveLocalArticleState keeps refreshes from resetting state owned by the
+// reader. A lookup miss means the article is new; other article fields remain
+// parser-owned and are refreshed normally.
+func (m *Manager) preserveLocalArticleState(articles []*storage.Article) {
+	for _, article := range articles {
+		if article == nil {
+			continue
+		}
+		old, err := m.store.GetArticle(article.ID)
+		if err != nil || old == nil {
+			continue
+		}
+		article.Read = old.Read
+		article.Starred = old.Starred
+	}
 }
 
 // RefreshAllFeeds refreshes every persisted feed in parallel and returns

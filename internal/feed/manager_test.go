@@ -353,6 +353,18 @@ func TestRefreshFeedWithMockServer(t *testing.T) {
 	updatedFeed, err := store.GetFeed(feed.ID)
 	require.NoError(t, err)
 	assert.True(t, updatedFeed.LastFetched.After(feed.LastFetched))
+
+	articles, err := store.GetArticles(feed.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, articles, 1)
+	require.NoError(t, store.MarkArticleRead(articles[0].ID, true))
+	require.NoError(t, store.MarkArticleStarred(articles[0].ID, true))
+	time.Sleep(2 * time.Millisecond)
+	require.NoError(t, manager.RefreshFeed(feed.ID))
+	refreshedArticle, err := store.GetArticle(articles[0].ID)
+	require.NoError(t, err)
+	assert.True(t, refreshedArticle.Read, "refresh must preserve read state")
+	assert.True(t, refreshedArticle.Starred, "refresh must preserve starred state")
 }
 
 // TestRefreshFeed_RecordsAndClearsError asserts that a failing refresh
