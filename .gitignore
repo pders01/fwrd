@@ -63,3 +63,6 @@ coverage.out
 # GoReleaser output directory (do not commit release artifacts)
 dist/
 
+# Project-local pinned development tools
+.tools/
+

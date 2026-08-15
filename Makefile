@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-integration clean run install-caddy lint modernize coverage help release release-snapshot
+.PHONY: build test test-unit test-integration clean run install-caddy tools lint modernize coverage help release release-snapshot
 
 # Variables
 BINARY_NAME=fwrd
@@ -6,6 +6,9 @@ BINARY_PATH=./$(BINARY_NAME)
 MAIN_PATH=cmd/rss/main.go
 COVERAGE_FILE=coverage.out
 COVERAGE_HTML=coverage.html
+TOOLS_DIR=$(CURDIR)/.tools/bin
+GOLANGCI_LINT_VERSION=v2.12.2
+GOLANGCI_LINT=$(TOOLS_DIR)/golangci-lint
 
 # Default target
 all: build
@@ -54,19 +57,18 @@ coverage:
 	@echo "Coverage report generated: $(COVERAGE_HTML)"
 	@go tool cover -func=$(COVERAGE_FILE)
 
+## tools: Install pinned development tools under .tools/bin
+tools: $(GOLANGCI_LINT)
+
+$(GOLANGCI_LINT):
+	@echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."
+	@mkdir -p $(TOOLS_DIR)
+	@GOBIN=$(TOOLS_DIR) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
 ## lint: Run Go linters
-lint:
-	@echo "Running linters..."
-	@if ! command -v golangci-lint > /dev/null; then \
-		echo "golangci-lint v2 is required. Install with:"; \
-		echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2"; \
-		exit 1; \
-	fi
-	@if ! golangci-lint version | grep -Eq 'version v?2\.'; then \
-		echo "golangci-lint v2 is required; found: $$(golangci-lint version)"; \
-		exit 1; \
-	fi
-	@golangci-lint run ./...
+lint: $(GOLANGCI_LINT)
+	@echo "Running linters with $$($(GOLANGCI_LINT) version)..."
+	@$(GOLANGCI_LINT) run ./...
 	@echo "Running gofmt..."
 	@gofmt -l -s .
 

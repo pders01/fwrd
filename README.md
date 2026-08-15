@@ -547,9 +547,10 @@ make install
 # Build Docker image
 make docker-build
 
-# Format and lint
+# Install pinned development tools under .tools/bin, then format and lint
+make tools             # golangci-lint v2.12.2
 make fmt
-make lint
+make lint              # also installs the pinned linter if missing
 
 # Create a release with GoReleaser (CI recommended)
 make release            # requires GoReleaser installed locally
