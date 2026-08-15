@@ -21,6 +21,21 @@
 </span>
 </header>
 
+<section class="source-filing" aria-labelledby="source-filing-title">
+<div>
+<p class="page-kicker">Editorial filing</p>
+<h2 id="source-filing-title">{{.Desk.Label}}</h2>
+<p class="muted">Stories from this subscription are filed here by your explicit source assignment.</p>
+</div>
+<form action="/feeds/{{.Feed.ID}}/desk" method="post" class="desk-picker">
+<label for="feed-desk">Desk</label>
+<select id="feed-desk" name="desk">
+{{range .Desks}}<option value="{{.ID}}"{{if eq .ID $.Desk.ID}} selected{{end}}>{{.Label}}</option>{{end}}
+</select>
+<button type="submit">File source</button>
+</form>
+</section>
+
 <section class="dispatches" aria-labelledby="latest-dispatches">
 <header class="list-heading">
 <h2 id="latest-dispatches">Latest dispatches</h2>

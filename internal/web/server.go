@@ -24,6 +24,7 @@ import (
 	"github.com/pders01/fwrd/internal/audit"
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/control"
+	"github.com/pders01/fwrd/internal/editorial"
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/storage"
@@ -67,14 +68,18 @@ type Server struct {
 	fallbackMu sync.Mutex
 	requestWG  sync.WaitGroup
 
-	// frontCache memoizes the front-page topic model and feed-name map. Both
-	// are pure functions of the corpus, which only changes on a store write;
-	// the cache is rebuilt when store.WriteGen() advances past frontGen.
+	// The compatibility topic model and stable-desk edition are pure functions
+	// of stored data. Both caches rebuild only when Store.WriteGen advances.
 	frontMu    sync.Mutex
 	frontGen   uint64
 	frontValid bool
 	frontModel *topics.Model
 	frontNames map[string]string
+
+	editionGen   uint64
+	editionValid bool
+	editionModel *editorial.Edition
+	editionNames map[string]string
 }
 
 // NewServer wires handlers over the given backends. manager drives feed
@@ -128,6 +133,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /{$}", s.handleFront)
 	mux.HandleFunc("GET /feeds", s.handleFeeds)
 	mux.HandleFunc("GET /topic/{slug}", s.handleTopic)
+	mux.HandleFunc("GET /desk/{slug}", s.handleDesk)
 	mux.HandleFunc("GET /feeds/{id}", s.handleFeed)
 	// Article IDs are composite (feedID:articleURL) and contain slashes and
 	// query chars, so they can't ride in a path segment — use a query param.
@@ -142,6 +148,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /feeds", s.handleAddFeed)
 	mux.HandleFunc("POST /opml/import", s.handleOPMLImport)
 	mux.HandleFunc("POST /feeds/{id}/refresh", s.handleRefreshFeed)
+	mux.HandleFunc("POST /feeds/{id}/desk", s.handleSetFeedDesk)
 	mux.HandleFunc("POST /feeds/{id}/delete", s.handleDeleteFeed)
 	mux.HandleFunc("POST /refresh", s.handleRefreshAll)
 	mux.HandleFunc("POST /read", s.handleToggleRead)
@@ -424,6 +431,18 @@ func (s *Server) refreshAllFeeds(ctx context.Context) (feed.RefreshSummary, erro
 	s.fallbackMu.Lock()
 	defer s.fallbackMu.Unlock()
 	return s.manager.RefreshAllFeedsContext(ctx)
+}
+
+func (s *Server) saveFeed(ctx context.Context, value *storage.Feed) error {
+	if s.coordinator != nil {
+		return s.coordinator.SaveFeed(ctx, value)
+	}
+	s.fallbackMu.Lock()
+	defer s.fallbackMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.store.SaveFeed(value)
 }
 
 func (s *Server) deleteFeed(ctx context.Context, id string) error {

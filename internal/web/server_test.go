@@ -141,6 +141,36 @@ func TestToggleRead(t *testing.T) {
 	}
 }
 
+func TestSetFeedDesk(t *testing.T) {
+	srv, store := newTestServer(t)
+	feedID, _ := seed(t, store)
+	h := srv.Handler()
+
+	rec := postForm(t, h, "/feeds/"+feedID+"/desk", url.Values{"desk": {"technology"}}, true)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status %d, want 303", rec.Code)
+	}
+	got, err := store.GetFeed(feedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DeskID != "technology" {
+		t.Fatalf("DeskID = %q, want technology", got.DeskID)
+	}
+
+	rec = postForm(t, h, "/feeds/"+feedID+"/desk", url.Values{"desk": {"made-up"}}, true)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("invalid desk status %d, want graceful 303", rec.Code)
+	}
+	got, err = store.GetFeed(feedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DeskID != "technology" {
+		t.Fatalf("invalid assignment changed DeskID to %q", got.DeskID)
+	}
+}
+
 func TestDeleteFeed(t *testing.T) {
 	srv, store := newTestServer(t)
 	feedID, _ := seed(t, store)

@@ -148,7 +148,12 @@ func TestStarCrossOriginRejected(t *testing.T) {
 
 func TestOPMLExport(t *testing.T) {
 	srv, store := newTestServer(t)
-	seed(t, store) // feed "Example" at http://example.com/feed
+	feedID, _ := seed(t, store) // feed "Example" at http://example.com/feed
+	feed, _ := store.GetFeed(feedID)
+	feed.DeskID = "technology"
+	if err := store.SaveFeed(feed); err != nil {
+		t.Fatal(err)
+	}
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/opml/export", http.NoBody))
 
@@ -162,8 +167,8 @@ func TestOPMLExport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-parse export: %v", err)
 	}
-	if len(feeds) != 1 || feeds[0].URL != "http://example.com/feed" {
-		t.Errorf("exported OPML = %+v, want the seeded feed", feeds)
+	if len(feeds) != 1 || feeds[0].URL != "http://example.com/feed" || feeds[0].DeskID != "technology" {
+		t.Errorf("exported OPML = %+v, want the seeded feed with its desk", feeds)
 	}
 }
 
@@ -195,7 +200,7 @@ func TestOPMLImportViaUpload(t *testing.T) {
 	h := srv.Handler()
 
 	doc := `<?xml version="1.0"?><opml version="2.0"><body>` +
-		`<outline type="rss" text="Backend" xmlUrl="` + backend.URL + `"/>` +
+		`<outline type="rss" text="Backend" category="fwrd/desk/world" xmlUrl="` + backend.URL + `"/>` +
 		`</body></opml>`
 
 	rec := postMultipart(t, h, "/opml/import", "file", "feeds.opml", doc)
@@ -203,8 +208,8 @@ func TestOPMLImportViaUpload(t *testing.T) {
 		t.Fatalf("status %d, want 303: %s", rec.Code, rec.Body.String())
 	}
 	feeds, _ := store.GetAllFeeds()
-	if len(feeds) != 1 || feeds[0].URL != backend.URL {
-		t.Fatalf("import should add the backend feed, got %+v", feeds)
+	if len(feeds) != 1 || feeds[0].URL != backend.URL || feeds[0].DeskID != "world" {
+		t.Fatalf("import should add the backend feed and restore its desk, got %+v", feeds)
 	}
 }
 

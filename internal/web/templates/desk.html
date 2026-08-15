@@ -1,0 +1,49 @@
+{{define "title"}}{{.Desk.Label}}{{end}}
+{{define "content"}}
+{{template "masthead" ""}}
+<main class="edition-page">
+<nav class="crumbs"><a href="/">Front page</a> / {{.Desk.Label}}</nav>
+<header class="page-heading">
+<div>
+<p class="page-kicker">Stable desk</p>
+<h1 class="topic-title">{{.Desk.Label}}</h1>
+<p class="standfirst">Stories filed from subscriptions explicitly assigned to this desk.</p>
+{{if .Topics}}<p class="emergent-topics">Developing: {{range $i, $topic := .Topics}}{{if $i}} · {{end}}<span id="topic-{{$topic.Slug}}">{{$topic.Label}}</span>{{end}}</p>{{end}}
+</div>
+<p class="page-folio page-action">{{len .Articles}} stor{{if eq (len .Articles) 1}}y{{else}}ies{{end}}</p>
+</header>
+
+<section class="dispatches" aria-labelledby="desk-file">
+<header class="list-heading">
+<h2 id="desk-file">Desk file</h2>
+<p>Newest first · source balanced</p>
+</header>
+{{if .Articles}}
+<ul class="article-list dispatch-list">
+{{range .Articles}}
+<li class="{{if .Article.Read}}read{{end}}{{if .Article.Starred}} starred{{end}}">
+<a href="/article?id={{.Article.ID}}">{{if .Article.Title}}{{.Article.Title}}{{else}}(untitled){{end}}</a>
+<span class="row-meta">
+<span class="byline">{{.Feed}}{{if not .Article.Published.IsZero}} · {{date .Article.Published}}{{end}}</span>
+<form action="/star" method="post" class="inline js-toggle" data-kind="star">
+<input type="hidden" name="id" value="{{.Article.ID}}">
+<input type="hidden" name="starred" value="{{if .Article.Starred}}0{{else}}1{{end}}">
+<input type="hidden" name="return" value="/desk/{{$.Desk.ID}}">
+<button type="submit" class="link" aria-pressed="{{if .Article.Starred}}true{{else}}false{{end}}">{{if .Article.Starred}}unstar{{else}}star{{end}}</button>
+</form>
+<form action="/read" method="post" class="inline js-toggle" data-kind="read">
+<input type="hidden" name="id" value="{{.Article.ID}}">
+<input type="hidden" name="read" value="{{if .Article.Read}}0{{else}}1{{end}}">
+<input type="hidden" name="return" value="/desk/{{$.Desk.ID}}">
+<button type="submit" class="link">{{if .Article.Read}}mark unread{{else}}mark read{{end}}</button>
+</form>
+</span>
+</li>
+{{end}}
+</ul>
+{{else}}
+<p class="muted empty-note">No current-edition stories are filed under this desk.</p>
+{{end}}
+</section>
+</main>
+{{end}}

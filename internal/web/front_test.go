@@ -51,11 +51,31 @@ func TestFrontPageRenders(t *testing.T) {
 		"section-lead",
 		"Kubernetes scheduling internals",
 		"Example Blog",
-		"/topic/",
+		"/desk/unfiled",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("front page missing %q", want)
 		}
+	}
+}
+
+func TestDeskPageRendersAndUnknown404(t *testing.T) {
+	srv, store := newTestServer(t)
+	seedCorpus(t, store)
+	h := srv.Handler()
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/desk/unfiled", http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("desk status %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Kubernetes operators in practice") {
+		t.Error("desk page missing one of its articles")
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/desk/does-not-exist", http.NoBody))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("unknown desk status %d, want 404", rec.Code)
 	}
 }
 

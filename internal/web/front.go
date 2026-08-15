@@ -8,17 +8,21 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/pders01/fwrd/internal/editorial"
 	"github.com/pders01/fwrd/internal/storage"
 	"github.com/pders01/fwrd/internal/topics"
 )
 
-// frontCorpus bounds how many recent articles (newest-first, across all
-// feeds) the front page and topic pages cluster over. A few hundred keeps
-// clustering fast while covering everything a reader is likely to scan.
+// frontCorpus bounds the compatibility /topic model. The stable-desk front
+// page uses the wider candidate window below, then selects at most 400.
 const frontCorpus = 400
 
-// headlinesPerSection caps how many articles a front-page section block
-// shows before linking to its full topic page.
+// frontCandidates is intentionally larger than the final edition: editorial
+// diversity caps must be able to skip a prolific source and keep scanning.
+const frontCandidates = 2000
+
+// headlinesPerSection caps how many articles a front-page desk block shows
+// before linking to its full desk page.
 const headlinesPerSection = 6
 
 // deckLen bounds the lead story's plain-text deck. sectionDeckLen keeps the
@@ -34,9 +38,15 @@ type headlineView struct {
 	Deck    string
 }
 
+type topicLink struct {
+	Slug  string
+	Label string
+}
+
 type sectionView struct {
 	Slug      string
 	Label     string
+	Topics    []topicLink
 	Spotlight *headlineView
 	Headlines []headlineView
 	Total     int
@@ -46,23 +56,31 @@ type sectionView struct {
 
 type frontData struct {
 	pageBase
-	Now           time.Time
-	HasContent    bool
-	Lead          *storage.Article
-	LeadFeed      string
-	LeadDeck      string
-	LeadTopic     string
-	LeadTopicSlug string
-	ArticleCount  int
-	UnreadCount   int
-	SourceCount   int
-	Sections      []sectionView
+	Now          time.Time
+	HasContent   bool
+	Lead         *storage.Article
+	LeadFeed     string
+	LeadDeck     string
+	LeadDesk     string
+	LeadDeskSlug string
+	LeadTopic    string
+	ArticleCount int
+	UnreadCount  int
+	SourceCount  int
+	Sections     []sectionView
 }
 
 type topicData struct {
 	pageBase
 	Label    string
 	Slug     string
+	Articles []headlineView
+}
+
+type deskData struct {
+	pageBase
+	Desk     editorial.Desk
+	Topics   []topicLink
 	Articles []headlineView
 }
 
@@ -73,6 +91,46 @@ func topicOptions() topics.Options {
 	o := topics.DefaultOptions()
 	o.Now = time.Now()
 	return o
+}
+
+func editorialOptions() editorial.Options {
+	o := editorial.DefaultOptions()
+	o.Now = time.Now()
+	return o
+}
+
+// editorialView returns the stable-desk edition, cached against WriteGen just
+// like the compatibility topic model. It loads a wider candidate window so
+// composition can apply source caps before selecting the final 400 stories.
+func (s *Server) editorialView() (edition *editorial.Edition, names map[string]string) {
+	gen := s.store.WriteGen()
+
+	s.frontMu.Lock()
+	defer s.frontMu.Unlock()
+	if s.editionValid && s.editionGen == gen {
+		return s.editionModel, s.editionNames
+	}
+	articles, err := s.store.GetArticles("", frontCandidates)
+	if err != nil {
+		if s.editionValid {
+			return s.editionModel, s.editionNames
+		}
+		return editorial.Build(nil, nil, editorialOptions()), map[string]string{}
+	}
+	feeds, err := s.store.GetAllFeeds()
+	if err != nil {
+		if s.editionValid {
+			return s.editionModel, s.editionNames
+		}
+		return editorial.Build(nil, nil, editorialOptions()), map[string]string{}
+	}
+	names = make(map[string]string, len(feeds))
+	for _, feed := range feeds {
+		names[feed.ID] = feedLabel(feed)
+	}
+	edition = editorial.Build(articles, feeds, editorialOptions())
+	s.editionModel, s.editionNames, s.editionGen, s.editionValid = edition, names, gen, true
+	return edition, names
 }
 
 // frontView returns the front-page topic model and feed-name map, rebuilding
@@ -107,60 +165,54 @@ func (s *Server) frontView() (model *topics.Model, names map[string]string) {
 	return model, names
 }
 
-// handleFront renders the newspaper front page: a masthead, one lead story
-// (the most recent article across all feeds), and topical section blocks
-// derived from the corpus. The topic model is memoized (see frontView) and
-// rebuilt whenever the store changes, so read/star state stays fresh.
+// handleFront renders the composed newspaper: a scored lead and stable desk
+// blocks with emergent topics as secondary labels. The edition is memoized by
+// WriteGen so read/star state stays fresh without rebuilding per request.
 func (s *Server) handleFront(w http.ResponseWriter, r *http.Request) {
-	model, names := s.frontView()
+	edition, names := s.editorialView()
 
-	data := frontData{Now: time.Now(), HasContent: model.Lead != nil}
+	data := frontData{Now: time.Now(), HasContent: edition.Diagnostics.Selected > 0}
 	data.Flash = takeFlash(w, r)
-	if model.Lead != nil {
-		data.Lead = model.Lead
-		data.LeadFeed = names[model.Lead.FeedID]
-		data.LeadDeck = excerpt(articleBody(model.Lead), deckLen)
+	if edition.Lead != nil {
+		data.Lead = edition.Lead
+		data.LeadFeed = names[edition.Lead.FeedID]
+		data.LeadDeck = excerpt(articleBody(edition.Lead), deckLen)
+		if desk, topic := edition.TopicForArticle(edition.Lead.ID); desk != nil {
+			data.LeadDesk, data.LeadDeskSlug = desk.Desk.Label, desk.Desk.ID
+			if topic != nil {
+				data.LeadTopic = topic.Label
+			}
+		}
 	}
 
-	// Summarize the bounded front-page corpus rather than the complete
-	// archive. This makes the brief truthful and keeps it useful: it tells
-	// the reader how much is in this edition, not how large BoltDB is.
-	seenArticles := make(map[string]bool)
-	seenSources := make(map[string]bool)
-	for _, t := range model.Topics {
-		sv := sectionView{Slug: t.Slug, Label: t.Label, Total: len(t.Articles)}
-		for _, a := range t.Articles {
-			if !seenArticles[a.ID] {
-				seenArticles[a.ID] = true
-				data.ArticleCount++
-				if !a.Read {
-					data.UnreadCount++
-				}
-				seenSources[a.FeedID] = true
-			}
-			if !a.Read {
+	// Summarize the bounded, diversity-filtered edition rather than the
+	// complete archive. Stable desks replace emergent terms as primary blocks.
+	for _, section := range edition.Desks {
+		if len(section.Articles) == 0 {
+			continue
+		}
+		sv := sectionView{Slug: section.Desk.ID, Label: section.Desk.Label, Total: len(section.Articles)}
+		for _, topic := range section.Topics {
+			sv.Topics = append(sv.Topics, topicLink{Slug: topic.Slug, Label: topic.Label})
+		}
+		for _, article := range section.Articles {
+			data.ArticleCount++
+			if !article.Read {
+				data.UnreadCount++
 				sv.Unread++
 			}
-
-			// The lead is shown prominently above; don't repeat it in a
-			// section block (it still belongs to the topic page and counts).
-			if model.Lead != nil && a.ID == model.Lead.ID {
-				data.LeadTopic, data.LeadTopicSlug = t.Label, t.Slug
+			if edition.Lead != nil && article.ID == edition.Lead.ID {
+				if data.LeadDesk == "" {
+					data.LeadDesk, data.LeadDeskSlug = section.Desk.Label, section.Desk.ID
+				}
 				continue
 			}
 			if sv.Spotlight == nil {
-				sv.Spotlight = &headlineView{
-					Article: a,
-					Feed:    names[a.FeedID],
-					Deck:    excerpt(articleBody(a), sectionDeckLen),
-				}
+				sv.Spotlight = &headlineView{Article: article, Feed: names[article.FeedID], Deck: excerpt(articleBody(article), sectionDeckLen)}
 				continue
 			}
 			if len(sv.Headlines) < headlinesPerSection-1 {
-				sv.Headlines = append(sv.Headlines, headlineView{
-					Article: a,
-					Feed:    names[a.FeedID],
-				})
+				sv.Headlines = append(sv.Headlines, headlineView{Article: article, Feed: names[article.FeedID]})
 			}
 		}
 		shown := len(sv.Headlines)
@@ -168,7 +220,7 @@ func (s *Server) handleFront(w http.ResponseWriter, r *http.Request) {
 			shown++
 		}
 		totalWithoutLead := sv.Total
-		if model.Lead != nil && containsArticle(t.Articles, model.Lead.ID) {
+		if edition.Lead != nil && containsArticle(section.Articles, edition.Lead.ID) {
 			totalWithoutLead--
 		}
 		sv.More = totalWithoutLead - shown
@@ -176,7 +228,7 @@ func (s *Server) handleFront(w http.ResponseWriter, r *http.Request) {
 			data.Sections = append(data.Sections, sv)
 		}
 	}
-	data.SourceCount = len(seenSources)
+	data.SourceCount = len(edition.Diagnostics.Sources)
 	s.render(w, "front.html", data)
 }
 
@@ -196,6 +248,25 @@ func (s *Server) handleTopic(w http.ResponseWriter, r *http.Request) {
 		data.Articles = append(data.Articles, headlineView{Article: a, Feed: names[a.FeedID]})
 	}
 	s.render(w, "topic.html", data)
+}
+
+// handleDesk renders a stable editorial desk. Empty desks remain valid URLs so
+// navigation does not disappear with the current corpus.
+func (s *Server) handleDesk(w http.ResponseWriter, r *http.Request) {
+	edition, names := s.editorialView()
+	section := edition.ByDesk(r.PathValue("slug"))
+	if section == nil {
+		http.NotFound(w, r)
+		return
+	}
+	data := deskData{Desk: section.Desk}
+	for _, topic := range section.Topics {
+		data.Topics = append(data.Topics, topicLink{Slug: topic.Slug, Label: topic.Label})
+	}
+	for _, article := range section.Articles {
+		data.Articles = append(data.Articles, headlineView{Article: article, Feed: names[article.FeedID]})
+	}
+	s.render(w, "desk.html", data)
 }
 
 // buildFeedNames maps feed ID to a display label (title, or host of the URL

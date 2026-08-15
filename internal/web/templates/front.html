@@ -20,14 +20,15 @@
 {{if .Sections}}
 <nav class="edition-index" aria-label="Sections in this edition">
 <span class="edition-index-label">In this edition</span>
-{{range .Sections}}<a href="#topic-{{.Slug}}">{{.Label}} <small>{{.Total}}</small></a>{{end}}
+{{range .Sections}}<a href="#desk-{{.Slug}}">{{.Label}} <small>{{.Total}}</small></a>{{end}}
 </nav>
 {{end}}
 </aside>
 
+{{if .Lead}}
 <article class="lead {{if .Lead.Read}}read{{end}}{{if .Lead.Starred}} starred{{end}}">
 <div class="lead-primary">
-{{if .LeadTopic}}<p class="story-kicker"><a href="/topic/{{.LeadTopicSlug}}">{{.LeadTopic}}</a> <span>Lead story</span></p>{{end}}
+{{if .LeadDesk}}<p class="story-kicker"><a href="/desk/{{.LeadDeskSlug}}">{{.LeadDesk}}</a>{{if .LeadTopic}} <span>{{.LeadTopic}}</span>{{end}} <span>Lead story</span></p>{{end}}
 <a class="lead-link" href="/article?id={{.Lead.ID}}"><h1 class="lead-hl">{{if .Lead.Title}}{{.Lead.Title}}{{else}}(untitled){{end}}</h1></a>
 <p class="byline">{{.LeadFeed}}{{if not .Lead.Published.IsZero}} · <time>{{date .Lead.Published}}</time>{{end}}</p>
 </div>
@@ -36,13 +37,15 @@
 <p class="story-state">{{if not .Lead.Read}}<span class="unread-state">Unread</span>{{else}}Read{{end}}{{if .Lead.Starred}} <span aria-hidden="true">·</span> <span class="saved-state">★ Saved</span>{{end}}</p>
 </div>
 </article>
+{{end}}
 
 <div class="sections">
 {{range .Sections}}
-<section class="topic-block" id="topic-{{.Slug}}">
+<section class="topic-block" id="desk-{{.Slug}}">
 <header class="section-head">
-<h2 class="section-label"><a href="/topic/{{.Slug}}">{{.Label}}</a></h2>
+<h2 class="section-label"><a href="/desk/{{.Slug}}">{{.Label}}</a></h2>
 <p class="section-count">{{.Total}} {{plural .Total "story" "stories"}}{{if gt .Unread 0}} · {{.Unread}} unread{{end}}</p>
+{{if .Topics}}{{$desk := .}}<p class="emergent-topics">Developing: {{range $i, $topic := .Topics}}{{if $i}} · {{end}}<a href="/desk/{{$desk.Slug}}#topic-{{$topic.Slug}}">{{$topic.Label}}</a>{{end}}</p>{{end}}
 </header>
 {{with .Spotlight}}
 <article class="section-lead {{if .Article.Read}}read{{end}}{{if .Article.Starred}} starred{{end}}">
@@ -61,7 +64,7 @@
 {{end}}
 </ul>
 {{end}}
-{{if gt .More 0}}<p class="more"><a href="/topic/{{.Slug}}">Explore {{.More}} more →</a></p>{{end}}
+{{if gt .More 0}}<p class="more"><a href="/desk/{{.Slug}}">Explore {{.More}} more →</a></p>{{end}}
 </section>
 {{end}}
 </div>

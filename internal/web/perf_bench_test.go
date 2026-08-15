@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/pders01/fwrd/internal/editorial"
 	"github.com/pders01/fwrd/internal/storage"
-	"github.com/pders01/fwrd/internal/topics"
 )
 
 // Benchmarks the real page-render hot paths against a populated database.
@@ -50,17 +50,21 @@ func BenchmarkHandleFeedsCounts(b *testing.B) {
 	}
 }
 
-// BenchmarkFrontPage measures the front-page work done per request:
-// load the corpus, build feed-name map, run topic clustering.
+// BenchmarkFrontPage measures a cold editorial composition: load the wider
+// candidate window and feed metadata, apply diversity caps, then cluster
+// emergent topics within stable desks. Normal requests hit the WriteGen cache.
 func BenchmarkFrontPage(b *testing.B) {
 	s := benchServer(b)
 	for b.Loop() {
-		arts, err := s.store.GetArticles("", frontCorpus)
+		arts, err := s.store.GetArticles("", frontCandidates)
 		if err != nil {
 			b.Fatalf("get articles: %v", err)
 		}
-		_ = s.buildFeedNames()
-		_ = topics.Build(arts, topicOptions())
+		feeds, err := s.store.GetAllFeeds()
+		if err != nil {
+			b.Fatalf("get feeds: %v", err)
+		}
+		_ = editorial.Build(arts, feeds, editorialOptions())
 	}
 }
 

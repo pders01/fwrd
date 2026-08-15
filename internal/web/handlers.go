@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pders01/fwrd/internal/editorial"
 	"github.com/pders01/fwrd/internal/opml"
 	"github.com/pders01/fwrd/internal/storage"
 )
@@ -26,6 +27,7 @@ type feedView struct {
 	Feed   *storage.Feed
 	Label  string
 	Source string
+	Desk   editorial.Desk
 	Unread int
 	Total  int
 }
@@ -43,6 +45,8 @@ type feedData struct {
 	Feed       *storage.Feed
 	Label      string
 	Source     string
+	Desk       editorial.Desk
+	Desks      []editorial.Desk
 	Articles   []*storage.Article
 	Total      int
 	Unread     int
@@ -96,10 +100,12 @@ func (s *Server) handleFeeds(w http.ResponseWriter, r *http.Request) {
 	data := indexData{}
 	for _, f := range feeds {
 		st := stats[f.ID]
+		desk, _ := editorial.DeskByID(f.DeskID)
 		views = append(views, feedView{
 			Feed:   f,
 			Label:  feedLabel(f),
 			Source: feedSource(f),
+			Desk:   desk,
 			Unread: st.Unread,
 			Total:  st.Total,
 		})
@@ -137,10 +143,13 @@ func (s *Server) handleFeed(w http.ResponseWriter, r *http.Request) {
 	if stats, statErr := s.store.FeedStats(); statErr == nil {
 		stat = stats[id]
 	}
+	desk, _ := editorial.DeskByID(feed.DeskID)
 	data := feedData{
 		Feed:       feed,
 		Label:      feedLabel(feed),
 		Source:     feedSource(feed),
+		Desk:       desk,
+		Desks:      editorial.Desks(),
 		Articles:   articles,
 		Total:      stat.Total,
 		Unread:     stat.Unread,
@@ -267,6 +276,30 @@ func (s *Server) handleRefreshAll(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, "/")
 }
 
+func (s *Server) handleSetFeedDesk(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	feed, err := s.store.GetFeed(id)
+	if err != nil || feed == nil {
+		http.NotFound(w, r)
+		return
+	}
+	deskID, ok := editorial.NormalizeDeskID(r.FormValue("desk"))
+	if !ok {
+		setFlash(w, flashError, "Unknown desk.")
+		redirect(w, r, "/feeds/"+id)
+		return
+	}
+	feed.DeskID = deskID
+	if err := s.saveFeed(r.Context(), feed); err != nil {
+		setFlash(w, flashError, "Couldn't update desk: "+err.Error())
+		redirect(w, r, "/feeds/"+id)
+		return
+	}
+	desk, _ := editorial.DeskByID(deskID)
+	setFlash(w, flashNotice, "Filed "+feedLabel(feed)+" under "+desk.Label+".")
+	redirect(w, r, "/feeds/"+id)
+}
+
 func (s *Server) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := s.deleteFeed(r.Context(), id); err != nil {
@@ -357,16 +390,44 @@ func (s *Server) handleOPMLImport(w http.ResponseWriter, r *http.Request) {
 		redirect(w, r, "/feeds")
 		return
 	}
+	metadataErr := s.applyImportedDeskMetadata(r, feeds)
 	msg := fmt.Sprintf("Imported %d feed(s)", added)
 	if skipped > 0 {
 		msg += fmt.Sprintf(", %d already present", skipped)
 	}
 	if failed > 0 {
 		setFlash(w, flashError, msg+fmt.Sprintf(", %d failed to fetch.", failed))
+	} else if metadataErr != nil {
+		setFlash(w, flashError, msg+"; couldn't restore desk assignments: "+metadataErr.Error())
 	} else {
 		setFlash(w, flashNotice, msg+".")
 	}
 	redirect(w, r, "/feeds")
+}
+
+func (s *Server) applyImportedDeskMetadata(r *http.Request, imported []opml.Feed) error {
+	stored, err := s.store.GetAllFeeds()
+	if err != nil {
+		return err
+	}
+	byURL := make(map[string]*storage.Feed, len(stored))
+	for _, feed := range stored {
+		byURL[feed.URL] = feed
+	}
+	for _, item := range imported {
+		if item.DeskID == "" {
+			continue
+		}
+		feed := byURL[item.URL]
+		if feed == nil || feed.DeskID == item.DeskID {
+			continue
+		}
+		feed.DeskID = item.DeskID
+		if err := s.saveFeed(r.Context(), feed); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Server) handleToggleStar(w http.ResponseWriter, r *http.Request) {

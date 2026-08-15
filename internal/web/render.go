@@ -18,7 +18,7 @@ var assets embed.FS
 // pages are the content templates; each is parsed together with layout.html
 // into its own set so their "title"/"content" block definitions don't
 // collide in a shared namespace.
-var pages = []string{"front.html", "topic.html", "feeds.html", "feed.html", "article.html", "search.html"}
+var pages = []string{"front.html", "topic.html", "desk.html", "feeds.html", "feed.html", "article.html", "search.html"}
 
 // sanitizer strips scripts, event handlers, and other active content from
 // feed-supplied HTML before it is marked template.HTML and rendered. Feed

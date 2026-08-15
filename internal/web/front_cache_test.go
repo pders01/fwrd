@@ -21,6 +21,15 @@ func TestFrontView_CachesUntilStoreChanges(t *testing.T) {
 		t.Fatalf("SaveArticles: %v", err)
 	}
 
+	e1, en1 := srv.editorialView()
+	e2, _ := srv.editorialView()
+	if e1 != e2 {
+		t.Fatalf("expected cached editorial edition on second call")
+	}
+	if en1["f1"] != "Example" {
+		t.Fatalf("editorial feed name not resolved: %q", en1["f1"])
+	}
+
 	m1, n1 := srv.frontView()
 	m2, _ := srv.frontView()
 	if m1 != m2 {
@@ -35,6 +44,10 @@ func TestFrontView_CachesUntilStoreChanges(t *testing.T) {
 		{ID: "f1:a2", FeedID: "f1", Title: "Beta story", Published: time.Now()},
 	}); err != nil {
 		t.Fatalf("SaveArticles 2: %v", err)
+	}
+	e3, _ := srv.editorialView()
+	if e3 == e1 {
+		t.Fatalf("expected editorial rebuild after store change")
 	}
 	m3, _ := srv.frontView()
 	if m3 == m1 {
