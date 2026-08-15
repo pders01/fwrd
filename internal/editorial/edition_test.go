@@ -72,6 +72,27 @@ func TestBuildDeterministicDiverseEdition(t *testing.T) {
 	}
 }
 
+func TestLeadTopicSupportPointsAreCapped(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	var feeds []*storage.Feed
+	var articles []*storage.Article
+	for i := range 5 {
+		id := string(rune('a' + i))
+		feeds = append(feeds, &storage.Feed{ID: id, URL: "https://" + id + ".example/rss", DeskID: DeskScienceHealth})
+		articles = append(articles, article(id+"1", id, "Quantum discovery experiment", now.Add(-time.Duration(i)*time.Minute)))
+	}
+	opts := DefaultOptions()
+	opts.Now = now
+	opts.TopicOptions.MaxDocFraction = 1
+	edition := Build(articles, feeds, opts)
+	if edition.LeadScore.TopicSources != 5 {
+		t.Fatalf("topic source count = %d, want 5", edition.LeadScore.TopicSources)
+	}
+	if edition.LeadScore.TopicSourcePoints != 36 {
+		t.Fatalf("topic points = %d, want capped 36", edition.LeadScore.TopicSourcePoints)
+	}
+}
+
 func TestBuildAppliesDocumentedSourceCaps(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	feeds := []*storage.Feed{

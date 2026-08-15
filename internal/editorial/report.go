@@ -23,15 +23,17 @@ type DiagnosticPolicy struct {
 // DiagnosticLead is the compact, content-free lead explanation emitted by
 // diagnostics. It intentionally mirrors every LeadScore component.
 type DiagnosticLead struct {
-	ID            string    `json:"id,omitempty"`
-	Title         string    `json:"title,omitempty"`
-	FeedID        string    `json:"feed_id,omitempty"`
-	Published     time.Time `json:"published,omitzero"`
-	RecencyPoints int       `json:"recency_points"`
-	TopicSources  int       `json:"topic_sources"`
-	DeskSources   int       `json:"desk_sources"`
-	StarredPoints int       `json:"starred_points"`
-	Total         int       `json:"total"`
+	ID                string    `json:"id,omitempty"`
+	Title             string    `json:"title,omitempty"`
+	FeedID            string    `json:"feed_id,omitempty"`
+	Published         time.Time `json:"published,omitzero"`
+	RecencyPoints     int       `json:"recency_points"`
+	TopicSources      int       `json:"topic_sources"`
+	TopicSourcePoints int       `json:"topic_source_points"`
+	DeskSources       int       `json:"desk_sources"`
+	DeskSourcePoints  int       `json:"desk_source_points"`
+	StarredPoints     int       `json:"starred_points"`
+	Total             int       `json:"total"`
 }
 
 // DiagnosticReport is a stable, machine-readable view of composition. It
@@ -72,12 +74,14 @@ func NewDiagnosticReport(edition *Edition, opts Options) DiagnosticReport {
 	if article := edition.LeadScore.Article; article != nil {
 		report.Lead = DiagnosticLead{
 			ID: article.ID, Title: article.Title, FeedID: article.FeedID,
-			Published:     article.Published,
-			RecencyPoints: edition.LeadScore.RecencyPoints,
-			TopicSources:  edition.LeadScore.TopicSources,
-			DeskSources:   edition.LeadScore.DeskSources,
-			StarredPoints: edition.LeadScore.StarredPoints,
-			Total:         edition.LeadScore.Total,
+			Published:         article.Published,
+			RecencyPoints:     edition.LeadScore.RecencyPoints,
+			TopicSources:      edition.LeadScore.TopicSources,
+			TopicSourcePoints: edition.LeadScore.TopicSourcePoints,
+			DeskSources:       edition.LeadScore.DeskSources,
+			DeskSourcePoints:  edition.LeadScore.DeskSourcePoints,
+			StarredPoints:     edition.LeadScore.StarredPoints,
+			Total:             edition.LeadScore.Total,
 		}
 	}
 	return report
@@ -109,9 +113,10 @@ func WriteDiagnostics(w io.Writer, edition *Edition, opts Options, jsonOutput bo
 			return err
 		}
 	} else if _, err := fmt.Fprintf(w,
-		"Lead: %s [score=%d recency=%d topic_sources=%d desk_sources=%d starred=%d]\n",
+		"Lead: %s [score=%d recency=%d topic=%d/%d sources desk=%d/%d sources starred=%d]\n",
 		report.Lead.Title, report.Lead.Total, report.Lead.RecencyPoints,
-		report.Lead.TopicSources, report.Lead.DeskSources, report.Lead.StarredPoints); err != nil {
+		report.Lead.TopicSourcePoints, report.Lead.TopicSources,
+		report.Lead.DeskSourcePoints, report.Lead.DeskSources, report.Lead.StarredPoints); err != nil {
 		return err
 	}
 

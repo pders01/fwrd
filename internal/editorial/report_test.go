@@ -30,7 +30,7 @@ func TestWriteDiagnosticsTextAndJSON(t *testing.T) {
 	if err := WriteDiagnostics(&text, edition, opts, false); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Edition: 3 selected", "Fallback: 0", "World", "SOURCES", "TOPICS", "topic_sources="} {
+	for _, want := range []string{"Edition: 3 selected", "Fallback: 0", "World", "SOURCES", "TOPICS", "topic="} {
 		if !strings.Contains(text.String(), want) {
 			t.Errorf("text report missing %q:\n%s", want, text.String())
 		}
@@ -47,7 +47,7 @@ func TestWriteDiagnosticsTextAndJSON(t *testing.T) {
 	if report.Selected != 3 || report.Policy.MaxArticles != opts.MaxArticles {
 		t.Fatalf("JSON report = %+v", report)
 	}
-	if report.Lead.ID == "" || report.Lead.TopicSources < 2 {
+	if report.Lead.ID == "" || report.Lead.TopicSources < 2 || report.Lead.TopicSourcePoints == 0 {
 		t.Fatalf("JSON lead lacks support explanation: %+v", report.Lead)
 	}
 }

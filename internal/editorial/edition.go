@@ -53,15 +53,19 @@ type DeskSection struct {
 	Topics   []Topic
 }
 
-// LeadScore exposes every lead-ranking component. Total is
-// RecencyPoints + 12*TopicSources + 2*min(DeskSources,5) + StarredPoints.
+// LeadScore exposes every lead-ranking component. Cross-source support is
+// capped at three sources: live diagnostics showed that an eight-source,
+// single-word "Model" cluster could otherwise overpower nearly two days of
+// recency and promote a status incident as the lead.
 type LeadScore struct {
-	Article       *storage.Article
-	RecencyPoints int
-	TopicSources  int
-	DeskSources   int
-	StarredPoints int
-	Total         int
+	Article           *storage.Article
+	RecencyPoints     int
+	TopicSources      int
+	TopicSourcePoints int
+	DeskSources       int
+	DeskSourcePoints  int
+	StarredPoints     int
+	Total             int
 }
 
 // Share is a diagnostic count and fraction of the selected edition.
@@ -246,7 +250,9 @@ func (e *Edition) chooseLead(now time.Time, deskSources map[string]map[string]in
 				TopicSources: topicSources[article.ID], DeskSources: deskBreadth,
 				StarredPoints: starred,
 			}
-			score.Total = score.RecencyPoints + 12*score.TopicSources + 2*min(score.DeskSources, 5) + score.StarredPoints
+			score.TopicSourcePoints = 12 * min(score.TopicSources, 3)
+			score.DeskSourcePoints = 2 * min(score.DeskSources, 5)
+			score.Total = score.RecencyPoints + score.TopicSourcePoints + score.DeskSourcePoints + score.StarredPoints
 			candidates = append(candidates, score)
 		}
 	}
