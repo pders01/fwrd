@@ -78,6 +78,11 @@ theme = "auto"   # "auto" (default, detect) / "light" / "dark"
 ./fwrd feed list
 ./fwrd feed refresh
 ./fwrd feed delete <feed-id>
+./fwrd feed desk <feed-id> technology  # assign a stable newspaper desk
+
+# Inspect source/desk/topic diversity and lead scoring
+./fwrd edition diagnostics
+./fwrd edition diagnostics --json
 
 # Plugin inspection
 ./fwrd plugins list
@@ -89,10 +94,11 @@ theme = "auto"   # "auto" (default, detect) / "light" / "dark"
 
 ### Web Mode
 
-Serve a web view of your feeds. The front page is a newspaper: a lead story
-and emergent topic sections clustered from your most recent articles, with
-search up top. Feed management lives at `/feeds`. Unlike the TUI — which
-converts HTML to terminal markdown — the web view renders article content
+Serve a web view of your feeds. The front page is a newspaper: a scored lead
+story and stable desks composed from your most recent articles, with emergent
+cross-source topics shown as secondary labels and search up top. Feed
+management lives at `/feeds`. Unlike the TUI — which converts HTML to terminal
+markdown — the web view renders article content
 as sanitized HTML, the form it was authored in.
 
 ```bash
@@ -104,8 +110,9 @@ as sanitized HTML, the form it was authored in.
 
 Near-parity with the TUI/CLI:
 
-- Newspaper front page: a lead story plus topic sections built from recent
-  articles; a section opens in full at `/topic/{slug}`
+- Newspaper front page: a scored lead plus source-balanced stable desks built
+  from recent articles; desks open at `/desk/{slug}` and compatibility topic
+  pages remain available at `/topic/{slug}`
 - Manage feeds at `/feeds` — add, refresh (per-feed or all), and delete, with
   unread counts, last-fetched time, and a **fetch-failed badge** when a feed's
   last refresh errored
