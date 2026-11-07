@@ -64,6 +64,10 @@ func Open(path string) (*Logger, error) {
 	if err != nil {
 		return nil, err
 	}
+	if chmodErr := f.Chmod(0o600); chmodErr != nil {
+		_ = f.Close()
+		return nil, chmodErr
+	}
 	return &Logger{w: f, closer: f}, nil
 }
 
@@ -82,7 +86,9 @@ func (l *Logger) Log(r *Record) {
 	if r.Time == "" {
 		r.Time = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	line, err := json.Marshal(r)
+	redacted := *r
+	redacted.URL = RedactURL(r.URL)
+	line, err := json.Marshal(&redacted)
 	if err != nil {
 		return
 	}
@@ -147,7 +153,7 @@ func (rt *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 		Source:     sourceFromContext(req.Context()),
 	}
 	if err != nil {
-		rec.Err = err.Error()
+		rec.Err = SafeHTTPError(err).Error()
 	} else {
 		rec.Status = resp.StatusCode
 		rec.Bytes = resp.ContentLength
