@@ -88,22 +88,22 @@ func (w *Watcher) handleUpsert(path string) {
 		w.warn("reload %s: %v", path, err)
 		return
 	}
-	old := w.reg.Replace(plugin)
-	closeIfPossible(old)
+	for _, old := range w.reg.ReplacePath(plugin.Path(), plugin) {
+		closeIfPossible(old)
+	}
 	w.info("reloaded plugin %s (priority=%d) from %s",
 		plugin.Name(), plugin.Priority(), path)
 }
 
 func (w *Watcher) handleRemove(path string) {
-	for _, p := range w.reg.ListPlugins() {
-		lp, ok := p.(*Plugin)
-		if !ok || lp.Path() != path {
-			continue
-		}
-		removed := w.reg.Unregister(lp.Name())
-		closeIfPossible(removed)
-		w.info("unregistered plugin %s (file removed)", lp.Name())
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		w.warn("resolve removed plugin path: %v", err)
 		return
+	}
+	for _, removed := range w.reg.UnregisterPath(abs) {
+		closeIfPossible(removed)
+		w.info("unregistered plugin %s (file removed)", removed.Name())
 	}
 }
 

@@ -56,7 +56,9 @@ func LoadAndRegister(reg *plugins.Registry, dir string, b Bindings) (int, error)
 			}
 			continue
 		}
-		reg.Register(r.Plugin)
+		for _, old := range reg.ReplacePath(r.Plugin.Path(), r.Plugin) {
+			closeIfPossible(old)
+		}
 		count++
 		if b.Logger != nil {
 			b.Logger.Infof("registered lua plugin %s (name=%s priority=%d)",

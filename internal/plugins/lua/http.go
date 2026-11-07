@@ -5,8 +5,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/pders01/fwrd/internal/audit"
+	"github.com/pders01/fwrd/internal/validation"
 	lua "github.com/yuin/gopher-lua"
 )
 
@@ -28,7 +30,7 @@ const httpBodyCap int64 = 50 * 1024 * 1024 // 50 MiB
 //   - headers: table of request headers to add
 func registerHTTP(L *lua.LState, client *http.Client) {
 	if client == nil {
-		client = http.DefaultClient
+		client = validation.NewHTTPClient(30 * time.Second)
 	}
 	tbl := L.NewTable()
 	L.SetField(tbl, "get", L.NewFunction(func(L *lua.LState) int {
@@ -100,6 +102,6 @@ func pushHTTPErr(L *lua.LState, err error) int {
 		err = errors.New("unknown http error")
 	}
 	L.Push(lua.LNil)
-	L.Push(lua.LString(err.Error()))
+	L.Push(lua.LString(audit.SafeHTTPError(err).Error()))
 	return 2
 }

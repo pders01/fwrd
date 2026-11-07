@@ -2,12 +2,16 @@ package lua
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/pders01/fwrd/internal/validation"
 )
 
 func TestEnsureDefaultsSeedsOnce(t *testing.T) {
@@ -122,7 +126,9 @@ func TestYouTubeBuiltinResolvesLegacyHandle(t *testing.T) {
 	if err := EnsureDefaults(tmp); err != nil {
 		t.Fatal(err)
 	}
-	plugin, err := LoadFile(filepath.Join(tmp, "youtube.lua"), Bindings{HTTPClient: srv.Client()})
+	policy := new(validation.HTTPPolicy)
+	policy.SetPermissive(true) // explicit local-server test policy
+	plugin, err := LoadFile(filepath.Join(tmp, "youtube.lua"), Bindings{HTTPClient: policy.NewHTTPClient(time.Second)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +158,8 @@ func TestYouTubeBuiltinResolvesAtHandleFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	plugin, err := LoadFile(filepath.Join(tmp, "youtube.lua"), Bindings{
-		// nil http client so the @handle resolve fails fast.
+		// Explicit failing host capability: never contact the real YouTube.
+		HTTPClient: &http.Client{Transport: unavailableHTTP{}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -170,6 +177,12 @@ func TestYouTubeBuiltinResolvesAtHandleFallback(t *testing.T) {
 	if info.Metadata["channel_handle"] != "somecreator" {
 		t.Errorf("channel_handle metadata: %v", info.Metadata)
 	}
+}
+
+type unavailableHTTP struct{}
+
+func (unavailableHTTP) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("network disabled in test")
 }
 
 func TestYouTubeBuiltinDirectChannelID(t *testing.T) {

@@ -1,6 +1,7 @@
 package lua
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -62,6 +63,10 @@ func LoadDir(dir string, b Bindings) ([]LoadResult, error) {
 // LoadFile loads a single Lua plugin file. The returned Plugin owns
 // a sandboxed *lua.LState that lives until Plugin.Close is called.
 func LoadFile(path string, b Bindings) (*Plugin, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolving plugin path: %w", err)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("opening plugin: %w", err)
@@ -84,7 +89,11 @@ func LoadFile(path string, b Bindings) (*Plugin, error) {
 		return nil, fmt.Errorf("plugin exceeds %d bytes", MaxScriptSize)
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), min(executionTimeout(b), bootstrapTimeout))
+	defer cancel()
 	L := NewSandboxedState(b)
+	L.SetContext(ctx)
+	defer L.RemoveContext()
 	chunk, err := L.LoadString(string(source))
 	if err != nil {
 		L.Close()
@@ -126,6 +135,8 @@ func LoadFile(path string, b Bindings) (*Plugin, error) {
 		name:     name,
 		priority: priority,
 		path:     path,
+		gate:     make(chan struct{}, 1),
+		timeout:  executionTimeout(b),
 		state:    L,
 		table:    tbl,
 	}, nil

@@ -5,6 +5,7 @@ package lua
 
 import (
 	"net/http"
+	"time"
 
 	lua "github.com/yuin/gopher-lua"
 )
@@ -13,8 +14,15 @@ import (
 // supplied by the loader and reused for every host binding registered
 // onto a sandboxed LState.
 type Bindings struct {
+	// HTTPClient is an explicitly supplied host capability. Production hosts
+	// must supply a policy-secured client (e.g. Manager.PluginHTTPClient).
+	// A nil client creates a strict standalone client, never http.DefaultClient.
 	HTTPClient *http.Client
 	Logger     Logger
+	// ExecutionTimeout bounds loading, routing, and enhancement including
+	// admission. Zero selects DefaultExecutionTimeout; loading and routing
+	// also have an independent two-second ceiling.
+	ExecutionTimeout time.Duration
 }
 
 // Logger is the minimal logging surface plugins call through log.info /

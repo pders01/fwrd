@@ -7,7 +7,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/pders01/fwrd/internal/validation"
 	gluapkg "github.com/yuin/gopher-lua"
 )
 
@@ -50,7 +52,9 @@ func TestHTTPGetSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	L := NewSandboxedState(Bindings{HTTPClient: srv.Client()})
+	policy := new(validation.HTTPPolicy)
+	policy.SetPermissive(true) // explicit local-server test policy
+	L := NewSandboxedState(Bindings{HTTPClient: policy.NewHTTPClient(time.Second)})
 	defer L.Close()
 	L.SetGlobal("URL", gluapkg.LString(srv.URL))
 
@@ -65,7 +69,7 @@ assert(res.headers["X-Reply"] == "hello")`); err != nil {
 }
 
 func TestHTTPGetErrorReturnsNilBody(t *testing.T) {
-	L := NewSandboxedState(Bindings{HTTPClient: http.DefaultClient})
+	L := NewSandboxedState(Bindings{})
 	defer L.Close()
 
 	if err := L.DoString(`
