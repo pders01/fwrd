@@ -1,13 +1,17 @@
 # fwrd configuration file
-# Copy this to ~/.config/fwrd/config.toml and customize as needed
-# Environment variables can override any setting using FWRD_ prefix
-# e.g., FWRD_DATABASE_PATH=/custom/path.db
+# Prefer `fwrd config generate` for a private file; generation never overwrites.
+# Or copy this to ~/.config/fwrd/config.toml, customize it, and use chmod 600 on Unix.
+# Nested environment settings use underscores, e.g. FWRD_DATABASE_PATH.
+# Relative filesystem paths resolve against this file's directory.
 
 [database]
 # Path to the database file
 # Default: ~/.fwrd/fwrd.db
 path = "~/.fwrd/fwrd.db"
-# Database operation timeout
+# Omit search_index to derive it from the DB path. The default DB uses
+# ~/.fwrd/index.bleve; a custom DB uses a neighboring .bleve path.
+# search_index = "/absolute/path/to/custom.bleve"
+# Database file-lock acquisition timeout
 timeout = "1s"
 
 [feed]
@@ -15,7 +19,8 @@ timeout = "1s"
 http_timeout = "30s"
 # Minimum interval between feed refreshes
 refresh_interval = "5m"
-# Default retry interval when no Retry-After header is present
+# Fallback for the Retry-After parsing helper only. Automatic backoff and
+# per-host rate limiting are not implemented.
 default_retry_after = "15m"
 # User agent string for HTTP requests
 user_agent = "fwrd/1.0 (https://github.com/pders01/fwrd)"
@@ -26,39 +31,31 @@ max_concurrent_refreshes = 5
 # intranet installation. Keep false for untrusted subscriptions/users.
 allow_private_networks = false
 
-[ui.colors]
-# Color scheme - accepts hex values or named colors
-primary = "#FF6B6B"     # Warm coral
-secondary = "#4ECDC4"   # Teal
-accent = "#95E1D3"      # Mint
-background = "#1A1A2E"  # Deep night
-surface = "#16213E"     # Midnight blue
-text = "#EAEAEA"        # Soft white
-muted = "#94A3B8"       # Muted gray-blue
-error = "#F87171"       # Red
-success = "#4ADE80"     # Green
-
 [ui]
 # Glamour render theme for the article reader.
 #   "auto"  — follow terminal / OS appearance (default)
 #   "light" — force light style
 #   "dark"  — force dark style
 # Press Ctrl+T inside the TUI to cycle at runtime.
-# Send SIGUSR1 (kill -USR1 <pid>) to re-detect after a manual switch;
+# On Unix, send SIGUSR1 (kill -USR1 <pid>) to re-detect after a manual switch;
 # on macOS the system appearance change is detected automatically.
 theme = "auto"
+icons = "nerd"
+search_debounce_ms = 200
 
 [ui.article]
 # Maximum length for article descriptions in lists
 max_description_length = 150
-# Word wrap settings for article reader
-word_wrap_max_width = 120
-word_wrap_min_width = 40
+# Article-list page size; scrolling fetches more pages.
+list_limit = 50
+# Reader wrapping follows terminal width; legacy word_wrap_* fields are
+# currently not used by the renderer.
 
 [media]
-# Default program to open unrecognized media types
-# Options: "open" (macOS), "xdg-open" (Linux), "start" (Windows)
-default_opener = "open"
+# Omit default_opener to use the current platform's default:
+# "open" (macOS), "xdg-open" (Linux), or "start" (Windows URL handler).
+# Only absolute HTTP(S) URLs can be launched, not local files/custom schemes.
+# default_opener = "open"
 
 [media.darwin]
 # Media players for macOS (in order of preference)
@@ -83,23 +80,23 @@ pdf = ["start"]
 
 [keys]
 # Modifier key for custom commands
-# Options: "ctrl", "alt", "cmd", "super"
+# Usually "ctrl" or "alt"; available combinations depend on your terminal.
 modifier = "ctrl"
 
 [keys.bindings]
-# Custom keybindings (without modifier prefix)
+# Action bindings combine with the modifier. Quit is a literal key;
+# Escape remains the built-in back key.
 quit = "q"
 search = "s"
 new_feed = "n"
 rename_feed = "e"
 delete_feed = "x"
 refresh = "r"
-toggle_read = "m"
+toggle_read = "u"  # ctrl+m is Enter in terminals; do not use it here
 toggle_star = "f"
 open_media = "o"
 theme_toggle = "t"
-back = "esc"
-help = "?"
+back = "esc"  # compatibility setting; Escape handling is built in
 
 [web]
 # Non-loopback serving without credentials is denied unless explicitly opted in.
@@ -112,3 +109,24 @@ allow_unauthenticated = false
 # Or set a raw CSS font-family list to use verbatim, e.g.:
 #   font = 'Iosevka, ui-monospace, monospace'
 font = "serif"
+
+[web.auth]
+# Set BOTH fields before binding to a non-loopback address.
+# Blank credentials are valid for loopback-only use; one non-empty field is an error.
+# Environment: FWRD_WEB_AUTH_USERNAME and FWRD_WEB_AUTH_PASSWORD.
+username = ""
+password = ""
+
+[web.tls]
+enabled = true
+mode = "self-signed"  # "local-ca" or "file" are also available
+# dir = "~/.fwrd/tls"
+# File mode requires both paths; restart serve after replacing these files.
+# cert_file = "/absolute/path/to/cert.pem"
+# key_file = "/absolute/path/to/key.pem"
+
+[web.audit]
+# Optional JSON-lines HTTP audit log, separate from plain-text debug logging.
+# URL credentials/query data are redacted; paths remain potentially sensitive.
+enabled = false
+path = "~/.fwrd/audit.log"
