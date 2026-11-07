@@ -27,7 +27,7 @@ These changes are not a claim of formal verification or complete sandbox isolati
 | Duplicate subscriptions and unstable IDs | Atomic create-only commits, idempotent duplicate detection and deterministic GUID-less IDs; persistence and parser identity tests |
 | Stale full-record desk/title writes | Atomic SetFeedDesk/RenameFeed operations, persistent title override, committed-record notifications; storage contracts and desk regression tests |
 | Article feed reassignment corrupts indexes | Reassignment rejected transactionally through both backends; storage contract tests |
-| Pre-epoch/undated ordering and expensive feed pagination | Full-range ordered keys, per-feed indexes and transactional rebuild; date/migration/allocation tests |
+| Pre-epoch/undated ordering and expensive feed pagination | Full-range ordered keys, per-feed indexes and transactional rebuild; date/migration/page-decoding tests |
 | Oversized IPC pages | Byte-budgeted server reads and adaptive client page reduction; bounded-page and RPC pagination tests |
 | Cancelled IPC work executes later | Request deadlines and disconnect cancellation reach queued/running work; cancellation/deadline/pipelining tests |
 | Unbounded IPC resources and unsafe socket removal | Connection/frame/dispatch budgets, response-write deadlines and positive stale-socket evidence; frame-budget/socket/RPC tests |
@@ -76,8 +76,11 @@ Final integration checks on macOS/arm64 with Go 1.26.10:
   passed; the discovered Markdown regression input is retained as a corpus seed.
 - Cross-builds: Windows/amd64, Linux/amd64, Linux/armv7 passed.
 - Deep-feed-page benchmark (10 iterations, Apple M2 Pro): approximately
-  0.118 ms, 26 KB, 486 allocations per page. A regression test separately checks
-  that allocations do not scale with total feed size.
+  0.118 ms, 26 KB, 486 allocations per page. A regression test checks that
+  out-of-page corruption does not affect fixed-size first/middle/deep pages,
+  for per-feed and global reads with 4 KiB and 16 KiB database pages. Allocation
+  comparisons remain benchmarks: B-tree depth and database page size affect
+  cursor allocations even when article decoding is bounded.
 - `git diff --check`: passed.
 
 Native Windows/Linux execution, Docker image execution, and a manual interactive

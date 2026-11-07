@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -172,32 +174,127 @@ func TestFailedIndexMigrationRollsBackAndCanRetry(t *testing.T) {
 	assertDatePages(t, s)
 }
 
-func TestFeedPageDecodeAllocationsDoNotScaleWithFeedSize(t *testing.T) {
-	s, cleanup := setupTestStore(t)
-	defer cleanup()
-	appendArticles := func(start, end int) {
-		t.Helper()
-		articles := make([]*Article, 0, end-start)
-		for i := start; i < end; i++ {
-			articles = append(articles, &Article{ID: fmt.Sprintf("a-%05d", i), FeedID: "f", Published: time.Unix(int64(i), 0)})
-		}
-		if err := s.SaveArticles(articles); err != nil {
-			t.Fatal(err)
-		}
+// newPageSizeStore exercises the 4 KiB and 16 KiB database layouts without
+// depending on the host OS page size. Reopening preserves the stored page size.
+func newPageSizeStore(t testing.TB, pageSize int) *Store {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "pages.db")
+	db, err := bolt.Open(path, 0o600, &bolt.Options{PageSize: pageSize})
+	if err != nil {
+		t.Fatal(err)
 	}
-	measure := func() float64 {
-		return testing.AllocsPerRun(5, func() {
-			page, err := s.GetArticlesWithCursor("f", 5, "a-00009")
-			if err != nil || len(page) != 5 {
-				t.Fatalf("page = %v, %v", page, err)
+	if closeErr := db.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	s, err := NewStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if closeErr := s.Close(); closeErr != nil {
+			t.Error(closeErr)
+		}
+	})
+	return s
+}
+
+func pageDecodeFixture(count int) []*Article {
+	articles := make([]*Article, count)
+	for i := range articles {
+		articles[i] = &Article{ID: fmt.Sprintf("a-%05d", i), FeedID: "f", Published: time.Unix(int64(i), 0)}
+	}
+	return articles
+}
+
+func TestArticlePagesDoNotDecodeOutsideRequestedPage(t *testing.T) {
+	const total = 4000
+	cases := []struct {
+		name   string
+		cursor string
+		first  int
+	}{
+		{name: "first", first: total - 1},
+		{name: "middle", cursor: "a-02000", first: 1999},
+		{name: "deep", cursor: "a-00009", first: 8},
+	}
+	for _, pageSize := range []int{4096, 16384} {
+		t.Run(fmt.Sprintf("page_size_%d", pageSize), func(t *testing.T) {
+			s := newPageSizeStore(t, pageSize)
+			articles := pageDecodeFixture(total)
+			if err := s.SaveArticles(articles); err != nil {
+				t.Fatal(err)
+			}
+			// For each query, only its cursor and five page records remain
+			// decodable. Same-length corruption preserves record sizes;
+			// eager decoding must not be needed to find the requested page.
+			for _, tc := range cases {
+				keep := map[string]bool{tc.cursor: true}
+				for offset := range 5 {
+					keep[articles[tc.first-offset].ID] = true
+				}
+				if err := s.backend.(*boltBackend).db.Update(func(tx *bolt.Tx) error {
+					ab := tx.Bucket(articlesBucket)
+					for _, article := range articles {
+						data, marshalErr := json.Marshal(article)
+						if marshalErr != nil {
+							return marshalErr
+						}
+						if !keep[article.ID] {
+							data = bytes.Repeat([]byte{'!'}, len(data))
+						}
+						if putErr := ab.Put([]byte(article.ID), data); putErr != nil {
+							return putErr
+						}
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				for _, feedID := range []string{"f", ""} {
+					t.Run(fmt.Sprintf("feed_%q/%s", feedID, tc.name), func(t *testing.T) {
+						page, err := s.GetArticlesWithCursor(feedID, 5, tc.cursor)
+						if err != nil || len(page) != 5 {
+							t.Fatalf("page = %v, %v", page, err)
+						}
+						for offset, article := range page {
+							if want := articles[tc.first-offset].ID; article.ID != want {
+								t.Errorf("article %d = %q, want %q", offset, article.ID, want)
+							}
+						}
+						// Expanding the page must encounter the corrupt next
+						// record, not silently skip it and scan for a later one.
+						_, err = s.GetArticlesWithCursor(feedID, 6, tc.cursor)
+						var syntaxErr *json.SyntaxError
+						if !errors.As(err, &syntaxErr) {
+							t.Fatalf("expanded page error = %v, want JSON syntax error", err)
+						}
+					})
+				}
 			}
 		})
 	}
-	appendArticles(0, 20)
-	small := measure()
-	appendArticles(20, 4000)
-	large := measure()
-	if large > small+30 {
-		t.Fatalf("page allocations scaled with feed size: small %.0f, large %.0f", small, large)
+}
+
+// Allocation totals include B-tree cursor stacks, which depend on page size
+// and tree depth even when only a fixed number of articles are decoded. Keep
+// those totals visible as benchmarks rather than a platform-specific CI gate.
+func BenchmarkFeedPageDecodeAllocations(b *testing.B) {
+	for _, pageSize := range []int{4096, 16384} {
+		for _, total := range []int{20, 4000} {
+			b.Run(fmt.Sprintf("page_size_%d/articles_%d", pageSize, total), func(b *testing.B) {
+				s := newPageSizeStore(b, pageSize)
+				if err := s.SaveArticles(pageDecodeFixture(total)); err != nil {
+					b.Fatal(err)
+				}
+				b.ReportAllocs()
+				b.ResetTimer()
+				for range b.N {
+					page, err := s.GetArticlesWithCursor("f", 5, "a-00009")
+					if err != nil || len(page) != 5 {
+						b.Fatalf("page = %v, %v", page, err)
+					}
+				}
+			})
+		}
 	}
 }
