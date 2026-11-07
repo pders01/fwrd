@@ -145,9 +145,17 @@ func openRemote(ep ipc.Endpoint, cfg *config.Config) (*Session, error) {
 		return nil, fmt.Errorf("connect to serve: %w", err)
 	}
 
+	// Keep long-running feed operations off the storage connection so reads
+	// and reader-state changes remain responsive during a refresh/import.
+	operations, err := ipc.NewClient(ep.Address, ep.DatabaseID)
+	if err != nil {
+		_ = client.Close()
+		return nil, fmt.Errorf("connect feed operations to serve: %w", err)
+	}
 	return &Session{
-		Store:  storage.NewRPCStore(client),
-		Feeds:  newRemoteOps(client, cfg),
-		client: client,
+		Store:   storage.NewRPCStore(client),
+		Feeds:   newRemoteOps(operations, cfg),
+		client:  client,
+		closers: []io.Closer{operations},
 	}, nil
 }
