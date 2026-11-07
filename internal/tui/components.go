@@ -2,13 +2,14 @@ package tui
 
 import (
 	"github.com/charmbracelet/lipgloss"
+	"github.com/pders01/fwrd/internal/terminaltext"
 )
 
 // renderHeader returns a consistently styled header with an optional muted subtitle.
 // Width is used to guide truncation via helpers.
 func renderHeader(title, subtitle string, width int) string {
-	title = truncateEnd(title, width-2)
-	subtitle = truncateEnd(subtitle, width-2)
+	title = truncateEnd(terminaltext.Safe(title), width-2)
+	subtitle = truncateEnd(terminaltext.Safe(subtitle), width-2)
 	rows := []string{HeaderStyle.Render(title)}
 	if subtitle != "" {
 		rows = append(rows, renderMuted(subtitle))
@@ -47,7 +48,7 @@ func renderCentered(width, height int, content string) string {
 
 // renderMuted renders text in muted color (utility wrapper).
 func renderMuted(text string) string {
-	return lipgloss.NewStyle().Foreground(MutedColor).Render(text)
+	return lipgloss.NewStyle().Foreground(MutedColor).Render(terminaltext.Safe(text))
 }
 
 // renderHelp renders help/instructional text consistently.
@@ -105,10 +106,10 @@ func getSeparatorWidth(totalWidth int) int {
 
 // truncateForSubtitle truncates text to fit in subtitle space.
 func truncateForSubtitle(text string, totalWidth int) string {
-	return truncateEnd(text, totalWidth-10) // Standard subtitle margin
+	return truncateEnd(terminaltext.Safe(text), totalWidth-10) // Standard subtitle margin
 }
 
 // truncateForModal truncates text to fit in modal with padding.
 func truncateForModal(text string, modalWidth int) string {
-	return truncateEnd(text, modalWidth-4) // Modal content padding
+	return truncateEnd(terminaltext.Safe(text), modalWidth-4) // Modal content padding
 }

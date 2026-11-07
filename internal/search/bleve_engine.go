@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/blevesearch/bleve/v2"
@@ -73,6 +74,12 @@ type bleveEngine struct {
 	store   *storage.Store
 	idx     bleve.Index
 	pending *bleve.Batch
+	// scopeMu is held from BeginBatch through CommitBatch, not just for
+	// individual callbacks: a second refresh must never replace pending.
+	scopeMu  sync.Mutex
+	mu       sync.RWMutex // index lifetime and pending batch contents
+	closed   bool
+	closeErr error
 }
 
 // NewBleveEngine creates or opens a Bleve index at indexPath and indexes
@@ -128,6 +135,7 @@ func newBleveEngine(store *storage.Store, indexPath string, permissive bool) (Se
 	if needsReindex {
 		if err := be.reindexAll(); err != nil {
 			debuglog.Errorf("reindexAll failed: %v", err)
+			_ = idx.Close()
 			return nil, err
 		}
 	} else {
@@ -330,6 +338,11 @@ func (b *bleveEngine) commitBatch(batch *bleve.Batch) error {
 }
 
 func (b *bleveEngine) Search(query string, limit int) ([]*Result, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.closed {
+		return nil, errors.New("search index is closed")
+	}
 	if len(strings.TrimSpace(query)) < 2 {
 		return []*Result{}, nil
 	}
@@ -401,21 +414,15 @@ func (b *bleveEngine) Search(query string, limit int) ([]*Result, error) {
 			r.Feed = f
 			r.IsArticle = false
 		} else if id, ok := strings.CutPrefix(h.ID, docPrefixArticle); ok {
-			a := &storage.Article{ID: id}
-			if t, ok := h.Fields["title"].(string); ok {
-				a.Title = t
+			// The index is a locator, not the authoritative reader record.
+			// Content, media, publication time and read/star state aren't all
+			// stored in Bleve and may have changed since the last refresh.
+			a, err := b.store.GetArticle(id)
+			if err != nil || a == nil {
+				continue // a stale hit can outlive deletion from the store
 			}
-			if d, ok := h.Fields["description"].(string); ok {
-				a.Description = d
-			}
-			if u, ok := h.Fields["url"].(string); ok {
-				a.URL = u
-			}
-			if fid, ok := h.Fields["feed_id"].(string); ok {
-				a.FeedID = fid
-				if f, err := b.store.GetFeed(fid); err == nil {
-					r.Feed = f
-				}
+			if f, err := b.store.GetFeed(a.FeedID); err == nil {
+				r.Feed = f
 			}
 			r.Article = a
 			r.IsArticle = true
@@ -432,6 +439,11 @@ func (b *bleveEngine) Search(query string, limit int) ([]*Result, error) {
 }
 
 func (b *bleveEngine) SearchInArticle(article *storage.Article, query string) ([]*Result, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.closed {
+		return nil, errors.New("search index is closed")
+	}
 	if len(strings.TrimSpace(query)) < 2 || article == nil {
 		return []*Result{}, nil
 	}
@@ -447,6 +459,11 @@ func (b *bleveEngine) SearchInArticle(article *storage.Article, query string) ([
 
 // OnDataUpdated indexes the provided feed and its articles using memory-efficient chunking.
 func (b *bleveEngine) OnDataUpdated(feed *storage.Feed, articles []*storage.Article) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return
+	}
 	var batch *bleve.Batch
 	if b.pending != nil {
 		batch = b.pending
@@ -509,6 +526,11 @@ func (b *bleveEngine) OnDataUpdated(feed *storage.Feed, articles []*storage.Arti
 
 // DocCount reports total documents in the index.
 func (b *bleveEngine) DocCount() (int, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.closed {
+		return 0, errors.New("search index is closed")
+	}
 	q := bleve.NewMatchAllQuery()
 	req := bleve.NewSearchRequestOptions(q, 0, 0, false)
 	res, err := b.idx.Search(req)
@@ -526,6 +548,14 @@ func (b *bleveEngine) DocCount() (int, error) {
 // is now at position 0. The maxIterations guard caps the loop in the
 // event a Delete silently fails and the same hits keep reappearing.
 func (b *bleveEngine) OnFeedDeleted(feedID string) {
+	// A delete must not be followed by resurrection from an older batch.
+	b.scopeMu.Lock()
+	defer b.scopeMu.Unlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return
+	}
 	_ = b.idx.Delete(docIDForFeed(feedID))
 
 	tq := bleve.NewTermQuery(feedID)
@@ -558,8 +588,18 @@ var _ interface {
 	CommitBatch()
 } = (*bleveEngine)(nil)
 
-func (b *bleveEngine) BeginBatch() { b.pending = b.idx.NewBatch() }
+func (b *bleveEngine) BeginBatch() {
+	b.scopeMu.Lock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.closed {
+		b.pending = b.idx.NewBatch()
+	}
+}
 func (b *bleveEngine) CommitBatch() {
+	defer b.scopeMu.Unlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if b.pending != nil {
 		if err := b.idx.Batch(b.pending); err != nil {
 			debuglog.Errorf("Error committing batch in CommitBatch: %v", err)
@@ -569,7 +609,17 @@ func (b *bleveEngine) CommitBatch() {
 }
 
 // Close closes the underlying index
-func (b *bleveEngine) Close() error { return b.idx.Close() }
+func (b *bleveEngine) Close() error {
+	b.scopeMu.Lock()
+	defer b.scopeMu.Unlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.closed {
+		b.closed = true
+		b.closeErr = b.idx.Close()
+	}
+	return b.closeErr
+}
 
 func docIDForFeed(feedID string) string   { return docPrefixFeed + feedID }
 func docIDForArticle(artID string) string { return docPrefixArticle + artID }

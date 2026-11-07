@@ -26,6 +26,7 @@ import (
 	pluginlua "github.com/pders01/fwrd/internal/plugins/lua"
 	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/storage"
+	"github.com/pders01/fwrd/internal/terminaltext"
 )
 
 // debugLogger adapts the package-level debuglog API to plugins/lua's
@@ -76,6 +77,9 @@ type App struct {
 	height          int
 	err             error
 	glamourRenderer *glamour.TermRenderer
+	renderMu        sync.Mutex // Glamour renderers need exclusive Render ownership
+	renderSeq       uint64
+	renderErr       error
 	rendererWidth   int    // Track the width used for the renderer
 	themePref       string // user preference: "auto" / "light" / "dark"
 	glamourStyle    string // Resolved style passed to glamour ("dark"/"light"/NoTTY)
@@ -103,6 +107,7 @@ type App struct {
 
 	// Debounced search state
 	searchSeq            int
+	searchErr            error
 	pendingSearchQuery   string
 	searchDebounceMillis int
 
@@ -122,11 +127,22 @@ type App struct {
 	pluginWatcherCancel context.CancelFunc
 	pluginWatcherWG     sync.WaitGroup
 	shutdownOnce        sync.Once
+
+	// Register Cmds only when executed: an unexecuted Cmd cannot block Close.
+	workerMu      sync.Mutex
+	workerWG      sync.WaitGroup
+	workerDone    chan struct{}
+	commandCtx    context.Context
+	commandCancel context.CancelFunc
+	closed        bool
+	ownsSearch    bool
+	readIntents   map[string]*articleIntent
+	starIntents   map[string]*articleIntent
 }
 
 func NewApp(store *storage.Store, cfg *config.Config) *App {
 	manager := feed.NewManager(store, cfg)
-	return newApp(store, cfg, manager, &control.LocalOps{Store: store, Manager: manager}, false)
+	return newApp(store, cfg, manager, control.NewMutationCoordinator(&control.LocalOps{Store: store, Manager: manager}), false)
 }
 
 // NewAppWithSession constructs a TUI over either a local database or the IPC
@@ -183,6 +199,7 @@ func newApp(store *storage.Store, cfg *config.Config, manager *feed.Manager, fee
 	si := textinput.New()
 	si.Placeholder = "Search feeds and articles..."
 
+	commandCtx, commandCancel := context.WithCancel(context.Background())
 	app := &App{
 		config:   cfg,
 		store:    store,
@@ -206,6 +223,10 @@ func newApp(store *storage.Store, cfg *config.Config, manager *feed.Manager, fee
 		themePref:            cfg.UI.Theme,
 		glamourStyle:         resolveGlamourStyle(cfg.UI.Theme),
 		themeEvents:          make(chan struct{}, 1),
+		workerDone:           make(chan struct{}),
+		commandCtx:           commandCtx,
+		commandCancel:        commandCancel,
+		ownsSearch:           !remote,
 		icons:                NewIconSet(cfg.UI.Icons),
 	}
 
@@ -263,6 +284,9 @@ func newApp(store *storage.Store, cfg *config.Config, manager *feed.Manager, fee
 		if bs, ok := app.searchEngine.(feed.BatchScope); ok {
 			app.manager.RegisterBatchScope(bs)
 		}
+		if dl, ok := app.searchEngine.(feed.DeleteListener); ok {
+			app.manager.RegisterDeleteListener(dl)
+		}
 
 		pluginDir := pluginlua.DefaultPluginDir()
 		if err := pluginlua.EnsureDefaults(pluginDir); err != nil {
@@ -315,18 +339,43 @@ func (a *App) SetForceRefresh(force bool) {
 }
 
 // Close releases App-owned resources that outlive the Bubble Tea
-// program loop — currently the plugin hot-reload watcher. Safe to call
-// multiple times.
+// program loop, including in-flight commands and the owned search index.
+// Safe to call multiple times. It does not close the caller-owned Store.
 func (a *App) Close() {
 	a.shutdownOnce.Do(func() {
+		a.workerMu.Lock()
+		a.closed = true
+		if a.workerDone == nil {
+			a.workerDone = make(chan struct{})
+		}
+		close(a.workerDone)
+		themeCancel := a.themeWatchCancel
+		a.workerMu.Unlock()
+		if a.commandCancel != nil {
+			a.commandCancel()
+		}
+		if a.ownsSearch {
+			if coordinator, ok := a.feedOps.(*control.MutationCoordinator); ok {
+				coordinator.BeginShutdown()
+				coordinator.CancelOperations()
+			}
+		}
 		if a.pluginWatcherCancel != nil {
 			a.pluginWatcherCancel()
 		}
 		a.pluginWatcherWG.Wait()
-		if a.themeWatchCancel != nil {
-			a.themeWatchCancel()
+		if themeCancel != nil {
+			themeCancel()
 		}
 		a.themeWatchWG.Wait()
+		a.workerWG.Wait()
+		if a.ownsSearch {
+			if closer, ok := a.searchEngine.(interface{ Close() error }); ok {
+				if err := closer.Close(); err != nil {
+					debuglog.Warnf("closing search engine: %v", err)
+				}
+			}
+		}
 	})
 }
 
@@ -363,13 +412,23 @@ func (a *App) signalThemeChange() {
 // event and emits themeChangedMsg. Update re-issues this command after
 // each event so the watcher behaves like a long-lived subscription.
 func (a *App) waitThemeChange() tea.Cmd {
-	return func() tea.Msg {
-		_, ok := <-a.themeEvents
-		if !ok {
+	a.workerMu.Lock()
+	if a.workerDone == nil {
+		a.workerDone = make(chan struct{})
+	}
+	done, events := a.workerDone, a.themeEvents
+	a.workerMu.Unlock()
+	return a.worker(func() tea.Msg {
+		select {
+		case <-done:
+			return nil
+		case _, ok := <-events:
+			if ok {
+				return themeChangedMsg{}
+			}
 			return nil
 		}
-		return themeChangedMsg{}
-	}
+	})
 }
 
 // themeChangedMsg is dispatched by waitThemeChange when an external
@@ -423,6 +482,11 @@ func (a *App) Init() tea.Cmd {
 // observers. Both write to a.themeEvents. Cancelling the context shuts
 // them down via Close.
 func (a *App) startThemeWatchers() {
+	a.workerMu.Lock()
+	defer a.workerMu.Unlock()
+	if a.closed || a.themeWatchCancel != nil {
+		return
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a.themeWatchCancel = cancel
 
@@ -438,6 +502,12 @@ func (a *App) startThemeWatchers() {
 }
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	a.workerMu.Lock()
+	closed := a.closed
+	a.workerMu.Unlock()
+	if closed {
+		return a, nil
+	}
 	var cmds []tea.Cmd
 
 	// Keep spinner animated
@@ -464,6 +534,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			inputWidth = msg.Width
 		}
 		a.textInput.Width = inputWidth
+		a.searchInput.Width = getInputWidth(msg.Width)
 
 	case tea.KeyMsg:
 		return a.keyHandler.HandleKey(msg)
@@ -511,20 +582,26 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.articlesHasMore = msg.hasMore
 
 	case articleReadToggledMsg:
-		if msg.err != nil {
-			a.err = msg.err
-		} else if msg.article != nil {
-			msg.article.Read = msg.read
-		}
+		a.applyArticleIntent(msg.articleID, msg.seq, msg.read, msg.err, false)
 
 	case articleStarToggledMsg:
-		if msg.err != nil {
-			a.err = msg.err
-		} else if msg.article != nil {
-			msg.article.Starred = msg.starred
-		}
+		a.applyArticleIntent(msg.articleID, msg.seq, msg.starred, msg.err, true)
 
 	case articleRenderedMsg:
+		if msg.seq != a.renderSeq || a.currentArticle == nil || msg.articleID != a.currentArticle.ID || a.view != ViewReader {
+			return a, nil
+		}
+		if msg.err != nil {
+			a.err = msg.err
+			a.renderErr = msg.err
+			a.loadingArticle = false
+			a.stopSpinner()
+			return a, nil
+		}
+		if a.renderErr != nil && errors.Is(a.err, a.renderErr) {
+			a.err = nil
+		}
+		a.renderErr = nil
 		// loadingArticle is set on user-driven article opens (Enter from
 		// list / search) and stays false for in-place re-renders such as
 		// the theme-toggle path. On a fresh open we always jump to the
@@ -579,7 +656,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.stopSpinner()
 
 	case searchResultsMsg:
+		if msg.seq != a.searchSeq || (msg.articleID != "" && (a.currentArticle == nil || a.currentArticle.ID != msg.articleID)) {
+			return a, nil
+		}
 		if a.view == ViewSearch {
+			if msg.err != nil {
+				a.err = msg.err
+				a.searchErr = msg.err
+				return a, nil
+			}
+			if a.searchErr != nil && errors.Is(a.err, a.searchErr) {
+				a.err = nil
+			}
+			a.searchErr = nil
 			a.searchResults = msg.results
 			items := make([]list.Item, len(msg.results))
 			for i, result := range msg.results {
@@ -598,7 +687,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case searchDebounceFireMsg:
 		// Only fire if this is the latest scheduled search
-		if msg.seq == a.searchSeq {
+		if msg.seq == a.searchSeq && a.view == ViewSearch {
 			q := strings.TrimSpace(a.pendingSearchQuery)
 			if len(q) > 1 {
 				// Use context-aware search if we came from reader view
@@ -772,8 +861,6 @@ func (a *App) View() string {
 		)
 		content = renderCentered(a.width, a.height-3, body)
 	case ViewSearch:
-		a.searchInput.Width = getInputWidth(a.width)
-
 		// Build header + subtitle with engine/context
 		subtitle := "global"
 		if a.previousView == ViewReader && a.currentArticle != nil {
@@ -826,7 +913,7 @@ func (a *App) View() string {
 func (a *App) getCustomStatusBar() string {
 	// Highest priority: any error
 	if a.err != nil {
-		errorMsg := ErrorMessageStyle.Render(fmt.Sprintf("%s %v", a.icons.Error, a.err))
+		errorMsg := ErrorMessageStyle.Render(fmt.Sprintf("%s %s", a.icons.Error, terminaltext.Safe(a.err.Error())))
 
 		return StatusBarStyleWithPadding().
 			Width(a.width).
@@ -836,7 +923,7 @@ func (a *App) getCustomStatusBar() string {
 	// Next: spinner for ongoing operations (refresh, loading article)
 	if a.spinnerActive {
 		left := a.statusSpinner.View()
-		label := strings.TrimSpace(a.spinnerLabel)
+		label := strings.TrimSpace(terminaltext.Safe(a.spinnerLabel))
 		if label == "" {
 			label = "Working…"
 		}
@@ -850,7 +937,7 @@ func (a *App) getCustomStatusBar() string {
 	// Next: transient status message
 	if a.statusText != "" && time.Now().Before(a.statusUntil) {
 		st := a.statusStyle(a.statusKind)
-		statusMsg := st.Render(a.statusText)
+		statusMsg := st.Render(terminaltext.Safe(a.statusText))
 		return StatusBarStyleWithPadding().
 			Width(a.width).
 			Render(statusMsg)
@@ -938,24 +1025,24 @@ type feedItem struct {
 
 func (i feedItem) Title() string {
 	if i.feed.LastError != "" {
-		return i.feed.Title + " " + StatusErrorStyle.Render("✗ fetch failed")
+		return terminaltext.Safe(i.feed.Title) + " " + StatusErrorStyle.Render("✗ fetch failed")
 	}
-	return i.feed.Title
+	return terminaltext.Safe(i.feed.Title)
 }
 
 func (i feedItem) Description() string {
 	if i.feed.LastError == "" {
-		return i.feed.Description
+		return terminaltext.Safe(i.feed.Description)
 	}
 	line := "last refresh failed"
 	if !i.feed.LastErrorAt.IsZero() {
 		line += " " + i.feed.LastErrorAt.Format("Jan 2, 15:04")
 	}
-	line += ": " + truncateEnd(i.feed.LastError, defaultMaxDescriptionLength)
+	line += ": " + truncateEnd(terminaltext.Safe(i.feed.LastError), defaultMaxDescriptionLength)
 	return ErrorMessageStyle.Render(line)
 }
 
-func (i feedItem) FilterValue() string { return i.feed.Title }
+func (i feedItem) FilterValue() string { return terminaltext.Safe(i.feed.Title) }
 
 type articleItem struct {
 	article    *storage.Article
@@ -968,20 +1055,18 @@ func (i articleItem) Title() string {
 		star = StarStyle.Render("★ ")
 	}
 	if i.article.Read {
-		return star + ReadItemStyle.Render(i.article.Title)
+		return star + ReadItemStyle.Render(terminaltext.Safe(i.article.Title))
 	}
-	return star + UnreadItemStyle.Render("● "+i.article.Title)
+	return star + UnreadItemStyle.Render("● "+terminaltext.Safe(i.article.Title))
 }
 
 func (i articleItem) Description() string {
-	desc := i.article.Description
+	desc := terminaltext.Safe(i.article.Description)
 	limit := i.maxDescLen
 	if limit <= 0 {
 		limit = defaultMaxDescriptionLength
 	}
-	if len(desc) > limit {
-		desc = desc[:limit] + "…"
-	}
+	desc = truncateEnd(desc, limit)
 
 	timeStr := ""
 	if !i.article.Published.IsZero() {
@@ -991,7 +1076,7 @@ func (i articleItem) Description() string {
 	return renderMuted(desc) + timeStr
 }
 
-func (i articleItem) FilterValue() string { return i.article.Title }
+func (i articleItem) FilterValue() string { return terminaltext.Safe(i.article.Title) }
 
 type searchResultItem struct {
 	feed      *storage.Feed
@@ -1004,16 +1089,16 @@ func (i searchResultItem) Title() string {
 	icons := i.iconSet()
 	if i.isArticle {
 		if i.article.Read {
-			return ReadItemStyle.Render(withIcon(icons.Article, i.article.Title))
+			return ReadItemStyle.Render(withIcon(icons.Article, terminaltext.Safe(i.article.Title)))
 		}
 		marker := icons.Article
 		if marker == "" {
 			marker = icons.Unread
 		}
-		return UnreadItemStyle.Render(withIcon(marker, i.article.Title))
+		return UnreadItemStyle.Render(withIcon(marker, terminaltext.Safe(i.article.Title)))
 	}
 
-	return FeedTitleStyle.Render(withIcon(icons.Feed, i.feed.Title))
+	return FeedTitleStyle.Render(withIcon(icons.Feed, terminaltext.Safe(i.feed.Title)))
 }
 
 func (i searchResultItem) iconSet() IconSet {
@@ -1025,10 +1110,7 @@ func (i searchResultItem) iconSet() IconSet {
 
 func (i searchResultItem) Description() string {
 	if i.isArticle {
-		desc := i.article.Description
-		if len(desc) > searchResultDescLength {
-			desc = desc[:searchResultDescLength] + "…"
-		}
+		desc := truncateEnd(terminaltext.Safe(i.article.Description), searchResultDescLength)
 
 		// Show which feed this article belongs to
 		feedName := "Unknown Feed"
@@ -1047,15 +1129,15 @@ func (i searchResultItem) Description() string {
 		return renderMuted(desc + " • from " + feedName + " • " + timeStr)
 	}
 
-	url := truncateMiddle(i.feed.URL, 80)
+	url := truncateMiddle(terminaltext.Safe(i.feed.URL), 80)
 	return renderMuted(url)
 }
 
 func (i searchResultItem) FilterValue() string {
 	if i.isArticle {
-		return i.article.Title + " " + i.article.Description
+		return terminaltext.Safe(i.article.Title + " " + i.article.Description)
 	}
-	return i.feed.Title + " " + i.feed.Description
+	return terminaltext.Safe(i.feed.Title + " " + i.feed.Description)
 }
 
 type mediaItem struct {
@@ -1097,12 +1179,12 @@ func (i mediaItem) Title() string {
 
 func (i mediaItem) Description() string {
 	// Show truncated URL
-	url := truncateMiddle(i.url, 80)
+	url := truncateMiddle(terminaltext.Safe(i.url), 80)
 	return url
 }
 
 func (i mediaItem) FilterValue() string {
-	return i.url
+	return terminaltext.Safe(i.url)
 }
 
 type feedsLoadedMsg struct {
@@ -1125,9 +1207,10 @@ type articlesLoadedMsg struct {
 // SetItem call is needed and the user's selection / scroll position
 // stays put — unlike a full loadArticles reload which resets both.
 type articleReadToggledMsg struct {
-	article *storage.Article
-	err     error
-	read    bool
+	articleID string
+	seq       uint64
+	err       error
+	read      bool
 }
 
 // articleStarToggledMsg reports the result of an in-place star-state flip,
@@ -1135,13 +1218,17 @@ type articleReadToggledMsg struct {
 // on the Update goroutine and re-read on the next render frame, so the
 // list updates without a reload and the selection stays put.
 type articleStarToggledMsg struct {
-	article *storage.Article
-	err     error
-	starred bool
+	articleID string
+	seq       uint64
+	err       error
+	starred   bool
 }
 
 type articleRenderedMsg struct {
-	content string
+	articleID string
+	seq       uint64
+	content   string
+	err       error
 }
 
 type feedAddedMsg struct {
@@ -1159,7 +1246,10 @@ type feedDeletedMsg struct {
 }
 
 type searchResultsMsg struct {
-	results []searchResultItem
+	seq       int
+	articleID string
+	results   []searchResultItem
+	err       error
 }
 
 type feedRenamedMsg struct {

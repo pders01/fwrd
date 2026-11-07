@@ -35,6 +35,7 @@ func TestBleveEngineIndexesAndSearches(t *testing.T) {
 	idxPath := filepath.Join(dir, "index.bleve")
 	eng, err := newBleveEngine(store, idxPath, true)
 	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eng.(io.Closer).Close()) })
 
 	// Perform searches that should hit title/description/content
 	res, err := eng.Search("Golang", 10)
@@ -141,6 +142,7 @@ func TestBleveEngineOnFeedDeleted_RemovesAllArticles(t *testing.T) {
 
 	eng, err := newBleveEngine(store, filepath.Join(dir, "idx.bleve"), true)
 	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eng.(io.Closer).Close()) })
 
 	pre, err := eng.Search("victimsentinel", total)
 	require.NoError(t, err)

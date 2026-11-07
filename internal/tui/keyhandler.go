@@ -10,6 +10,7 @@ import (
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/media"
 	"github.com/pders01/fwrd/internal/search"
+	"github.com/pders01/fwrd/internal/terminaltext"
 	"github.com/pders01/fwrd/internal/validation"
 )
 
@@ -33,6 +34,12 @@ func NewKeyHandler(app *App, cfg *config.Config) *KeyHandler {
 }
 
 func (kh *KeyHandler) HandleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type == tea.KeyRunes {
+		msg.Runes = []rune(terminaltext.Safe(string(msg.Runes)))
+		if len(msg.Runes) == 0 {
+			return kh.app, nil
+		}
+	}
 	key := msg.String()
 
 	if kh.isInTextInputMode() {
@@ -152,6 +159,8 @@ func (kh *KeyHandler) delegateToTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		newVal := kh.sanitizeSearchInput(kh.app.searchInput.Value())
 		if newVal != prev {
+			kh.app.searchResults = nil
+			kh.app.searchList.SetItems(nil)
 			kh.app.pendingSearchQuery = newVal
 			kh.app.searchSeq++
 			seq := kh.app.searchSeq
@@ -216,7 +225,7 @@ func (kh *KeyHandler) handleFeedsCustomKeys(key string) (tea.Model, tea.Cmd, boo
 			if i, ok := kh.app.feedList.SelectedItem().(feedItem); ok {
 				kh.app.feedToRename = i.feed
 				kh.app.view = ViewRenameFeed
-				kh.app.textInput.SetValue(i.feed.Title)
+				kh.app.textInput.SetValue(terminaltext.Safe(i.feed.Title))
 				kh.app.textInput.Focus()
 				return kh.app, nil, true
 			}
@@ -416,6 +425,7 @@ func (kh *KeyHandler) handleDeleteConfirmKeys(key string) (tea.Model, tea.Cmd, b
 
 // selectSearchResult handles selection of search results
 func (kh *KeyHandler) selectSearchResult(result searchResultItem) (tea.Model, tea.Cmd) {
+	kh.app.searchSeq++ // any pending search belongs to the view being left
 	if result.isArticle {
 		// Validate article data
 		if result.article == nil {
@@ -458,10 +468,14 @@ func (kh *KeyHandler) navigateBack() (tea.Model, tea.Cmd) {
 		return kh.app, nil
 
 	case ViewSearch:
+		kh.app.searchSeq++
 		kh.app.view = kh.app.previousView
 		kh.app.searchInput.Reset()
 		kh.app.searchResults = []searchResultItem{}
 		kh.app.searchList.SetItems([]list.Item{})
+		if kh.app.view == ViewReader && kh.app.currentArticle != nil {
+			return kh.app, kh.app.renderArticle(kh.app.currentArticle)
+		}
 		return kh.app, nil
 
 	case ViewMedia:
@@ -485,6 +499,7 @@ func (kh *KeyHandler) navigateBack() (tea.Model, tea.Cmd) {
 		return kh.app, nil
 
 	case ViewReader:
+		kh.app.renderSeq++
 		// Clear any in-flight loading state so a delayed articleRenderedMsg
 		// arriving after navigation doesn't leave the spinner running.
 		kh.app.loadingArticle = false
@@ -506,6 +521,8 @@ func (kh *KeyHandler) navigateBack() (tea.Model, tea.Cmd) {
 
 // enterSearchMode transitions to search view
 func (kh *KeyHandler) enterSearchMode() (tea.Model, tea.Cmd) {
+	kh.app.searchSeq++
+	kh.app.renderSeq++
 	kh.app.previousView = kh.app.view
 	kh.app.view = ViewSearch
 	kh.app.searchInput.Reset()
@@ -525,7 +542,7 @@ func (kh *KeyHandler) enterSearchMode() (tea.Model, tea.Cmd) {
 
 // sanitizeSearchInput sanitizes and limits search input length
 func (kh *KeyHandler) sanitizeSearchInput(input string) string {
-	input = strings.TrimSpace(input)
+	input = strings.TrimSpace(terminaltext.Safe(input))
 
 	// Length limit for search queries
 	if len(input) > 256 {
@@ -588,7 +605,7 @@ func (kh *KeyHandler) openMediaList() (tea.Model, tea.Cmd) {
 	title := "› media"
 	if kh.app.currentArticle != nil && kh.app.currentArticle.Title != "" {
 		// Truncate title if too long
-		articleTitle := kh.app.currentArticle.Title
+		articleTitle := terminaltext.Safe(kh.app.currentArticle.Title)
 		if len(articleTitle) > 50 {
 			articleTitle = articleTitle[:47] + "..."
 		}
@@ -600,12 +617,13 @@ func (kh *KeyHandler) openMediaList() (tea.Model, tea.Cmd) {
 }
 
 func (kh *KeyHandler) openURL(url string) tea.Cmd {
-	return func() tea.Msg {
-		if err := kh.app.launcher.Open(url); err != nil {
+	launcher := kh.app.launcher
+	return kh.app.worker(func() tea.Msg {
+		if err := launcher.Open(url); err != nil {
 			return errorMsg{err: fmt.Errorf("failed to open %s: %w", url, err)}
 		}
 		return nil
-	}
+	})
 }
 
 // GetHelpForCurrentView returns only our custom help text (Charm handles the rest)

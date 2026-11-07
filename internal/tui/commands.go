@@ -10,16 +10,18 @@ import (
 	"github.com/pders01/fwrd/internal/debuglog"
 	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/storage"
+	"github.com/pders01/fwrd/internal/terminaltext"
 )
 
 func (a *App) loadFeeds() tea.Cmd {
-	return func() tea.Msg {
-		feeds, err := a.store.GetAllFeeds()
+	store := a.store
+	return a.worker(func() tea.Msg {
+		feeds, err := store.GetAllFeeds()
 		if err != nil {
 			return errorMsg{err: err}
 		}
 		return feedsLoadedMsg{feeds: feeds}
-	}
+	})
 }
 
 func (a *App) loadArticles(feedID string) tea.Cmd {
@@ -48,7 +50,7 @@ func (a *App) loadArticlesPage(feedID, cursor string, appendPage bool) tea.Cmd {
 	seq := a.articlesSeq
 	limit := pickPositive(a.config.UI.Article.ListLimit, DefaultArticleLimit)
 	store := a.store
-	return func() tea.Msg {
+	return a.worker(func() tea.Msg {
 		articles, err := store.GetArticlesWithCursor(feedID, limit, cursor)
 		if err != nil {
 			return articlesLoadedMsg{feedID: feedID, seq: seq, appendPage: appendPage, err: wrapErr("load articles", err)}
@@ -67,7 +69,7 @@ func (a *App) loadArticlesPage(feedID, cursor string, appendPage bool) tea.Cmd {
 			cursor:     nextCursor,
 			hasMore:    hasMore,
 		}
-	}
+	})
 }
 
 // articleListPrefetchMargin is how many items from the bottom of the
@@ -108,10 +110,11 @@ const (
 func sanitizeAndLimitContent(content string, maxSize int) string {
 	if len(content) > maxSize {
 		debuglog.Warnf("Content size (%d bytes) exceeds limit (%d bytes), truncating", len(content), maxSize)
-		truncated := content[:maxSize-100] // Leave room for truncation message
-		return truncated + "\n\n**[Content truncated due to size limit]**"
+		truncated := strings.ToValidUTF8(content[:max(0, maxSize-100)], "") // Leave room for truncation message
+		// Safe discards any control sequence cut short at the size limit.
+		return terminaltext.Safe(truncated) + "\n\n**[Content truncated due to size limit]**"
 	}
-	return content
+	return terminaltext.Safe(content)
 }
 
 func (a *App) renderArticle(article *storage.Article) tea.Cmd {
@@ -121,7 +124,12 @@ func (a *App) renderArticle(article *storage.Article) tea.Cmd {
 	// App fields concurrently with Update — capturing r and rerr by
 	// value avoids a race against tea.WindowSizeMsg handling.
 	r, rerr := a.getRenderer()
-	return func() tea.Msg {
+	a.renderSeq++
+	seq := a.renderSeq
+	article = snapshotArticle(article)
+	id := article.ID
+	renderMu := &a.renderMu
+	return a.worker(func() tea.Msg {
 		var content strings.Builder
 
 		// Apply size limits for security and performance
@@ -155,80 +163,99 @@ func (a *App) renderArticle(article *storage.Article) tea.Cmd {
 		}
 
 		if rerr != nil {
-			return articleRenderedMsg{content: "Error initializing renderer: " + rerr.Error()}
+			return articleRenderedMsg{articleID: id, seq: seq, err: wrapErr("initialize renderer", rerr)}
 		}
 
-		rendered, err := r.Render(content.String())
+		// Cached Glamour renderers hold mutable buffers. Every Cmd sharing
+		// one must own it exclusively for the entire Render call.
+		renderMu.Lock()
+		rendered, err := r.Render(safeMarkdownInput(content.String()))
+		renderMu.Unlock()
 		if err != nil {
 			// Return articleRenderedMsg with error message for consistency
 			// This ensures loadingArticle flag is always cleared
-			return articleRenderedMsg{content: fmt.Sprintf("# Error\n\nFailed to render article: %s\n\nPress Escape to go back.", err.Error())}
+			return articleRenderedMsg{articleID: id, seq: seq, err: wrapErr("render article", err)}
 		}
 
 		// Read-state side-effect lives in markArticleRead, which is
 		// dispatched alongside this command from the article-open path.
 		// Duplicating the write here was a relic from before that split.
 
-		return articleRenderedMsg{content: rendered}
-	}
+		return articleRenderedMsg{articleID: id, seq: seq, content: rendered}
+	})
 }
 
 func (a *App) addFeed(url string) tea.Cmd {
-	return func() tea.Msg {
-		url = strings.TrimSpace(url)
-		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-			url = "https://" + url
-		}
-
-		if a.feedOps == nil {
+	ops, store, ctx := a.feedOps, a.store, a.commandContext()
+	url = strings.TrimSpace(url)
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		url = "https://" + url
+	}
+	return a.worker(func() tea.Msg {
+		if ops == nil {
 			return feedAddedMsg{err: fmt.Errorf("feed operations are unavailable")}
 		}
-		newFeed, err := a.feedOps.AddFeed(context.Background(), url)
+		newFeed, err := ops.AddFeed(ctx, url)
 		if err != nil {
 			return feedAddedMsg{err: wrapErr("add feed", err)}
 		}
 
 		// Pull article count from the store; the active local/remote operation
 		// has already persisted them and notified search-index listeners.
-		articles, _ := a.store.GetArticles(newFeed.ID, 0)
+		articles, _ := store.GetArticles(newFeed.ID, 0)
 		return feedAddedMsg{err: nil, added: len(articles), title: newFeed.Title}
-	}
+	})
 }
 
 func (a *App) renameFeed(newTitle string) tea.Cmd {
-	return func() tea.Msg {
-		if a.feedToRename == nil {
+	id := ""
+	if a.feedToRename != nil {
+		id = a.feedToRename.ID
+	}
+	store, engine, ops, ctx := a.store, a.searchEngine, a.feedOps, a.commandContext()
+	newTitle = strings.TrimSpace(newTitle)
+	return a.worker(func() tea.Msg {
+		if id == "" {
 			return feedRenamedMsg{err: fmt.Errorf("no feed selected for rename")}
 		}
-		f := *a.feedToRename
-		f.Title = strings.TrimSpace(newTitle)
-		if f.Title == "" {
+		if newTitle == "" {
 			return feedRenamedMsg{err: fmt.Errorf("title cannot be empty")}
 		}
-		f.UpdatedAt = time.Now()
-		if err := a.store.SaveFeed(&f); err != nil {
+		// Local construction uses the coordinator so rename + notification
+		// cannot interleave with a refresh batch. Remote stores route this
+		// same atomic operation to the server's coordinator through RPC.
+		if renamer, ok := ops.(interface {
+			RenameFeed(context.Context, string, string) (*storage.Feed, error)
+		}); ok {
+			_, err := renamer.RenameFeed(ctx, id, newTitle)
 			return feedRenamedMsg{err: err}
 		}
-		// Notify search engine about renamed feed so the index reflects the new title
-		if ul, ok := a.searchEngine.(search.UpdateListener); ok {
-			ul.OnDataUpdated(&f, nil)
+		f, err := store.RenameFeed(id, newTitle)
+		if err != nil {
+			return feedRenamedMsg{err: err}
 		}
-		return feedRenamedMsg{err: nil}
-	}
+		// Local engines need the committed record. Remote Store.RenameFeed
+		// notifies serve's index via RPC; its TUI fallback has no listener.
+		if ul, ok := engine.(search.UpdateListener); ok {
+			ul.OnDataUpdated(f, nil)
+		}
+		return feedRenamedMsg{}
+	})
 }
 
 func (a *App) refreshFeeds() tea.Cmd {
-	return func() tea.Msg {
-		if a.feedOps == nil {
+	ops, engine, force, ctx := a.feedOps, a.searchEngine, a.forceRefresh, a.commandContext()
+	return a.worker(func() tea.Msg {
+		if ops == nil {
 			return errorMsg{err: fmt.Errorf("feed operations are unavailable")}
 		}
-		summary, err := a.feedOps.RefreshAllFeeds(context.Background(), a.forceRefresh)
+		summary, err := ops.RefreshAllFeeds(ctx, force)
 		if err != nil && len(summary.Errors) == 0 {
 			return errorMsg{err: wrapErr("refresh feeds", err)}
 		}
 
 		docCount := -1
-		if ds, ok := a.searchEngine.(search.DebugStatser); ok {
+		if ds, ok := engine.(search.DebugStatser); ok {
 			if n, err := ds.DocCount(); err == nil {
 				docCount = n
 			}
@@ -240,54 +267,32 @@ func (a *App) refreshFeeds() tea.Cmd {
 			errors:        len(summary.Errors),
 			docCount:      docCount,
 		}
-	}
+	})
 }
 
 func (a *App) toggleRead(article *storage.Article) tea.Cmd {
-	return func() tea.Msg {
-		newState := !article.Read
-		if err := a.store.MarkArticleRead(article.ID, newState); err != nil {
-			return articleReadToggledMsg{article: article, err: err}
-		}
-		return articleReadToggledMsg{article: article, read: newState}
-	}
+	return a.changeArticleState(article, false, true)
 }
 
 func (a *App) toggleStarred(article *storage.Article) tea.Cmd {
-	return func() tea.Msg {
-		newState := !article.Starred
-		if err := a.store.MarkArticleStarred(article.ID, newState); err != nil {
-			return articleStarToggledMsg{article: article, err: err}
-		}
-		return articleStarToggledMsg{article: article, starred: newState}
-	}
+	return a.changeArticleState(article, true, true)
 }
 
 func (a *App) markArticleRead(article *storage.Article) tea.Cmd {
-	return func() tea.Msg {
-		if !article.Read {
-			if err := a.store.MarkArticleRead(article.ID, true); err != nil {
-				return errorMsg{err: err}
-			}
-			article.Read = true
-		}
-		return nil
-	}
+	return a.changeArticleState(article, false, false)
 }
 
 func (a *App) deleteFeed(feedID string) tea.Cmd {
-	return func() tea.Msg {
-		if a.feedOps == nil {
+	ops, ctx := a.feedOps, a.commandContext()
+	return a.worker(func() tea.Msg {
+		if ops == nil {
 			return feedDeletedMsg{err: fmt.Errorf("feed operations are unavailable")}
 		}
-		if err := a.feedOps.DeleteFeed(context.Background(), feedID); err != nil {
+		if err := ops.DeleteFeed(ctx, feedID); err != nil {
 			return feedDeletedMsg{err: wrapErr("delete feed", err)}
 		}
-		if dl, ok := a.searchEngine.(search.DeleteListener); ok {
-			dl.OnFeedDeleted(feedID)
-		}
 		return feedDeletedMsg{err: nil}
-	}
+	})
 }
 
 func (a *App) performSearch(query string) tea.Cmd {
@@ -295,24 +300,34 @@ func (a *App) performSearch(query string) tea.Cmd {
 }
 
 func (a *App) performSearchWithContext(query, searchContext string) tea.Cmd {
-	return func() tea.Msg {
+	a.searchSeq++
+	seq, engine, icons := a.searchSeq, a.searchEngine, a.icons
+	var article *storage.Article
+	id := ""
+	if searchContext == "article" {
+		article = snapshotArticle(a.currentArticle)
+		if article != nil {
+			id = article.ID
+		}
+	}
+	return a.worker(func() tea.Msg {
 		// Use the new intelligent search engine
 		var searchResults []*search.Result
 		var err error
 
-		if searchContext == "article" && a.currentArticle != nil {
-			// Search within current article
-			searchResults, err = a.searchEngine.SearchInArticle(a.currentArticle, query)
+		if article != nil {
+			// Search a detached snapshot, never a live model pointer.
+			searchResults, err = engine.SearchInArticle(article, query)
 			// If no results in-article, fall back to global to avoid empty UX
 			if err == nil && len(searchResults) == 0 {
-				searchResults, err = a.searchEngine.Search(query, defaultSearchResultLimit)
+				searchResults, err = engine.Search(query, defaultSearchResultLimit)
 			}
 		} else {
-			searchResults, err = a.searchEngine.Search(query, defaultSearchResultLimit)
+			searchResults, err = engine.Search(query, defaultSearchResultLimit)
 		}
 
 		if err != nil {
-			return errorMsg{err: err}
+			return searchResultsMsg{seq: seq, articleID: id, err: err}
 		}
 
 		// Convert search engine results to UI results
@@ -322,10 +337,10 @@ func (a *App) performSearchWithContext(query, searchContext string) tea.Cmd {
 				feed:      sr.Feed,
 				article:   sr.Article,
 				isArticle: sr.IsArticle,
-				icons:     &a.icons,
+				icons:     &icons,
 			})
 		}
 
-		return searchResultsMsg{results: results}
-	}
+		return searchResultsMsg{seq: seq, articleID: id, results: results}
+	})
 }
