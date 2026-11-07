@@ -175,6 +175,10 @@ feed CLI command targeting the same `--db` automatically connects to that
 `serve` process over local IPC, so they can run concurrently without bypassing
 its feed plugins or search-index updates. A second `serve` for the same database
 is still rejected because BoltDB and Bleve each require a single owner.
+Storage reads use a separate connection from long-running feed operations, so
+refreshes do not block browsing. Idle connections stay open; read-only requests
+can reconnect and retry once after a dropped connection. Mutations are never
+replayed automatically, since a lost response can hide a committed operation.
 
 #### Exposing the web view
 

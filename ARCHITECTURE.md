@@ -47,6 +47,8 @@ Handles high-performance local data persistence:
 - **Optimized indexes**: Published-date index for efficient article sorting
 - **Models**: Struct definitions for feeds, articles with comprehensive metadata
 - **Store**: Database operations abstraction with transaction management
+- **Refresh merges**: Fetched content and existing read/starred flags are merged
+  in one bbolt write transaction; new articles keep their onboarding state
 
 ### internal/tui
 Implements the sophisticated terminal user interface:
@@ -114,6 +116,15 @@ it. It reaches near-parity with the other front-ends:
   connects to it over per-database local IPC; reads use an RPC-backed store and
   mutations run through the serve-side manager/coordinator. A second `serve`
   on the same database remains mutually exclusive
+- **IPC reliability**: Storage and long-running feed operations use separate
+  persistent connections. Idle connections remain open; handshake and partial
+  frame reads are bounded. Calls include queueing/reconnection in their timeout,
+  support cancellation, and retry read-only methods at most once after a
+  transport failure. Mutations are never automatically replayed because a lost
+  response does not establish whether they committed
+- **TUI pagination**: Results and failures carry feed/request identities so stale
+  responses cannot replace another feed's list. Failed pages retain their cursor
+  and loaded items for a subsequent user-triggered retry
 
 ### internal/validation
 Provides comprehensive security validation:
