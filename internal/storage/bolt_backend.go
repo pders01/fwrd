@@ -176,26 +176,41 @@ func (b *boltBackend) FeedStats() (map[string]FeedStat, error) {
 }
 
 func (b *boltBackend) SaveArticles(articles []*Article) error {
-	return b.db.Update(func(tx *bolt.Tx) error {
+	_, err := b.saveArticles(articles, false)
+	return err
+}
+
+func (b *boltBackend) MergeArticles(articles []*Article) ([]*Article, error) {
+	return b.saveArticles(articles, true)
+}
+
+func (b *boltBackend) saveArticles(articles []*Article, preserveState bool) ([]*Article, error) {
+	saved := make([]*Article, 0, len(articles))
+	err := b.db.Update(func(tx *bolt.Tx) error {
 		ab := tx.Bucket(articlesBucket)
 		idxRoot := tx.Bucket(articlesByFeedBucket)
 		dateIdx := tx.Bucket(articlesByDateBucket)
-		for _, article := range articles {
-			data, err := json.Marshal(article)
-			if err != nil {
-				return err
+		for _, incoming := range articles {
+			if incoming == nil {
+				return fmt.Errorf("article must not be nil")
 			}
-			// Capture the prior record before overwriting so stale
-			// date-index keys are removed if Published changed.
+			// Work on a copy: a failed transaction must not change caller state.
+			article := *incoming
 			var prevPublished time.Time
 			hadPrev := false
-			if dateIdx != nil {
-				if existing := ab.Get([]byte(article.ID)); existing != nil {
-					var old Article
-					if json.Unmarshal(existing, &old) == nil {
-						prevPublished, hadPrev = old.Published, true
-					}
+			if existing := ab.Get([]byte(article.ID)); existing != nil {
+				var old Article
+				if err := json.Unmarshal(existing, &old); err != nil {
+					return fmt.Errorf("decode existing article %s: %w", article.ID, err)
 				}
+				prevPublished, hadPrev = old.Published, true
+				if preserveState {
+					article.Read, article.Starred = old.Read, old.Starred
+				}
+			}
+			data, err := json.Marshal(&article)
+			if err != nil {
+				return err
 			}
 			if err := ab.Put([]byte(article.ID), data); err != nil {
 				return err
@@ -224,9 +239,14 @@ func (b *boltBackend) SaveArticles(articles []*Article) error {
 					return err
 				}
 			}
+			saved = append(saved, &article)
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return saved, nil
 }
 
 func (b *boltBackend) GetArticle(id string) (*Article, error) {

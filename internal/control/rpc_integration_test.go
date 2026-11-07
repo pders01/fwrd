@@ -380,6 +380,7 @@ func TestRPCRejectsMalformedParamsWithoutStoppingServer(t *testing.T) {
 		params any
 	}{
 		{method: "SaveArticles", params: []*storage.Article{nil}},
+		{method: "MergeArticles", params: []*storage.Article{nil}},
 		{method: "SaveFeed", params: nil},
 		{method: "GetFeed", params: map[string]string{"id": ""}},
 		{method: "GetArticlesWithCursor", params: map[string]any{"limit": 0}},

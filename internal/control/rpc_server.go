@@ -354,7 +354,7 @@ func (s *RPCServer) dispatch(conn net.Conn, req *ipc.Request) {
 		}
 		s.writeResult(conn, req.ID, feeds)
 
-	case "SaveArticles":
+	case "SaveArticles", "MergeArticles":
 		var articles []*storage.Article
 		if err := s.decodeParams(req, &articles); err != nil {
 			s.writeError(conn, req.ID, ipc.CodeInvalidArg, err.Error())
@@ -362,6 +362,15 @@ func (s *RPCServer) dispatch(conn net.Conn, req *ipc.Request) {
 		}
 		if err := validateArticles(articles); err != nil {
 			s.writeError(conn, req.ID, ipc.CodeInvalidArg, err.Error())
+			return
+		}
+		if req.Method == "MergeArticles" {
+			saved, err := s.coordinator.MergeArticles(s.operations, articles)
+			if err != nil {
+				s.writeError(conn, req.ID, errorCode(err), err.Error())
+				return
+			}
+			s.writeResult(conn, req.ID, saved)
 			return
 		}
 		if err := s.coordinator.SaveArticles(s.operations, articles); err != nil {

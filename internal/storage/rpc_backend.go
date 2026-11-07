@@ -53,6 +53,14 @@ func (r *rpcBackend) SaveArticles(articles []*Article) error {
 	return r.call("SaveArticles", articles, nil)
 }
 
+func (r *rpcBackend) MergeArticles(articles []*Article) ([]*Article, error) {
+	var saved []*Article
+	if err := r.call("MergeArticles", articles, &saved); err != nil {
+		return nil, err
+	}
+	return saved, nil
+}
+
 func (r *rpcBackend) GetArticle(id string) (*Article, error) {
 	var article Article
 	if err := r.call("GetArticle", map[string]string{"id": id}, &article); err != nil {

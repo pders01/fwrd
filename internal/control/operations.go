@@ -86,6 +86,16 @@ func (l *LocalOps) SaveArticles(articles []*storage.Article) error {
 	return nil
 }
 
+// MergeArticles refreshes article content and indexes the committed records.
+func (l *LocalOps) MergeArticles(articles []*storage.Article) ([]*storage.Article, error) {
+	saved, err := l.Store.MergeArticles(articles)
+	if err != nil {
+		return nil, err
+	}
+	l.Manager.NotifyDataUpdated(nil, saved)
+	return saved, nil
+}
+
 func (l *LocalOps) ImportFeeds(ctx context.Context, urls []string) (ImportSummary, error) {
 	if err := ctx.Err(); err != nil {
 		return ImportSummary{}, err

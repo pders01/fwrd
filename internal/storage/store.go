@@ -108,6 +108,17 @@ func (s *Store) SaveArticles(articles []*Article) error {
 	return err
 }
 
+// MergeArticles refreshes content while atomically preserving the current
+// Read/Starred flags of existing articles. New articles keep their supplied
+// flags (including onboarding state). It returns the records actually saved.
+func (s *Store) MergeArticles(articles []*Article) ([]*Article, error) {
+	saved, err := s.backend.MergeArticles(articles)
+	if err == nil {
+		s.writeGen.Add(1)
+	}
+	return saved, err
+}
+
 // GetArticle fetches a single article by ID.
 func (s *Store) GetArticle(id string) (*Article, error) {
 	if s == nil || s.backend == nil {

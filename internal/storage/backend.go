@@ -21,6 +21,7 @@ type storeBackend interface {
 	GetFeed(id string) (*Feed, error)
 	GetAllFeeds() ([]*Feed, error)
 	SaveArticles(articles []*Article) error
+	MergeArticles(articles []*Article) ([]*Article, error)
 	GetArticle(id string) (*Article, error)
 	GetArticles(feedID string, limit int) ([]*Article, error)
 	GetArticlesWithCursor(feedID string, limit int, cursor string) ([]*Article, error)

@@ -26,7 +26,7 @@ func FuzzRPCDispatchMalformed(f *testing.F) {
 	}
 	defer client.Close()
 
-	methods := []string{"SaveFeed", "SaveArticles", "GetFeed", "GetArticle", "GetArticlesWithCursor", "MarkArticleRead", "ImportFeeds"}
+	methods := []string{"SaveFeed", "SaveArticles", "MergeArticles", "GetFeed", "GetArticle", "GetArticlesWithCursor", "MarkArticleRead", "ImportFeeds"}
 	f.Fuzz(func(t *testing.T, data []byte) {
 		var params any
 		if unmarshalErr := json.Unmarshal(data, &params); unmarshalErr != nil {

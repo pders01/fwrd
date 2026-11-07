@@ -149,6 +149,22 @@ func (c *MutationCoordinator) SaveArticles(ctx context.Context, articles []*stor
 	return ops.SaveArticles(articles)
 }
 
+// MergeArticles serializes content merges and their search notifications.
+func (c *MutationCoordinator) MergeArticles(ctx context.Context, articles []*storage.Article) ([]*storage.Article, error) {
+	_, done, err := c.operationContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	ops, ok := c.ops.(interface {
+		MergeArticles([]*storage.Article) ([]*storage.Article, error)
+	})
+	if !ok {
+		return nil, errors.New("primitive MergeArticles is unavailable")
+	}
+	return ops.MergeArticles(articles)
+}
+
 func (c *MutationCoordinator) ImportFeeds(ctx context.Context, urls []string) (ImportSummary, error) {
 	opCtx, done, err := c.operationContext(ctx)
 	if err != nil {

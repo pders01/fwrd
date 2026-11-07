@@ -335,11 +335,11 @@ func (m *Manager) refreshFeedByIDContext(ctx context.Context, feedID string, not
 	if err := m.store.SaveFeed(feed); err != nil {
 		return feed, nil, fmt.Errorf("saving feed: %w", err)
 	}
-	// Apply the subscription cutoff to newly discovered history, then merge
-	// existing state so an explicit reader action always wins.
+	// Apply the cutoff only to new history. Merge existing reader state in
+	// the same write transaction as content, so concurrent actions aren't lost.
 	applyOnboardingState(feed, articles)
-	m.preserveLocalArticleState(articles)
-	if err := m.store.SaveArticles(articles); err != nil {
+	articles, err = m.store.MergeArticles(articles)
+	if err != nil {
 		return feed, nil, fmt.Errorf("saving articles: %w", err)
 	}
 
@@ -364,23 +364,6 @@ func applyOnboardingState(feed *storage.Feed, articles []*storage.Article) {
 		if article.Published.IsZero() || !article.Published.After(feed.SubscribedAt) {
 			article.Read = true
 		}
-	}
-}
-
-// preserveLocalArticleState keeps refreshes from resetting state owned by the
-// reader. A lookup miss means the article is new; other article fields remain
-// parser-owned and are refreshed normally.
-func (m *Manager) preserveLocalArticleState(articles []*storage.Article) {
-	for _, article := range articles {
-		if article == nil {
-			continue
-		}
-		old, err := m.store.GetArticle(article.ID)
-		if err != nil || old == nil {
-			continue
-		}
-		article.Read = old.Read
-		article.Starred = old.Starred
 	}
 }
 
