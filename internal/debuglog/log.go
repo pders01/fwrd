@@ -3,9 +3,13 @@ package debuglog
 import (
 	"fmt"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+
+	"github.com/pders01/fwrd/internal/terminaltext"
 )
 
 // LogLevel represents the severity level of a log message
@@ -56,6 +60,7 @@ func ParseLogLevel(s string) LogLevel {
 }
 
 var (
+	stateMu      sync.RWMutex
 	currentLevel = LevelOff
 	logger       *log.Logger
 	logFile      *os.File
@@ -64,6 +69,8 @@ var (
 // Setup configures the logging system with the specified level and optional file path.
 // If filePath is empty, defaults to ~/.fwrd/fwrd.log.
 func Setup(level LogLevel, filePath ...string) error {
+	stateMu.Lock()
+	defer stateMu.Unlock()
 	currentLevel = level
 
 	// Close existing log file if open
@@ -72,8 +79,8 @@ func Setup(level LogLevel, filePath ...string) error {
 		logFile = nil
 	}
 
+	logger = nil
 	if level == LevelOff {
-		logger = nil
 		return nil
 	}
 
@@ -84,18 +91,22 @@ func Setup(level LogLevel, filePath ...string) error {
 	} else {
 		home, _ := os.UserHomeDir()
 		dir := filepath.Join(home, ".fwrd")
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("failed to create log directory: %w", err)
 		}
 		logPath = filepath.Join(dir, "fwrd.log")
 	}
 
 	// Open log file
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open log file %s: %w", logPath, err)
 	}
 
+	if chmodErr := f.Chmod(0o600); chmodErr != nil {
+		_ = f.Close()
+		return fmt.Errorf("protect log file: %w", chmodErr)
+	}
 	logFile = f
 	logger = log.New(f, "fwrd ", log.LstdFlags|log.Lmicroseconds)
 	return nil
@@ -122,16 +133,22 @@ func SetupWithBool(enabled bool) {
 
 // SetLevel changes the current logging level
 func SetLevel(level LogLevel) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
 	currentLevel = level
 }
 
 // GetLevel returns the current logging level
 func GetLevel() LogLevel {
+	stateMu.RLock()
+	defer stateMu.RUnlock()
 	return currentLevel
 }
 
 // Close closes the log file if open
 func Close() error {
+	stateMu.Lock()
+	defer stateMu.Unlock()
 	if logFile != nil {
 		err := logFile.Close()
 		logFile = nil
@@ -143,11 +160,13 @@ func Close() error {
 
 // logf writes a log message at the specified level
 func logf(level LogLevel, format string, args ...any) {
+	stateMu.RLock()
+	defer stateMu.RUnlock()
 	if level < currentLevel || logger == nil {
 		return
 	}
 
-	message := fmt.Sprintf(format, args...)
+	message := terminaltext.Safe(fmt.Sprintf(format, args...))
 	logger.Printf("[%s] %s", level.String(), message)
 }
 
@@ -176,7 +195,7 @@ type FieldLogger struct {
 
 // WithFields returns a new logger with the specified fields
 func WithFields(fields map[string]any) *FieldLogger {
-	return &FieldLogger{fields: fields}
+	return &FieldLogger{fields: maps.Clone(fields)}
 }
 
 // formatFields converts fields to a string representation
@@ -193,29 +212,17 @@ func (fl *FieldLogger) formatFields() string {
 }
 
 func (fl *FieldLogger) Debugf(format string, args ...any) {
-	if LevelDebug >= currentLevel && logger != nil {
-		message := fmt.Sprintf(format, args...) + fl.formatFields()
-		logf(LevelDebug, "%s", message)
-	}
+	logf(LevelDebug, "%s", fmt.Sprintf(format, args...)+fl.formatFields())
 }
 
 func (fl *FieldLogger) Infof(format string, args ...any) {
-	if LevelInfo >= currentLevel && logger != nil {
-		message := fmt.Sprintf(format, args...) + fl.formatFields()
-		logf(LevelInfo, "%s", message)
-	}
+	logf(LevelInfo, "%s", fmt.Sprintf(format, args...)+fl.formatFields())
 }
 
 func (fl *FieldLogger) Warnf(format string, args ...any) {
-	if LevelWarn >= currentLevel && logger != nil {
-		message := fmt.Sprintf(format, args...) + fl.formatFields()
-		logf(LevelWarn, "%s", message)
-	}
+	logf(LevelWarn, "%s", fmt.Sprintf(format, args...)+fl.formatFields())
 }
 
 func (fl *FieldLogger) Errorf(format string, args ...any) {
-	if LevelError >= currentLevel && logger != nil {
-		message := fmt.Sprintf(format, args...) + fl.formatFields()
-		logf(LevelError, "%s", message)
-	}
+	logf(LevelError, "%s", fmt.Sprintf(format, args...)+fl.formatFields())
 }

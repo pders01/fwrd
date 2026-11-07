@@ -2,8 +2,11 @@ package media
 
 import (
 	"fmt"
+	neturl "net/url"
 	"os/exec"
 	"runtime"
+	"strings"
+	"unicode"
 
 	"github.com/pders01/fwrd/internal/config"
 )
@@ -97,6 +100,9 @@ func NewLauncher(cfg *config.Config) *Launcher {
 }
 
 func (l *Launcher) Open(url string) error {
+	if err := validateURL(url); err != nil {
+		return err
+	}
 	mediaType := l.detector.DetectType(url)
 
 	var playerName string
@@ -136,7 +142,7 @@ func (l *Launcher) Open(url string) error {
 
 	cmd, err := l.registry.GetCommand(playerName, mediaType, url)
 	if err != nil {
-		cmd = exec.Command(playerName, url)
+		cmd = playerCommand(playerName, []string{url}, runtime.GOOS)
 	}
 
 	// Start GUI applications detached
@@ -149,6 +155,28 @@ func (l *Launcher) Open(url string) error {
 	}()
 
 	return nil
+}
+
+// validateURL restricts feed-provided launch targets to web resources. Never
+// pass local files, custom handlers, control bytes, or options to an opener.
+func validateURL(target string) error {
+	if target == "" || strings.TrimSpace(target) != target || strings.HasPrefix(target, "-") || strings.ContainsFunc(target, unicode.IsControl) {
+		return fmt.Errorf("invalid media URL")
+	}
+	u, err := neturl.Parse(target)
+	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("media URL must be an absolute HTTP(S) URL")
+	}
+	return nil
+}
+
+// start is a cmd.exe builtin, not an executable. Use the Windows URL handler
+// directly rather than a command shell, where URL metacharacters are unsafe.
+func playerCommand(player string, args []string, platform string) *exec.Cmd {
+	if platform == "windows" && strings.EqualFold(player, "start") {
+		return exec.Command("rundll32.exe", append([]string{"url.dll,FileProtocolHandler"}, args...)...)
+	}
+	return exec.Command(player, args...)
 }
 
 func findCommand(commands ...string) string {

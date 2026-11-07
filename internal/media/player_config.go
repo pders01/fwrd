@@ -78,9 +78,12 @@ func (r *PlayerRegistry) loadUserConfig() {
 }
 
 func (r *PlayerRegistry) GetCommand(playerName string, mediaType Type, url string) (*exec.Cmd, error) {
+	if err := validateURL(url); err != nil {
+		return nil, err
+	}
 	player, exists := r.players[playerName]
 	if !exists {
-		return exec.Command(playerName, url), nil
+		return playerCommand(playerName, []string{url}, runtime.GOOS), nil
 	}
 
 	supportsPlatform := false
@@ -111,10 +114,10 @@ func (r *PlayerRegistry) GetCommand(playerName string, mediaType Type, url strin
 		return nil, fmt.Errorf("%s doesn't support media type", playerName)
 	}
 
-	args := r.getArgs(config)
+	args := append([]string(nil), r.getArgs(config)...)
 	args = append(args, url)
 
-	return exec.Command(playerName, args...), nil
+	return playerCommand(playerName, args, runtime.GOOS), nil
 }
 
 func (r *PlayerRegistry) getArgs(config *PlayerMediaTypeConfig) []string {
