@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 )
 
@@ -53,16 +54,52 @@ func ListenEndpoint(endpoint Endpoint) (net.Listener, error) {
 		return nil, err
 	}
 
-	ln, err := net.Listen("unix", endpoint.Address)
+	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: endpoint.Address, Net: "unix"})
 	if err != nil {
 		return nil, fmt.Errorf("listen unix %s: %w", endpoint.Address, err)
 	}
-	if err := os.Chmod(endpoint.Address, 0o600); err != nil {
+	// net.UnixListener's default unlink-on-close does not establish that the
+	// pathname still identifies our socket. Retain its inode for safe cleanup.
+	ln.SetUnlinkOnClose(false)
+	info, err := os.Lstat(endpoint.Address)
+	if err != nil {
 		_ = ln.Close()
-		_ = RemoveEndpoint(endpoint.Address)
-		return nil, fmt.Errorf("chmod socket %s: %w", endpoint.Address, err)
+		return nil, fmt.Errorf("inspect bound socket: %w", err)
 	}
-	return ln, nil
+	owned := &ownedUnixListener{UnixListener: ln, path: endpoint.Address, info: info}
+	if chmodErr := os.Chmod(endpoint.Address, 0o600); chmodErr != nil {
+		_ = owned.Close()
+		return nil, fmt.Errorf("chmod socket %s: %w", endpoint.Address, chmodErr)
+	}
+	return owned, nil
+}
+
+// Closing our own listener is positive stale evidence, but only for the exact
+// socket we bound. Never unlink a replacement installed by another process.
+type ownedUnixListener struct {
+	*net.UnixListener
+	path string
+	info os.FileInfo
+	once sync.Once
+	err  error
+}
+
+func (ln *ownedUnixListener) Close() error {
+	ln.once.Do(func() {
+		ln.err = ln.UnixListener.Close()
+		current, err := os.Lstat(ln.path)
+		if errors.Is(err, os.ErrNotExist) {
+			return
+		}
+		if err != nil {
+			ln.err = errors.Join(ln.err, err)
+			return
+		}
+		if os.SameFile(ln.info, current) {
+			ln.err = errors.Join(ln.err, os.Remove(ln.path))
+		}
+	})
+	return ln.err
 }
 
 func ensurePrivateRunDir(dir string) error {
@@ -88,20 +125,10 @@ func ensurePrivateRunDir(dir string) error {
 	return nil
 }
 
-// RemoveEndpoint removes only a Unix socket. It refuses to unlink a path that
-// has been replaced by a regular file, directory, or symlink.
+// RemoveEndpoint removes only positively stale Unix sockets. Live or ambiguous
+// endpoints, regular files, directories, symlinks and replacements are retained.
 func RemoveEndpoint(addr string) error {
-	fi, err := os.Lstat(addr)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if fi.Mode()&os.ModeSocket == 0 || fi.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%s is not a socket; refusing to remove", addr)
-	}
-	return os.Remove(addr)
+	return removeStaleSocket(Endpoint{Address: addr})
 }
 
 // removeStaleSocket removes an unreachable socket only after validating its
@@ -120,8 +147,8 @@ func removeStaleSocket(endpoint Endpoint) error {
 	}
 
 	parent := filepath.Dir(endpoint.Address)
-	if err := ensurePrivateRunDir(parent); err != nil {
-		return err
+	if dirErr := ensurePrivateRunDir(parent); dirErr != nil {
+		return dirErr
 	}
 
 	probeErr := Probe(endpoint.Address, endpoint.DatabaseID)
@@ -132,6 +159,22 @@ func removeStaleSocket(endpoint Endpoint) error {
 		return fmt.Errorf("live incompatible IPC server at %s: %w", endpoint.Address, probeErr)
 	}
 
+	// A timeout, EOF, malformed handshake, or permission failure is ambiguous:
+	// the listener may be alive but busy or speaking a different protocol.
+	// Only connection refusal is positive evidence of a stale Unix socket.
+	if !errors.Is(probeErr, syscall.ECONNREFUSED) {
+		return fmt.Errorf("cannot establish stale IPC socket at %s; refusing to remove: %w", endpoint.Address, probeErr)
+	}
+	current, err := os.Lstat(endpoint.Address)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(fi, current) {
+		return fmt.Errorf("IPC socket changed during probe; refusing to remove")
+	}
 	if err := os.Remove(endpoint.Address); err != nil {
 		return fmt.Errorf("remove stale socket %s: %w", endpoint.Address, err)
 	}

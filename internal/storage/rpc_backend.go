@@ -21,8 +21,15 @@ func newRPCBackend(client *ipc.Client) *rpcBackend {
 
 func (r *rpcBackend) call(method string, params, result any) error {
 	if err := r.client.Call(method, params, result); err != nil {
-		if ipc.ErrorCode(err) == ipc.CodeLocked {
+		switch ipc.ErrorCode(err) {
+		case ipc.CodeLocked:
 			return fmt.Errorf("%s: %w", method, errors.Join(ErrDatabaseLocked, err))
+		case ipc.CodeFeedExists:
+			return fmt.Errorf("%s: %w", method, errors.Join(ErrFeedExists, err))
+		case ipc.CodeArticleFeedChanged:
+			return fmt.Errorf("%s: %w", method, errors.Join(ErrArticleFeedChanged, err))
+		case ipc.CodeResultTooLarge:
+			return fmt.Errorf("%s: %w", method, errors.Join(ErrResultTooLarge, err))
 		}
 		return fmt.Errorf("%s: %w", method, err)
 	}
@@ -31,6 +38,28 @@ func (r *rpcBackend) call(method string, params, result any) error {
 
 func (r *rpcBackend) SaveFeed(feed *Feed) error {
 	return r.call("SaveFeed", feed, nil)
+}
+
+func (r *rpcBackend) CommitFeed(feed *Feed, articles []*Article, createOnly bool) ([]*Article, error) {
+	var saved []*Article
+	err := r.call("CommitFeed", map[string]any{"feed": feed, "articles": articles, "create_only": createOnly}, &saved)
+	return saved, err
+}
+
+func (r *rpcBackend) SetFeedDesk(id, deskID string) (*Feed, error) {
+	var feed Feed
+	if err := r.call("SetFeedDesk", map[string]string{"id": id, "desk_id": deskID}, &feed); err != nil {
+		return nil, err
+	}
+	return &feed, nil
+}
+
+func (r *rpcBackend) RenameFeed(id, title string) (*Feed, error) {
+	var feed Feed
+	if err := r.call("RenameFeed", map[string]string{"id": id, "title": title}, &feed); err != nil {
+		return nil, err
+	}
+	return &feed, nil
 }
 
 func (r *rpcBackend) GetFeed(id string) (*Feed, error) {
@@ -74,7 +103,7 @@ func (r *rpcBackend) GetArticles(feedID string, limit int) ([]*Article, error) {
 }
 
 func (r *rpcBackend) GetArticlesWithCursor(feedID string, limit int, cursor string) ([]*Article, error) {
-	const pageSize = 1000
+	pageSize := 1000
 	articles := make([]*Article, 0)
 	for limit <= 0 || len(articles) < limit {
 		pageLimit := pageSize
@@ -88,6 +117,13 @@ func (r *rpcBackend) GetArticlesWithCursor(feedID string, limit int, cursor stri
 		}
 		var page []*Article
 		if err := r.call("GetArticlesWithCursor", params, &page); err != nil {
+			if errors.Is(err, ipc.ErrResultTooLarge) {
+				if pageLimit == 1 {
+					return nil, fmt.Errorf("single article after cursor %q exceeds IPC response limit: %w", cursor, err)
+				}
+				pageSize = max(1, pageLimit/2)
+				continue
+			}
 			return nil, err
 		}
 		articles = append(articles, page...)
@@ -101,6 +137,14 @@ func (r *rpcBackend) GetArticlesWithCursor(feedID string, limit int, cursor stri
 		cursor = nextCursor
 	}
 	return articles, nil
+}
+
+func (r *rpcBackend) GetArticlesWithCursorBounded(feedID string, limit int, cursor string, maxBytes int) ([]*Article, error) {
+	var articles []*Article
+	err := r.call("GetArticlesWithCursor", map[string]any{
+		"feed_id": feedID, "limit": limit, "cursor": cursor, "max_bytes": maxBytes,
+	}, &articles)
+	return articles, err
 }
 
 func (r *rpcBackend) FeedStats() (map[string]FeedStat, error) {

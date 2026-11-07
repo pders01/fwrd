@@ -118,7 +118,7 @@ func openLocal(store *storage.Store, cfg *config.Config, opts sessionOptions) (*
 	manager := feed.NewManager(store, cfg)
 	session := &Session{
 		Store: store,
-		Feeds: &LocalOps{Store: store, Manager: manager},
+		Feeds: NewMutationCoordinator(&LocalOps{Store: store, Manager: manager}),
 	}
 	if opts.localSetup != nil {
 		closer, err := opts.localSetup(store, manager)

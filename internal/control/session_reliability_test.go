@@ -17,8 +17,8 @@ func blockingRemoteSession(t *testing.T) (*Session, *blockingOps) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SaveArticles([]*storage.Article{{ID: "article", FeedID: "feed"}}); err != nil {
-		t.Fatal(err)
+	if saveErr := store.SaveArticles([]*storage.Article{{ID: "article", FeedID: "feed"}}); saveErr != nil {
+		t.Fatal(saveErr)
 	}
 	ep := ipc.NewEndpoint(filepath.Join(t.TempDir(), "session.db"))
 	ops := &blockingOps{started: make(chan struct{}), release: make(chan struct{})}

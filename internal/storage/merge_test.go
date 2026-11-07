@@ -13,8 +13,8 @@ func TestMergeArticlesReadsStateInsideWriteTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.SaveArticles([]*Article{{ID: "article", FeedID: "feed"}}); err != nil {
-		t.Fatal(err)
+	if saveErr := store.SaveArticles([]*Article{{ID: "article", FeedID: "feed"}}); saveErr != nil {
+		t.Fatal(saveErr)
 	}
 
 	// Hold the writer lock with an uncommitted reader action. A content merge
@@ -30,31 +30,31 @@ func TestMergeArticlesReadsStateInsideWriteTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tx.Bucket(articlesBucket).Put([]byte("article"), data); err != nil {
-		t.Fatal(err)
+	if putErr := tx.Bucket(articlesBucket).Put([]byte("article"), data); putErr != nil {
+		t.Fatal(putErr)
 	}
-	if err := setUnreadMembership(tx, "feed", "article", false); err != nil {
-		t.Fatal(err)
+	if indexErr := setUnreadMembership(tx, "feed", "article", false); indexErr != nil {
+		t.Fatal(indexErr)
 	}
 
 	started := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
 		close(started)
-		saved, err := store.MergeArticles([]*Article{{ID: "article", FeedID: "feed", Title: "Fetched content"}})
-		if err == nil && (len(saved) != 1 || !saved[0].Read || !saved[0].Starred) {
-			err = errors.New("merge did not preserve state committed by preceding writer")
+		saved, mergeErr := store.MergeArticles([]*Article{{ID: "article", FeedID: "feed", Title: "Fetched content"}})
+		if mergeErr == nil && (len(saved) != 1 || !saved[0].Read || !saved[0].Starred) {
+			mergeErr = errors.New("merge did not preserve state committed by preceding writer")
 		}
-		done <- err
+		done <- mergeErr
 	}()
 	<-started
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
+	if commitErr := tx.Commit(); commitErr != nil {
+		t.Fatal(commitErr)
 	}
 	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
+	case mergeErr := <-done:
+		if mergeErr != nil {
+			t.Fatal(mergeErr)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("merge did not finish after writer committed")

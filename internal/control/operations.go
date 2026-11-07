@@ -96,6 +96,40 @@ func (l *LocalOps) MergeArticles(articles []*storage.Article) ([]*storage.Articl
 	return saved, nil
 }
 
+// CommitFeed publishes only committed feed/article state to search listeners.
+func (l *LocalOps) CommitFeed(value *storage.Feed, articles []*storage.Article, createOnly bool) ([]*storage.Article, error) {
+	saved, err := l.Store.CommitFeed(value, articles, createOnly)
+	if err != nil {
+		return nil, err
+	}
+	committed, err := l.Store.GetFeed(value.ID)
+	if err != nil {
+		return nil, err
+	}
+	l.Manager.NotifyDataUpdated(committed, saved)
+	return saved, nil
+}
+
+// SetFeedDesk atomically changes a feed's desk and updates search.
+func (l *LocalOps) SetFeedDesk(id, deskID string) (*storage.Feed, error) {
+	value, err := l.Store.SetFeedDesk(id, deskID)
+	if err != nil {
+		return nil, err
+	}
+	l.Manager.NotifyDataUpdated(value, nil)
+	return value, nil
+}
+
+// RenameFeed atomically changes a feed's title override and updates search.
+func (l *LocalOps) RenameFeed(id, title string) (*storage.Feed, error) {
+	value, err := l.Store.RenameFeed(id, title)
+	if err != nil {
+		return nil, err
+	}
+	l.Manager.NotifyDataUpdated(value, nil)
+	return value, nil
+}
+
 func (l *LocalOps) ImportFeeds(ctx context.Context, urls []string) (ImportSummary, error) {
 	if err := ctx.Err(); err != nil {
 		return ImportSummary{}, err

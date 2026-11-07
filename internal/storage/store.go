@@ -75,6 +75,35 @@ func (s *Store) SaveFeed(feed *Feed) error {
 	return err
 }
 
+// CommitFeed atomically saves feed metadata and merges articles, preserving
+// stored reader state and (on refresh) user-owned feed fields. Failed commits
+// leave both caller values and the database unchanged.
+func (s *Store) CommitFeed(feed *Feed, articles []*Article, createOnly bool) ([]*Article, error) {
+	saved, err := s.backend.CommitFeed(feed, articles, createOnly)
+	if err == nil {
+		s.writeGen.Add(1)
+	}
+	return saved, err
+}
+
+// SetFeedDesk changes only the desk of an existing feed.
+func (s *Store) SetFeedDesk(id, deskID string) (*Feed, error) {
+	feed, err := s.backend.SetFeedDesk(id, deskID)
+	if err == nil {
+		s.writeGen.Add(1)
+	}
+	return feed, err
+}
+
+// RenameFeed sets a persistent title override on an existing feed.
+func (s *Store) RenameFeed(id, title string) (*Feed, error) {
+	feed, err := s.backend.RenameFeed(id, title)
+	if err == nil {
+		s.writeGen.Add(1)
+	}
+	return feed, err
+}
+
 // GetFeed retrieves a single feed by ID.
 func (s *Store) GetFeed(id string) (*Feed, error) {
 	return s.backend.GetFeed(id)
@@ -144,6 +173,16 @@ func (s *Store) GetArticlesWithCursor(feedID string, limit int, cursor string) (
 		return []*Article{}, nil
 	}
 	return s.backend.GetArticlesWithCursor(feedID, limit, cursor)
+}
+
+// GetArticlesWithCursorBounded is a page read with an additional serialized
+// payload budget. It fails before decoding records exceeding that budget;
+// RPC uses it to bound response memory independently of article count.
+func (s *Store) GetArticlesWithCursorBounded(feedID string, limit int, cursor string, maxBytes int) ([]*Article, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("maxBytes must be positive")
+	}
+	return s.backend.GetArticlesWithCursorBounded(feedID, limit, cursor, maxBytes)
 }
 
 // MarkArticleRead sets the Read flag on an article. On success writeGen

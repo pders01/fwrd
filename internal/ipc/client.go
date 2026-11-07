@@ -334,10 +334,11 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	id := atomic.AddUint64(&c.reqID, 1)
 
 	req := Request{
-		Version: ProtocolVersion,
-		ID:      id,
-		Method:  method,
-		Params:  params,
+		Version:  ProtocolVersion,
+		ID:       id,
+		Method:   method,
+		Params:   params,
+		Deadline: deadline,
 	}
 
 	if err := WriteFrame(conn, req); err != nil {

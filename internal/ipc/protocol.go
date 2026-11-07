@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,31 +26,36 @@ const ProtocolVersion = 1
 // Stable error codes returned by the server. Adding codes is backward-
 // compatible; removing or renumbering is not.
 const (
-	CodeOK             = ""
-	CodeNotFound       = "not_found"
-	CodeInvalidArg     = "invalid_argument"
-	CodeLocked         = "locked"
-	CodeUnavailable    = "unavailable"
-	CodeInternal       = "internal"
-	CodeProtocol       = "protocol_error"
-	CodeMismatch       = "database_mismatch"
-	CodeUnknownMethod  = "unknown_method"
-	CodeResultTooLarge = "result_too_large"
+	CodeOK                 = ""
+	CodeNotFound           = "not_found"
+	CodeInvalidArg         = "invalid_argument"
+	CodeLocked             = "locked"
+	CodeUnavailable        = "unavailable"
+	CodeInternal           = "internal"
+	CodeProtocol           = "protocol_error"
+	CodeMismatch           = "database_mismatch"
+	CodeUnknownMethod      = "unknown_method"
+	CodeResultTooLarge     = "result_too_large"
+	CodeFeedExists         = "feed_exists"
+	CodeArticleFeedChanged = "article_feed_changed"
 )
 
 // Sentinel errors for common protocol-level problems.
 var (
-	ErrFrameTooLarge    = errors.New("frame exceeds maximum size")
-	ErrZeroLengthFrame  = errors.New("zero-length frame")
-	ErrConnClosed       = errors.New("connection closed")
-	ErrNotFound         = errors.New("not found")
-	ErrInvalidArgument  = errors.New("invalid argument")
-	ErrLocked           = errors.New("resource locked")
-	ErrUnavailable      = errors.New("service unavailable")
-	ErrProtocol         = errors.New("protocol error")
-	ErrDatabaseMismatch = errors.New("database mismatch")
-	ErrUnknownMethod    = errors.New("unknown method")
-	ErrResultTooLarge   = errors.New("result requires pagination")
+	ErrFrameTooLarge      = errors.New("frame exceeds maximum size")
+	ErrFrameBudget        = errors.New("aggregate frame budget exhausted")
+	ErrZeroLengthFrame    = errors.New("zero-length frame")
+	ErrConnClosed         = errors.New("connection closed")
+	ErrNotFound           = errors.New("not found")
+	ErrInvalidArgument    = errors.New("invalid argument")
+	ErrLocked             = errors.New("resource locked")
+	ErrUnavailable        = errors.New("service unavailable")
+	ErrProtocol           = errors.New("protocol error")
+	ErrDatabaseMismatch   = errors.New("database mismatch")
+	ErrUnknownMethod      = errors.New("unknown method")
+	ErrResultTooLarge     = errors.New("result requires pagination")
+	ErrFeedExists         = errors.New("feed already exists")
+	ErrArticleFeedChanged = errors.New("article feed cannot be changed")
 )
 
 // --- wire messages ---
@@ -68,6 +74,8 @@ type Request struct {
 	ID      uint64 `json:"id"`
 	Method  string `json:"method"`
 	Params  any    `json:"params,omitempty"`
+	// Deadline is an optional absolute request deadline. Older peers ignore it.
+	Deadline time.Time `json:"deadline,omitzero"`
 }
 
 // Response is the server's reply to a Request.
@@ -112,6 +120,10 @@ func (e *ErrorBody) Unwrap() error {
 		return ErrUnknownMethod
 	case CodeResultTooLarge:
 		return ErrResultTooLarge
+	case CodeFeedExists:
+		return ErrFeedExists
+	case CodeArticleFeedChanged:
+		return ErrArticleFeedChanged
 	default:
 		return nil
 	}
@@ -121,7 +133,7 @@ func (e *ErrorBody) Unwrap() error {
 
 // WriteFrame marshals msg as JSON, prepends a 4-byte big-endian length,
 // and writes the complete frame to w. Frames longer than MaxFrameSize
-// are rejected before allocation.
+// are rejected before writing.
 func WriteFrame(w io.Writer, msg any) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -131,22 +143,20 @@ func WriteFrame(w io.Writer, msg any) error {
 		return fmt.Errorf("%w: %d bytes", ErrFrameTooLarge, len(data))
 	}
 
-	header := make([]byte, 4)
-	binary.BigEndian.PutUint32(header, uint32(len(data)))
-
-	frame := make([]byte, 4+len(data))
-	copy(frame, header)
-	copy(frame[4:], data)
-
-	for len(frame) > 0 {
-		n, err := w.Write(frame)
-		if err != nil {
-			return fmt.Errorf("write frame: %w", err)
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], uint32(len(data)))
+	// Do not allocate a second full-sized copy just to prepend the header.
+	for _, part := range [][]byte{header[:], data} {
+		for len(part) > 0 {
+			n, writeErr := w.Write(part)
+			if writeErr != nil {
+				return fmt.Errorf("write frame: %w", writeErr)
+			}
+			if n <= 0 || n > len(part) {
+				return fmt.Errorf("write frame: %w", io.ErrShortWrite)
+			}
+			part = part[n:]
 		}
-		if n <= 0 || n > len(frame) {
-			return fmt.Errorf("write frame: %w", io.ErrShortWrite)
-		}
-		frame = frame[n:]
 	}
 	return nil
 }
@@ -155,48 +165,97 @@ func WriteFrame(w io.Writer, msg any) error {
 // bytes from r. Frames larger than MaxFrameSize or zero-length frames
 // are rejected.
 func ReadFrame(r io.Reader) ([]byte, error) {
-	var header [4]byte
-	if _, err := io.ReadFull(r, header[:]); err != nil {
-		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, ErrConnClosed
+	body, release, err := ReadFrameWithBudget(r, MaxFrameSize, nil)
+	release()
+	return body, err
+}
+
+// FrameBudget bounds aggregate live frame bodies across connections. Exhaustion
+// rejects a frame before allocation instead of blocking while holding resources.
+type FrameBudget struct {
+	limit int64
+	used  atomic.Int64
+}
+
+// NewFrameBudget constructs a shared byte budget.
+func NewFrameBudget(limit int64) *FrameBudget { return &FrameBudget{limit: limit} }
+
+func (b *FrameBudget) reserve(size int64) (func(), error) {
+	if b == nil {
+		return func() {}, nil
+	}
+	for {
+		used := b.used.Load()
+		if size > b.limit-used {
+			return func() {}, ErrFrameBudget
 		}
-		return nil, fmt.Errorf("read header: %w", err)
+		if b.used.CompareAndSwap(used, used+size) {
+			return func() { b.used.Add(-size) }, nil
+		}
+	}
+}
+
+// ReadFrameWithBudget checks both a per-frame limit and a shared aggregate
+// budget before allocating. The returned release must be called exactly once
+// after the body (and any zero-copy decoded request fields) is no longer used.
+// Release is always non-nil, even on error.
+func ReadFrameWithBudget(r io.Reader, maxSize uint32, budget *FrameBudget) (body []byte, release func(), err error) {
+	noop := func() {}
+	var header [4]byte
+	if _, readErr := io.ReadFull(r, header[:]); readErr != nil {
+		if errors.Is(readErr, io.EOF) || errors.Is(readErr, io.ErrUnexpectedEOF) {
+			return nil, noop, ErrConnClosed
+		}
+		return nil, noop, fmt.Errorf("read header: %w", readErr)
 	}
 
 	length := binary.BigEndian.Uint32(header[:])
 	switch {
 	case length == 0:
-		return nil, ErrZeroLengthFrame
-	case length > MaxFrameSize:
-		return nil, fmt.Errorf("%w: %d bytes", ErrFrameTooLarge, length)
+		return nil, noop, ErrZeroLengthFrame
+	case length > maxSize || length > MaxFrameSize:
+		return nil, noop, fmt.Errorf("%w: %d bytes", ErrFrameTooLarge, length)
 	}
-
-	body := make([]byte, length)
+	release, err = budget.reserve(int64(length))
+	if err != nil {
+		return nil, noop, err
+	}
+	body = make([]byte, length)
 	if _, err := io.ReadFull(r, body); err != nil {
+		release()
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, ErrConnClosed
+			return nil, noop, ErrConnClosed
 		}
-		return nil, fmt.Errorf("read body: %w", err)
+		return nil, noop, fmt.Errorf("read body: %w", err)
 	}
-	return body, nil
+	return body, release, nil
 }
 
 // ReadRequestFrame permits an authenticated connection to remain idle, but
 // bounds the time to finish a frame once its first byte arrives. Shutdown can
 // still interrupt the idle read by closing conn.
 func ReadRequestFrame(conn net.Conn, timeout time.Duration) ([]byte, error) {
+	body, release, err := ReadRequestFrameWithBudget(conn, timeout, nil)
+	release()
+	return body, err
+}
+
+// ReadRequestFrameWithBudget permits idle connections while sharing an aggregate
+// frame budget. See ReadFrameWithBudget for release ownership.
+func ReadRequestFrameWithBudget(conn net.Conn, timeout time.Duration, budget *FrameBudget) (body []byte, release func(), err error) {
+	noop := func() {}
 	var first [1]byte
 	if _, err := io.ReadFull(conn, first[:]); err != nil {
 		if errors.Is(err, io.EOF) {
-			return nil, ErrConnClosed
+			return nil, noop, ErrConnClosed
 		}
-		return nil, fmt.Errorf("read first byte: %w", err)
+		return nil, noop, fmt.Errorf("read first byte: %w", err)
 	}
 	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-		return nil, fmt.Errorf("set frame deadline: %w", err)
+		return nil, noop, fmt.Errorf("set frame deadline: %w", err)
 	}
-	defer conn.SetReadDeadline(time.Time{})
-	return ReadFrame(io.MultiReader(bytes.NewReader(first[:]), conn))
+	defer func() { _ = conn.SetReadDeadline(time.Time{}) }()
+	return ReadFrameWithBudget(io.MultiReader(bytes.NewReader(first[:]), conn), MaxFrameSize, budget)
 }
 
 // --- helpers ---

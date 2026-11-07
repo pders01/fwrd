@@ -281,8 +281,8 @@ func TestClientReconnectHandshakeRespectsDeadlineAndClose(t *testing.T) {
 			peerDone := make(chan struct{})
 			go func() {
 				defer close(peerDone)
-				conn, err := ln.Accept()
-				if err != nil {
+				conn, acceptErr := ln.Accept()
+				if acceptErr != nil {
 					return
 				}
 				defer conn.Close()
@@ -355,8 +355,8 @@ func TestClientConcurrentCallsStaySerialized(t *testing.T) {
 				return
 			}
 			var req Request
-			if err := json.Unmarshal(body, &req); err != nil {
-				peerDone <- err
+			if decodeErr := json.Unmarshal(body, &req); decodeErr != nil {
+				peerDone <- decodeErr
 				return
 			}
 			result, err := json.Marshal(req.Params)

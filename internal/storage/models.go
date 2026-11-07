@@ -14,11 +14,13 @@ type Feed struct {
 	SubscribedTitle string    `json:"subscribed_title,omitempty"`
 	SubscribedAt    time.Time `json:"subscribed_at,omitzero"`
 	Title           string    `json:"title"`
-	Description     string    `json:"description"`
-	LastFetched     time.Time `json:"last_fetched"`
-	ETag            string    `json:"etag"`
-	LastModified    string    `json:"last_modified"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	// TitleOverride is set by RenameFeed and survives subsequent refreshes.
+	TitleOverride string    `json:"title_override,omitempty"`
+	Description   string    `json:"description"`
+	LastFetched   time.Time `json:"last_fetched"`
+	ETag          string    `json:"etag"`
+	LastModified  string    `json:"last_modified"`
+	UpdatedAt     time.Time `json:"updated_at"`
 	// DeskID is the stable, user-assigned editorial desk. An empty value is
 	// retained for backward compatibility and is presented as "unfiled".
 	DeskID string `json:"desk_id,omitempty"`

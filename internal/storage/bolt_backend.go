@@ -25,12 +25,17 @@ var (
 	metaBucket                 = []byte("metadata")
 	articlesByFeedBucket       = []byte("articles_by_feed")
 	articlesByDateBucket       = []byte("articles_by_date")
+	articlesByFeedDateBucket   = []byte("articles_by_feed_date")
 	articlesUnreadByFeedBucket = []byte("articles_unread_by_feed")
 )
 
 // unreadIndexFlag marks (in metaBucket) that the unread index has been
 // back-filled for a pre-existing database.
 var unreadIndexFlag = []byte("unread_index_v1")
+
+// Version 2 uses signed seconds plus nanoseconds and per-feed date indexes.
+// Derived indexes are rebuilt in one transaction, including after interruption.
+var dateIndexFlag = []byte("date_index_v2")
 
 // boltBackend is the local bbolt implementation of storeBackend.
 type boltBackend struct {
@@ -69,6 +74,9 @@ func newBoltBackend(dbPath string, timeout time.Duration) (*boltBackend, error) 
 				return createErr
 			}
 		}
+		if rebuildErr := rebuildDateIndexesIfNeeded(tx); rebuildErr != nil {
+			return rebuildErr
+		}
 		return buildUnreadIndexIfNeeded(tx)
 	})
 
@@ -102,6 +110,89 @@ func (b *boltBackend) SaveFeed(feed *Feed) error {
 		}
 		return bucket.Put([]byte(feed.ID), data)
 	})
+}
+
+func (b *boltBackend) CommitFeed(feed *Feed, articles []*Article, createOnly bool) ([]*Article, error) {
+	if feed == nil {
+		return nil, fmt.Errorf("feed must not be nil")
+	}
+	var saved []*Article
+	err := b.db.Update(func(tx *bolt.Tx) error {
+		committed := *feed
+		fb := tx.Bucket(feedsBucket)
+		if raw := fb.Get([]byte(feed.ID)); raw != nil {
+			if createOnly {
+				return ErrFeedExists
+			}
+			var current Feed
+			if err := json.Unmarshal(raw, &current); err != nil {
+				return err
+			}
+			committed.DeskID = current.DeskID
+			committed.SubscribedURL = current.SubscribedURL
+			committed.SubscribedTitle = current.SubscribedTitle
+			committed.SubscribedAt = current.SubscribedAt
+			committed.TitleOverride = current.TitleOverride
+			if current.TitleOverride != "" {
+				committed.Title = current.TitleOverride
+			}
+		} else if !createOnly {
+			return fmt.Errorf("feed not found")
+		}
+		for _, article := range articles {
+			if article == nil || article.FeedID != feed.ID {
+				return fmt.Errorf("article must belong to committed feed")
+			}
+		}
+		data, err := json.Marshal(&committed)
+		if err != nil {
+			return err
+		}
+		if putErr := fb.Put([]byte(feed.ID), data); putErr != nil {
+			return putErr
+		}
+		saved, err = saveArticlesTx(tx, articles, true)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return saved, nil
+}
+
+func (b *boltBackend) mutateFeed(id string, mutate func(*Feed)) (*Feed, error) {
+	var feed Feed
+	err := b.db.Update(func(tx *bolt.Tx) error {
+		fb := tx.Bucket(feedsBucket)
+		raw := fb.Get([]byte(id))
+		if raw == nil {
+			return fmt.Errorf("feed not found")
+		}
+		if err := json.Unmarshal(raw, &feed); err != nil {
+			return err
+		}
+		mutate(&feed)
+		data, err := json.Marshal(&feed)
+		if err != nil {
+			return err
+		}
+		return fb.Put([]byte(id), data)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &feed, nil
+}
+
+func (b *boltBackend) SetFeedDesk(id, deskID string) (*Feed, error) {
+	return b.mutateFeed(id, func(f *Feed) { f.DeskID = deskID })
+}
+
+func (b *boltBackend) RenameFeed(id, title string) (*Feed, error) {
+	if strings.TrimSpace(title) == "" {
+		return nil, fmt.Errorf("title is required")
+	}
+	return b.mutateFeed(id, func(f *Feed) { f.Title, f.TitleOverride = title, title })
 }
 
 func (b *boltBackend) GetFeed(id string) (*Feed, error) {
@@ -185,8 +276,21 @@ func (b *boltBackend) MergeArticles(articles []*Article) ([]*Article, error) {
 }
 
 func (b *boltBackend) saveArticles(articles []*Article, preserveState bool) ([]*Article, error) {
-	saved := make([]*Article, 0, len(articles))
+	var saved []*Article
 	err := b.db.Update(func(tx *bolt.Tx) error {
+		var err error
+		saved, err = saveArticlesTx(tx, articles, preserveState)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return saved, nil
+}
+
+func saveArticlesTx(tx *bolt.Tx, articles []*Article, preserveState bool) ([]*Article, error) {
+	saved := make([]*Article, 0, len(articles))
+	err := func() error {
 		ab := tx.Bucket(articlesBucket)
 		idxRoot := tx.Bucket(articlesByFeedBucket)
 		dateIdx := tx.Bucket(articlesByDateBucket)
@@ -203,6 +307,9 @@ func (b *boltBackend) saveArticles(articles []*Article, preserveState bool) ([]*
 				if err := json.Unmarshal(existing, &old); err != nil {
 					return fmt.Errorf("decode existing article %s: %w", article.ID, err)
 				}
+				if old.FeedID != article.FeedID {
+					return fmt.Errorf("%w: %s", ErrArticleFeedChanged, article.ID)
+				}
 				prevPublished, hadPrev = old.Published, true
 				if preserveState {
 					article.Read, article.Starred = old.Read, old.Starred
@@ -212,37 +319,42 @@ func (b *boltBackend) saveArticles(articles []*Article, preserveState bool) ([]*
 			if err != nil {
 				return err
 			}
-			if err := ab.Put([]byte(article.ID), data); err != nil {
-				return err
+			if putErr := ab.Put([]byte(article.ID), data); putErr != nil {
+				return putErr
 			}
 
 			if idxRoot != nil {
-				fb, err := idxRoot.CreateBucketIfNotExists([]byte(article.FeedID))
-				if err != nil {
-					return err
+				fb, bucketErr := idxRoot.CreateBucketIfNotExists([]byte(article.FeedID))
+				if bucketErr != nil {
+					return bucketErr
 				}
-				if err := fb.Put([]byte(article.ID), []byte{1}); err != nil {
-					return err
+				if putErr := fb.Put([]byte(article.ID), []byte{1}); putErr != nil {
+					return putErr
 				}
 			}
 
-			if err := setUnreadMembership(tx, article.FeedID, article.ID, !article.Read); err != nil {
+			if unreadErr := setUnreadMembership(tx, article.FeedID, article.ID, !article.Read); unreadErr != nil {
+				return unreadErr
+			}
+
+			feedDates, err := tx.Bucket(articlesByFeedDateBucket).CreateBucketIfNotExists([]byte(article.FeedID))
+			if err != nil {
 				return err
 			}
-
-			if dateIdx != nil {
+			for _, index := range []*bolt.Bucket{dateIdx, feedDates} {
 				if hadPrev && !prevPublished.Equal(article.Published) {
-					_ = dateIdx.Delete(makeDateIndexKey(prevPublished, article.ID))
+					if err := index.Delete(makeDateIndexKey(prevPublished, article.ID)); err != nil {
+						return err
+					}
 				}
-				dateKey := makeDateIndexKey(article.Published, article.ID)
-				if err := dateIdx.Put(dateKey, []byte(article.ID)); err != nil {
+				if err := index.Put(makeDateIndexKey(article.Published, article.ID), []byte(article.ID)); err != nil {
 					return err
 				}
 			}
 			saved = append(saved, &article)
 		}
 		return nil
-	})
+	}()
 	if err != nil {
 		return nil, err
 	}
@@ -273,6 +385,10 @@ func (b *boltBackend) GetArticles(feedID string, limit int) ([]*Article, error) 
 }
 
 func (b *boltBackend) GetArticlesWithCursor(feedID string, limit int, cursor string) ([]*Article, error) {
+	return b.GetArticlesWithCursorBounded(feedID, limit, cursor, 0)
+}
+
+func (b *boltBackend) GetArticlesWithCursorBounded(feedID string, limit int, cursor string, maxBytes int) ([]*Article, error) {
 	var articles []*Article
 
 	err := b.db.View(func(tx *bolt.Tx) error {
@@ -282,86 +398,53 @@ func (b *boltBackend) GetArticlesWithCursor(feedID string, limit int, cursor str
 		}
 
 		if feedID != "" {
-			return b.getArticlesForFeed(tx, ab, feedID, limit, cursor, &articles)
+			return b.getArticlesForFeed(tx, ab, feedID, limit, cursor, maxBytes, &articles)
 		}
-		return b.getArticlesGlobalOptimized(tx, ab, limit, cursor, &articles)
+		return b.getArticlesGlobalOptimized(tx, ab, limit, cursor, maxBytes, &articles)
 	})
 
-	return articles, err
+	if err != nil {
+		return nil, err
+	}
+	return articles, nil
 }
 
-// getArticlesForFeed collects all articles in feedID's per-feed bucket,
-// sorts by Published descending, then applies cursor + limit.
-func (b *boltBackend) getArticlesForFeed(tx *bolt.Tx, ab *bolt.Bucket, feedID string, limit int, cursor string, articles *[]*Article) error {
-	idxRoot := tx.Bucket(articlesByFeedBucket)
-	if idxRoot == nil {
+// getArticlesForFeed seeks directly into the per-feed chronological index.
+// Only the cursor record and returned page are decoded, independent of feed size.
+func (b *boltBackend) getArticlesForFeed(tx *bolt.Tx, ab *bolt.Bucket, feedID string, limit int, cursor string, maxBytes int, articles *[]*Article) error {
+	root := tx.Bucket(articlesByFeedDateBucket)
+	if root == nil {
 		return nil
 	}
-
-	fb := idxRoot.Bucket([]byte(feedID))
-	if fb == nil {
+	index := root.Bucket([]byte(feedID))
+	if index == nil {
 		return nil
 	}
-
-	c := fb.Cursor()
-	for k, _ := c.First(); k != nil; k, _ = c.Next() {
-		v := ab.Get(k)
-		if v == nil {
-			continue
-		}
-		var article Article
-		if err := json.Unmarshal(v, &article); err != nil {
-			continue
-		}
-		*articles = append(*articles, &article)
-	}
-
-	sort.SliceStable(*articles, func(i, j int) bool {
-		ai, aj := (*articles)[i], (*articles)[j]
-		if !ai.Published.Equal(aj.Published) {
-			return ai.Published.After(aj.Published)
-		}
-		return ai.ID < aj.ID
-	})
-
 	if cursor != "" {
-		cursorIndex := -1
-		for i, article := range *articles {
-			if article.ID == cursor {
-				cursorIndex = i
-				break
-			}
+		raw := ab.Get([]byte(cursor))
+		var article struct {
+			FeedID string `json:"feed_id"`
 		}
-		if cursorIndex >= 0 && cursorIndex+1 < len(*articles) {
-			*articles = (*articles)[cursorIndex+1:]
-		} else {
-			*articles = []*Article{}
+		if raw == nil || json.Unmarshal(raw, &article) != nil || article.FeedID != feedID {
+			return nil
 		}
 	}
-
-	if limit > 0 && len(*articles) > limit {
-		*articles = (*articles)[:limit]
-	}
-
-	return nil
+	return collectDatePage(ab, index, limit, cursor, maxBytes, articles)
 }
 
 // getArticlesGlobalOptimized retrieves articles across all feeds using the date index.
-func (b *boltBackend) getArticlesGlobalOptimized(tx *bolt.Tx, ab *bolt.Bucket, limit int, cursor string, articles *[]*Article) error {
+func (b *boltBackend) getArticlesGlobalOptimized(tx *bolt.Tx, ab *bolt.Bucket, limit int, cursor string, maxBytes int, articles *[]*Article) error {
 	dateIdx := tx.Bucket(articlesByDateBucket)
 	if dateIdx == nil {
-		return ab.ForEach(func(_ []byte, v []byte) error {
-			var article Article
-			if err := json.Unmarshal(v, &article); err != nil {
-				return nil
-			}
-			*articles = append(*articles, &article)
-			return nil
-		})
+		return fmt.Errorf("article date index missing")
 	}
+	return collectDatePage(ab, dateIdx, limit, cursor, maxBytes, articles)
+}
 
-	c := dateIdx.Cursor()
+func collectDatePage(ab, index *bolt.Bucket, limit int, cursor string, maxBytes int, articles *[]*Article) error {
+	c := index.Cursor()
 	count := 0
+	payloadBytes := 2 // JSON array brackets
 
 	k, articleID := seekDateCursor(ab, c, cursor)
 
@@ -370,9 +453,13 @@ func (b *boltBackend) getArticlesGlobalOptimized(tx *bolt.Tx, ab *bolt.Bucket, l
 		if v == nil {
 			continue
 		}
+		payloadBytes += len(v) + 1 // serialized record and comma
+		if maxBytes > 0 && payloadBytes > maxBytes {
+			return ErrResultTooLarge
+		}
 		var article Article
 		if err := json.Unmarshal(v, &article); err != nil {
-			continue
+			return err
 		}
 		*articles = append(*articles, &article)
 		count++
@@ -428,6 +515,11 @@ func (b *boltBackend) DeleteFeed(id string) error {
 		if err := feedBucket.Delete([]byte(id)); err != nil {
 			return err
 		}
+		if dates := tx.Bucket(articlesByFeedDateBucket); dates != nil && dates.Bucket([]byte(id)) != nil {
+			if err := dates.DeleteBucket([]byte(id)); err != nil {
+				return err
+			}
+		}
 
 		if unreadRoot := tx.Bucket(articlesUnreadByFeedBucket); unreadRoot != nil {
 			if unreadRoot.Bucket([]byte(id)) != nil {
@@ -480,12 +572,12 @@ func (b *boltBackend) DeleteFeed(id string) error {
 // ---- helpers ----
 
 func makeDateIndexKey(published time.Time, articleID string) []byte {
-	timestamp := published.UnixNano()
-	reverseTimestamp := ^timestamp
-
-	key := make([]byte, 8+len(articleID))
-	binary.BigEndian.PutUint64(key[:8], uint64(reverseTimestamp))
-	copy(key[8:], articleID)
+	// Flip the sign bit before inversion so negative seconds sort correctly.
+	// UnixNano overflows for zero dates and dates outside 1678–2262.
+	key := make([]byte, 12+len(articleID))
+	binary.BigEndian.PutUint64(key[:8], ^(uint64(published.Unix()) ^ (uint64(1) << 63)))
+	binary.BigEndian.PutUint32(key[8:12], ^uint32(published.Nanosecond()))
+	copy(key[12:], articleID)
 	return key
 }
 
@@ -497,7 +589,11 @@ func seekDateCursor(ab *bolt.Bucket, dateCursor *bolt.Cursor, cursor string) (ke
 	if raw == nil {
 		return nil, nil
 	}
-	var art Article
+	// Cursor lookup needs metadata only; do not allocate/copy its content.
+	var art struct {
+		ID        string    `json:"id"`
+		Published time.Time `json:"published"`
+	}
 	if err := json.Unmarshal(raw, &art); err != nil {
 		return nil, nil
 	}
@@ -528,6 +624,54 @@ func setUnreadMembership(tx *bolt.Tx, feedID, articleID string, unread bool) err
 		return fb.Delete([]byte(articleID))
 	}
 	return nil
+}
+
+func rebuildDateIndexesIfNeeded(tx *bolt.Tx) error {
+	meta := tx.Bucket(metaBucket)
+	if meta.Get(dateIndexFlag) != nil {
+		return nil
+	}
+	for _, name := range [][]byte{articlesByDateBucket, articlesByFeedDateBucket, articlesByFeedBucket, articlesUnreadByFeedBucket} {
+		if tx.Bucket(name) != nil {
+			if err := tx.DeleteBucket(name); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.CreateBucket(name); err != nil {
+			return err
+		}
+	}
+	if err := tx.Bucket(articlesBucket).ForEach(func(id, raw []byte) error {
+		var article Article
+		if err := json.Unmarshal(raw, &article); err != nil {
+			return fmt.Errorf("rebuild article index %q: %w", id, err)
+		}
+		if article.ID != string(id) {
+			return fmt.Errorf("rebuild article index: mismatched ID %q", id)
+		}
+		key := makeDateIndexKey(article.Published, article.ID)
+		if err := tx.Bucket(articlesByDateBucket).Put(key, id); err != nil {
+			return err
+		}
+		feedDates, err := tx.Bucket(articlesByFeedDateBucket).CreateBucketIfNotExists([]byte(article.FeedID))
+		if err != nil {
+			return err
+		}
+		if putErr := feedDates.Put(key, id); putErr != nil {
+			return putErr
+		}
+		members, err := tx.Bucket(articlesByFeedBucket).CreateBucketIfNotExists([]byte(article.FeedID))
+		if err != nil {
+			return err
+		}
+		if err := members.Put(id, []byte{1}); err != nil {
+			return err
+		}
+		return setUnreadMembership(tx, article.FeedID, article.ID, !article.Read)
+	}); err != nil {
+		return err
+	}
+	return meta.Put(dateIndexFlag, []byte{1})
 }
 
 func buildUnreadIndexIfNeeded(tx *bolt.Tx) error {

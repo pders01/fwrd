@@ -68,6 +68,9 @@ func (c *MutationCoordinator) operationContext(ctx context.Context) (context.Con
 	// If shutdown raced with lock acquisition, return the token and reject the
 	// operation rather than starting new work after shutdown began.
 	select {
+	case <-ctx.Done():
+		c.token <- struct{}{}
+		return nil, nil, ctx.Err()
 	case <-c.closing:
 		c.token <- struct{}{}
 		return nil, nil, context.Canceled
@@ -163,6 +166,54 @@ func (c *MutationCoordinator) MergeArticles(ctx context.Context, articles []*sto
 		return nil, errors.New("primitive MergeArticles is unavailable")
 	}
 	return ops.MergeArticles(articles)
+}
+
+// CommitFeed serializes the atomic feed commit and its search notification.
+func (c *MutationCoordinator) CommitFeed(ctx context.Context, value *storage.Feed, articles []*storage.Article, createOnly bool) ([]*storage.Article, error) {
+	_, done, err := c.operationContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	ops, ok := c.ops.(interface {
+		CommitFeed(*storage.Feed, []*storage.Article, bool) ([]*storage.Article, error)
+	})
+	if !ok {
+		return nil, errors.New("primitive CommitFeed is unavailable")
+	}
+	return ops.CommitFeed(value, articles, createOnly)
+}
+
+// SetFeedDesk changes only the desk and notifies search under the mutation lock.
+func (c *MutationCoordinator) SetFeedDesk(ctx context.Context, id, deskID string) (*storage.Feed, error) {
+	_, done, err := c.operationContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	ops, ok := c.ops.(interface {
+		SetFeedDesk(string, string) (*storage.Feed, error)
+	})
+	if !ok {
+		return nil, errors.New("primitive SetFeedDesk is unavailable")
+	}
+	return ops.SetFeedDesk(id, deskID)
+}
+
+// RenameFeed changes only the persistent title override and notifies search.
+func (c *MutationCoordinator) RenameFeed(ctx context.Context, id, title string) (*storage.Feed, error) {
+	_, done, err := c.operationContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	ops, ok := c.ops.(interface {
+		RenameFeed(string, string) (*storage.Feed, error)
+	})
+	if !ok {
+		return nil, errors.New("primitive RenameFeed is unavailable")
+	}
+	return ops.RenameFeed(id, title)
 }
 
 func (c *MutationCoordinator) ImportFeeds(ctx context.Context, urls []string) (ImportSummary, error) {
