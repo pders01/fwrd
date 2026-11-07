@@ -7,6 +7,9 @@ package service
 // deterministic.
 func serveArgs(o *Options) []string {
 	args := []string{"serve", "--addr", o.Addr}
+	if o.AllowUnauthenticated {
+		args = append(args, "--allow-unauthenticated")
+	}
 	if o.Config != "" {
 		args = append(args, "--config", o.Config)
 	}

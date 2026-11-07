@@ -7,6 +7,21 @@ import (
 	"testing"
 )
 
+func TestUnitContentQuotesPathsAndDisablesExpansion(t *testing.T) {
+	got, err := unitContent(&Options{BinPath: "/home/user/My Apps/fwrd", Config: "/home/user/$CONFIG%/settings.toml", Addr: "127.0.0.1:8080", TLS: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"/home/user/My Apps/fwrd"`, `"/home/user/$$CONFIG%%/settings.toml"`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("unit missing safe argument %s: %s", want, got)
+		}
+	}
+	if _, err := unitContent(&Options{BinPath: "/bin/fwrd", Addr: "127.0.0.1:8080\nExecStart=/bin/other"}); err == nil {
+		t.Fatal("service directive injection accepted")
+	}
+}
+
 func TestUnitContent(t *testing.T) {
 	got, err := unitContent(&Options{
 		BinPath:  "/usr/local/bin/fwrd",

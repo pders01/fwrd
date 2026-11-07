@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 
 	tea "github.com/charmbracelet/bubbletea"
 	charmlog "github.com/charmbracelet/log"
@@ -38,6 +37,7 @@ import (
 	"github.com/pders01/fwrd/internal/search"
 	"github.com/pders01/fwrd/internal/service"
 	"github.com/pders01/fwrd/internal/storage"
+	"github.com/pders01/fwrd/internal/terminaltext"
 	"github.com/pders01/fwrd/internal/tui"
 	"github.com/pders01/fwrd/internal/validation"
 	"github.com/pders01/fwrd/internal/web"
@@ -54,8 +54,12 @@ var logger = charmlog.NewWithOptions(os.Stderr, charmlog.Options{ReportTimestamp
 // interface so plugin load events flow through the same styled output.
 type pluginLogger struct{}
 
-func (pluginLogger) Infof(format string, args ...any) { logger.Infof(format, args...) }
-func (pluginLogger) Warnf(format string, args ...any) { logger.Warnf(format, args...) }
+func (pluginLogger) Infof(format string, args ...any) {
+	logger.Info(terminaltext.Safe(fmt.Sprintf(format, args...)))
+}
+func (pluginLogger) Warnf(format string, args ...any) {
+	logger.Warn(terminaltext.Safe(fmt.Sprintf(format, args...)))
+}
 
 // loadLuaPlugins registers user-authored Lua plugins onto m's registry.
 // Failures are logged and ignored — a malformed plugin must not break
@@ -78,41 +82,43 @@ func loadLuaPlugins(m *feed.Manager) {
 var Version = "dev"
 
 var (
-	cfgFile        string
-	dbPath         string
-	debugFlag      bool
-	quiet          bool
-	forceRefresh   bool
-	serveAddr      string
-	serveMDNS      bool
-	serveMDNSName  string
-	serveMDNSIPs   []string
-	serveMDNSIface string
-	serveTLS       bool
-	serveTLSMode   string
-	serveTLSCert   string
-	serveTLSKey    string
-	serveAudit     bool
-	svcAddr        string
-	svcMDNS        bool
-	svcMDNSName    string
-	svcMDNSIPs     []string
-	svcMDNSIface   string
-	svcTLS         bool
-	svcTLSMode     string
-	svcTLSCert     string
-	svcTLSKey      string
-	netIface       string
-	netAliasIPs    []string
-	netPort        int
-	netHTTPS       bool
-	netToPort      int
-	netPrefix      int
-	netMask        string
-	logsFollow     bool
-	logsLines      int
-	logsService    bool
-	editionJSON    bool
+	cfgFile                   string
+	dbPath                    string
+	debugFlag                 bool
+	quiet                     bool
+	forceRefresh              bool
+	serveAddr                 string
+	serveMDNS                 bool
+	serveMDNSName             string
+	serveMDNSIPs              []string
+	serveMDNSIface            string
+	serveTLS                  bool
+	serveTLSMode              string
+	serveTLSCert              string
+	serveTLSKey               string
+	serveAudit                bool
+	serveAllowUnauthenticated bool
+	svcAddr                   string
+	svcMDNS                   bool
+	svcMDNSName               string
+	svcMDNSIPs                []string
+	svcMDNSIface              string
+	svcTLS                    bool
+	svcTLSMode                string
+	svcTLSCert                string
+	svcTLSKey                 string
+	svcAllowUnauthenticated   bool
+	netIface                  string
+	netAliasIPs               []string
+	netPort                   int
+	netHTTPS                  bool
+	netToPort                 int
+	netPrefix                 int
+	netMask                   string
+	logsFollow                bool
+	logsLines                 int
+	logsService               bool
+	editionJSON               bool
 )
 
 var rootCmd = &cobra.Command{
@@ -123,8 +129,6 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
-
 	// Global flags
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/fwrd/config.toml)")
 	rootCmd.PersistentFlags().StringVar(&dbPath, "db", "", "database file path (overrides config)")
@@ -137,6 +141,7 @@ func init() {
 	_ = rootCmd.Flags().MarkDeprecated("force-refresh", "use --force")
 
 	// serve flags
+	serveCmd.Flags().BoolVar(&serveAllowUnauthenticated, "allow-unauthenticated", false, "explicitly allow non-loopback serving without authentication")
 	serveCmd.Flags().StringVar(&serveAddr, "addr", "127.0.0.1:8080", "address to bind the web server")
 	serveCmd.Flags().BoolVar(&serveMDNS, "mdns", false, "advertise the web view on the LAN over mDNS (e.g. http://fwrd.local:PORT)")
 	serveCmd.Flags().StringVar(&serveMDNSName, "mdns-name", "fwrd", "mDNS hostname label; advertised as <name>.local")
@@ -166,10 +171,10 @@ func init() {
 	logsCmd.Flags().IntVarP(&logsLines, "lines", "n", 200, "number of trailing lines to show")
 	logsCmd.Flags().BoolVar(&logsService, "service", false, "show the background service's logs instead of fwrd's debug log")
 
-	// service flags: default to a LAN bind + mDNS, since a background
-	// service exists to be reachable from other devices as fwrd.local.
-	serviceInstallCmd.Flags().StringVar(&svcAddr, "addr", "0.0.0.0:8080", "address the service binds")
-	serviceInstallCmd.Flags().BoolVar(&svcMDNS, "mdns", true, "advertise the service over mDNS as <name>.local")
+	// Service installation is private by default, just like ad-hoc serve.
+	serviceInstallCmd.Flags().BoolVar(&svcAllowUnauthenticated, "allow-unauthenticated", false, "explicitly allow non-loopback serving without authentication")
+	serviceInstallCmd.Flags().StringVar(&svcAddr, "addr", "127.0.0.1:8080", "address the service binds")
+	serviceInstallCmd.Flags().BoolVar(&svcMDNS, "mdns", false, "advertise the service over mDNS as <name>.local")
 	serviceInstallCmd.Flags().StringVar(&svcMDNSName, "mdns-name", "fwrd", "mDNS hostname label; advertised as <name>.local")
 	serviceInstallCmd.Flags().StringArrayVar(&svcMDNSIPs, "mdns-ip", nil, "advertise these alias IP(s) from `fwrd net up`, each scoped to its subnet (repeatable); for bare http://<name>.local on port 80")
 	serviceInstallCmd.Flags().StringVar(&svcMDNSIface, "mdns-iface", "", "comma-separated interfaces to advertise on; default: auto-detected LAN interfaces")
@@ -194,13 +199,14 @@ func init() {
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Serve a read-only web view of stored feeds and articles",
+	Short: "Serve the web reader and feed-management interface",
 	Long: `serve starts an HTTP server rendering the same feeds, articles, and
 search backing the TUI. Article content is served as sanitized HTML rather
 than the lossy terminal markdown the TUI must use.
 
-The web server holds the database open for its lifetime, so it cannot run
-against the same --db as a concurrent TUI (BoltDB is single-process).`,
+The server owns the database and search index; concurrent TUI and CLI sessions
+use local IPC. Non-loopback serving requires authentication or an explicit
+--allow-unauthenticated opt-in.`,
 	Run: runServe,
 }
 
@@ -398,23 +404,6 @@ func init() {
 	_ = feedRefreshCmd.Flags().MarkDeprecated("force-refresh", "use --force")
 }
 
-func initConfig() {
-	if cfgFile != "" {
-		viper.SetConfigFile(cfgFile)
-	} else {
-		home, err := os.UserHomeDir()
-		cobra.CheckErr(err)
-
-		viper.AddConfigPath(filepath.Join(home, ".config", "fwrd"))
-		viper.AddConfigPath(".")
-		viper.SetConfigName("config")
-		viper.SetConfigType("toml")
-	}
-
-	viper.SetEnvPrefix("FWRD")
-	viper.AutomaticEnv()
-}
-
 func loadConfig() (*config.Config, error) {
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
@@ -433,12 +422,7 @@ func loadConfig() (*config.Config, error) {
 // deriveIndexPath returns the Bleve index path sited next to a database
 // path, mirroring the fallback used when no index is configured.
 func deriveIndexPath(dbFilePath string) string {
-	switch dbFilePath {
-	case "", storage.MemoryPath:
-		return "fwrd.bleve"
-	default:
-		return strings.TrimSuffix(dbFilePath, filepath.Ext(dbFilePath)) + ".bleve"
-	}
+	return config.DerivedIndexPath(dbFilePath)
 }
 
 func configuredDBPath(cfg *config.Config) string {
@@ -629,6 +613,9 @@ func runServe(cmd *cobra.Command, _ []string) {
 			logger.Warn(w)
 		}
 
+		if accessErr := validateServeExposure(serveAddr, cfg, serveAllowUnauthenticated); accessErr != nil {
+			return accessErr
+		}
 		searcher, err := buildSearcher(store, cfg)
 		if err != nil {
 			return err
@@ -794,6 +781,13 @@ func runServe(cmd *cobra.Command, _ []string) {
 }
 
 func runServiceInstall(_ *cobra.Command, _ []string) {
+	cfg, err := loadConfig()
+	if err != nil {
+		logger.Fatal("load service configuration", "err", err)
+	}
+	if accessErr := validateServeExposure(svcAddr, cfg, svcAllowUnauthenticated); accessErr != nil {
+		logger.Fatal("unsafe service configuration", "err", accessErr)
+	}
 	bin, err := os.Executable()
 	if err != nil {
 		logger.Fatal("cannot resolve the fwrd binary path", "err", err)
@@ -809,18 +803,19 @@ func runServiceInstall(_ *cobra.Command, _ []string) {
 		bin = resolved
 	}
 	path, err := service.Install(&service.Options{
-		BinPath:   bin,
-		Addr:      svcAddr,
-		MDNS:      svcMDNS,
-		MDNSName:  svcMDNSName,
-		MDNSIPs:   svcMDNSIPs,
-		MDNSIface: svcMDNSIface,
-		TLS:       svcTLS,
-		TLSMode:   svcTLSMode,
-		TLSCert:   svcTLSCert,
-		TLSKey:    svcTLSKey,
-		Config:    cfgFile,
-		DB:        dbPath,
+		BinPath:              bin,
+		Addr:                 svcAddr,
+		MDNS:                 svcMDNS,
+		MDNSName:             svcMDNSName,
+		MDNSIPs:              svcMDNSIPs,
+		MDNSIface:            svcMDNSIface,
+		TLS:                  svcTLS,
+		TLSMode:              svcTLSMode,
+		TLSCert:              svcTLSCert,
+		TLSKey:               svcTLSKey,
+		Config:               cfg.SourcePath,
+		DB:                   dbPath,
+		AllowUnauthenticated: svcAllowUnauthenticated,
 	})
 	if err != nil {
 		// A non-empty path means the file was written but activation failed —
@@ -1157,6 +1152,20 @@ func firstNonEmpty(vals ...string) string {
 // so the warning about unauthenticated exposure is suppressed for the
 // default 127.0.0.1 bind. A bare port (":8080") or 0.0.0.0/empty host
 // counts as non-loopback because it accepts off-box connections.
+// validateServeExposure fails closed before binding or installing a service.
+func validateServeExposure(addr string, cfg *config.Config, allow bool) error {
+	if cfg == nil {
+		return fmt.Errorf("web configuration is required")
+	}
+	if (cfg.Web.Auth.Username == "") != (cfg.Web.Auth.Password == "") {
+		return fmt.Errorf("web.auth requires both a non-empty username and password")
+	}
+	if !isLoopbackBind(addr) && cfg.Web.Auth.Username == "" && !allow && !cfg.Web.AllowUnauthenticated {
+		return fmt.Errorf("non-loopback serving requires [web.auth] credentials or an explicit --allow-unauthenticated opt-in")
+	}
+	return nil
+}
+
 func isLoopbackBind(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -1187,12 +1196,12 @@ func exitWithError(err error) {
 		os.Exit(1)
 	}
 	if errors.Is(err, syscall.EADDRINUSE) {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %s\n", terminaltext.Safe(err.Error()))
 		fmt.Fprintln(os.Stderr, "Hint: another process is already on that port. Pick a free one with --addr, "+
 			"or expose port 80 without a conflict via `fwrd net up` (see README: \"Serving on port 80\").")
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	fmt.Fprintf(os.Stderr, "Error: %s\n", terminaltext.Safe(err.Error()))
 	os.Exit(1)
 }
 
@@ -1214,12 +1223,12 @@ func listFeeds(_ *cobra.Command, _ []string) {
 		}
 		fmt.Printf("Found %d feeds:\n\n", len(feeds))
 		for _, feed := range feeds {
-			fmt.Printf("Title: %s\n", feed.Title)
-			fmt.Printf("URL:   %s\n", feed.SubscriptionURL())
+			fmt.Printf("Title: %s\n", terminaltext.Safe(feed.Title))
+			fmt.Printf("URL:   %s\n", terminaltext.Safe(feed.SubscriptionURL()))
 			if feed.URL != feed.SubscriptionURL() {
-				fmt.Printf("Fetch: %s\n", feed.URL)
+				fmt.Printf("Fetch: %s\n", terminaltext.Safe(feed.URL))
 			}
-			fmt.Printf("ID:    %s\n", feed.ID)
+			fmt.Printf("ID:    %s\n", terminaltext.Safe(feed.ID))
 			desk, _ := editorial.DeskByID(feed.DeskID)
 			fmt.Printf("Desk:  %s (%s)\n", desk.Label, desk.ID)
 			if !feed.SubscribedAt.IsZero() {
@@ -1230,10 +1239,10 @@ func listFeeds(_ *cobra.Command, _ []string) {
 
 			fmt.Printf("Last Fetched: %s\n", feed.LastFetched.Format("2006-01-02 15:04:05"))
 			if feed.ETag != "" {
-				fmt.Printf("ETag: %s\n", feed.ETag)
+				fmt.Printf("ETag: %s\n", terminaltext.Safe(feed.ETag))
 			}
 			if feed.LastModified != "" {
-				fmt.Printf("Last-Modified: %s\n", feed.LastModified)
+				fmt.Printf("Last-Modified: %s\n", terminaltext.Safe(feed.LastModified))
 			}
 			fmt.Println()
 		}
@@ -1249,7 +1258,7 @@ func setFeedDesk(_ *cobra.Command, args []string) {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Filed %s under %s (%s).\n", feed.Title, desk.Label, desk.ID)
+		fmt.Printf("Filed %s under %s (%s).\n", terminaltext.Safe(feed.Title), desk.Label, desk.ID)
 		return nil
 	}); err != nil {
 		exitWithError(err)
@@ -1279,11 +1288,11 @@ func assignFeedDesk(store *storage.Store, urlOrID, deskID string) (*storage.Feed
 	if target == nil {
 		return nil, editorial.Desk{}, fmt.Errorf("feed not found: %s", urlOrID)
 	}
-	target.DeskID = desk.ID
-	if err := store.SaveFeed(target); err != nil {
-		return nil, editorial.Desk{}, fmt.Errorf("save feed: %w", err)
+	updated, err := store.SetFeedDesk(target.ID, desk.ID)
+	if err != nil {
+		return nil, editorial.Desk{}, fmt.Errorf("set feed desk: %w", err)
 	}
-	return target, desk, nil
+	return updated, desk, nil
 }
 
 func reportEditionDiagnostics(_ *cobra.Command, _ []string) {
@@ -1308,18 +1317,18 @@ func reportEditionDiagnostics(_ *cobra.Command, _ []string) {
 	}
 }
 
-func addFeed(_ *cobra.Command, args []string) {
+func addFeed(cmd *cobra.Command, args []string) {
 	url := args[0]
 
 	if err := withSession(true, func(sess *control.Session) error {
-		fmt.Printf("Adding feed: %s\n", url)
-		feed, err := sess.Feeds.AddFeed(context.Background(), url)
+		fmt.Printf("Adding feed: %s\n", terminaltext.Safe(url))
+		feed, err := sess.Feeds.AddFeed(commandContext(cmd), url)
 		if err != nil {
 			return fmt.Errorf("failed to add feed: %w", err)
 		}
 
-		fmt.Printf("Successfully added feed: %s (%s)\n", feed.Title, feed.URL)
-		fmt.Printf("Feed ID: %s\n", feed.ID)
+		fmt.Printf("Successfully added feed: %s (%s)\n", terminaltext.Safe(feed.Title), terminaltext.Safe(feed.URL))
+		fmt.Printf("Feed ID: %s\n", terminaltext.Safe(feed.ID))
 
 		stats, err := sess.Store.FeedStats()
 		if err != nil {
@@ -1333,7 +1342,7 @@ func addFeed(_ *cobra.Command, args []string) {
 	}
 }
 
-func deleteFeed(_ *cobra.Command, args []string) {
+func deleteFeed(cmd *cobra.Command, args []string) {
 	urlOrID := args[0]
 
 	if err := withSession(true, func(sess *control.Session) error {
@@ -1355,9 +1364,9 @@ func deleteFeed(_ *cobra.Command, args []string) {
 			return fmt.Errorf("feed not found: %s", urlOrID)
 		}
 
-		fmt.Printf("Deleting feed: %s (%s)\n", targetFeed.Title, targetFeed.URL)
+		fmt.Printf("Deleting feed: %s (%s)\n", terminaltext.Safe(targetFeed.Title), terminaltext.Safe(targetFeed.URL))
 
-		if err := sess.Feeds.DeleteFeed(context.Background(), targetFeed.ID); err != nil {
+		if err := sess.Feeds.DeleteFeed(commandContext(cmd), targetFeed.ID); err != nil {
 			return fmt.Errorf("failed to delete feed: %w", err)
 		}
 
@@ -1393,7 +1402,7 @@ func exportFeeds(_ *cobra.Command, args []string) {
 	}
 }
 
-func importFeeds(_ *cobra.Command, args []string) {
+func importFeeds(cmd *cobra.Command, args []string) {
 	path := args[0]
 	if err := withSession(true, func(sess *control.Session) error {
 		var data []byte
@@ -1427,11 +1436,11 @@ func importFeeds(_ *cobra.Command, args []string) {
 		for i, value := range feeds {
 			urls[i] = value.URL
 			if !have[value.URL] {
-				fmt.Printf("Adding %s\n", value.URL)
+				fmt.Printf("Adding %s\n", terminaltext.Safe(value.URL))
 			}
 		}
 
-		summary, err := sess.Feeds.ImportFeeds(context.Background(), urls)
+		summary, err := sess.Feeds.ImportFeeds(commandContext(cmd), urls)
 		if err != nil {
 			return fmt.Errorf("failed to import: %w", err)
 		}
@@ -1451,13 +1460,12 @@ func importFeeds(_ *cobra.Command, args []string) {
 			if imported.DeskID == "" || value == nil || value.DeskID == imported.DeskID {
 				continue
 			}
-			value.DeskID = imported.DeskID
-			if err := sess.Store.SaveFeed(value); err != nil {
+			if _, err := sess.Store.SetFeedDesk(value.ID, imported.DeskID); err != nil {
 				return fmt.Errorf("failed to restore desk for %s: %w", imported.URL, err)
 			}
 		}
 		for _, failure := range summary.Failures {
-			fmt.Fprintf(os.Stderr, "  %s failed: %s\n", failure.URL, failure.Error)
+			fmt.Fprintf(os.Stderr, "  %s failed: %s\n", terminaltext.Safe(failure.URL), terminaltext.Safe(failure.Error))
 		}
 		fmt.Printf("Imported %d feed(s); %d skipped (already present); %d failed.\n", summary.Added, summary.Skipped, summary.Failed)
 		return nil
@@ -1496,19 +1504,19 @@ func listPlugins(_ *cobra.Command, _ []string) {
 		if pp, ok := p.(interface{ Path() string }); ok {
 			path = pp.Path()
 		}
-		fmt.Fprintf(w, "%s\t%d\t%s\n", p.Name(), p.Priority(), path)
+		fmt.Fprintf(w, "%s\t%d\t%s\n", terminaltext.Safe(p.Name()), p.Priority(), terminaltext.Safe(path))
 	}
 	_ = w.Flush()
 }
 
-func refreshFeeds(_ *cobra.Command, _ []string) {
+func refreshFeeds(cmd *cobra.Command, _ []string) {
 	if err := withSession(true, func(sess *control.Session) error {
 		if forceRefresh {
 			fmt.Println("Force refresh enabled - ignoring ETag/Last-Modified headers")
 		}
 
 		fmt.Println("Refreshing all feeds...")
-		summary, err := sess.Feeds.RefreshAllFeeds(context.Background(), forceRefresh)
+		summary, err := sess.Feeds.RefreshAllFeeds(commandContext(cmd), forceRefresh)
 		if err != nil {
 			return fmt.Errorf("failed to refresh feeds: %w", err)
 		}
@@ -1521,9 +1529,21 @@ func refreshFeeds(_ *cobra.Command, _ []string) {
 	}
 }
 
-func main() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+func commandContext(cmd *cobra.Command) context.Context {
+	if cmd == nil {
+		return context.Background()
 	}
+	return cmd.Context()
 }
+
+func run() int {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", terminaltext.Safe(err.Error()))
+		return 1
+	}
+	return 0
+}
+
+func main() { os.Exit(run()) }

@@ -49,6 +49,11 @@ func unitPath() (string, error) {
 // the file is written are returned with the path so the caller can surface a
 // manual-enable hint.
 func Install(o *Options) (string, error) {
+	prepared, prepErr := prepareOptions(o)
+	if prepErr != nil {
+		return "", prepErr
+	}
+	o = prepared
 	path, err := unitPath()
 	if err != nil {
 		return "", err
@@ -104,12 +109,30 @@ func LogCommand(follow bool, lines int) (name string, args []string, err error) 
 }
 
 func unitContent(o *Options) (string, error) {
-	data := struct{ Exec string }{o.BinPath + " " + strings.Join(serveArgs(o), " ")}
+	args := append([]string{o.BinPath}, serveArgs(o)...)
+	for i, arg := range args {
+		if strings.ContainsAny(arg, "\x00\r\n") {
+			return "", fmt.Errorf("service argument contains control characters")
+		}
+		args[i] = systemdArgument(arg)
+	}
+	data := struct{ Exec string }{strings.Join(args, " ")}
 	var b strings.Builder
 	if err := unitTmpl.Execute(&b, data); err != nil {
 		return "", fmt.Errorf("rendering unit: %w", err)
 	}
 	return b.String(), nil
+}
+
+// systemd expands percent specifiers and dollar variables even inside quoted
+// ExecStart arguments; escape those independently from token quoting.
+func systemdArgument(arg string) string {
+	if arg != "" && !strings.ContainsAny(arg, " \t\r\n\\\"'$%") {
+		return arg
+	}
+	arg = strings.ReplaceAll(arg, "%", "%%")
+	arg = strings.ReplaceAll(arg, "$", "$$")
+	return strconv.Quote(arg)
 }
 
 func run(name string, args ...string) error {

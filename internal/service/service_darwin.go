@@ -63,6 +63,11 @@ func plistPath() (string, error) {
 // Install writes the LaunchAgent plist and loads it. RunAtLoad + KeepAlive
 // make it start now and restart on exit/login.
 func Install(o *Options) (string, error) {
+	prepared, prepErr := prepareOptions(o)
+	if prepErr != nil {
+		return "", prepErr
+	}
+	o = prepared
 	path, err := plistPath()
 	if err != nil {
 		return "", err
