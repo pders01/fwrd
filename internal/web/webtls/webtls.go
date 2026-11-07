@@ -24,12 +24,14 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"log"
 	"math/big"
 	"net"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -72,9 +74,9 @@ func NewSource(mode, dir, certFile, keyFile string, hosts []string) (Source, err
 	}
 	switch mode {
 	case "", ModeSelfSigned:
-		return &generatedSource{dir: dir, hosts: hosts, withCA: false}, nil
+		return &generatedSource{dir: dir, hosts: append([]string(nil), hosts...), withCA: false}, nil
 	case ModeLocalCA:
-		return &generatedSource{dir: dir, hosts: hosts, withCA: true}, nil
+		return &generatedSource{dir: dir, hosts: append([]string(nil), hosts...), withCA: true}, nil
 	case ModeFile:
 		return nil, fmt.Errorf("tls mode %q requires --tls-cert and --tls-key", mode)
 	default:
@@ -101,6 +103,18 @@ type generatedSource struct {
 	dir    string
 	hosts  []string
 	withCA bool
+
+	mu         sync.Mutex
+	current    *tls.Certificate
+	retryAfter time.Time
+	now        func() time.Time // optional clock for renewal tests; set before use
+}
+
+func (s *generatedSource) timeNow() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
 }
 
 func (s *generatedSource) certPath() string  { return filepath.Join(s.dir, "cert.pem") }
@@ -109,6 +123,40 @@ func (s *generatedSource) caPath() string    { return filepath.Join(s.dir, "ca.p
 func (s *generatedSource) caKeyPath() string { return filepath.Join(s.dir, "ca-key.pem") }
 
 func (s *generatedSource) TLSConfig() (*tls.Config, error) {
+	if _, err := s.certificate(nil); err != nil {
+		return nil, err
+	}
+	// No static Certificates fallback: GetCertificate must also run for
+	// clients without SNI (notably IP-literal connections).
+	return &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: s.certificate}, nil
+}
+
+func (s *generatedSource) certificate(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.timeNow()
+	valid := s.current != nil && !now.Before(s.current.Leaf.NotBefore) && now.Before(s.current.Leaf.NotAfter)
+	if valid && (now.Add(renewWindow).Before(s.current.Leaf.NotAfter) || now.Before(s.retryAfter)) {
+		return s.current, nil
+	}
+	cert, err := s.renewCertificate()
+	if err != nil {
+		if valid {
+			// Transient disk errors during the early renewal window must not
+			// take a still-valid HTTPS service offline. Retry at most once a
+			// minute; expired certificates never receive this fallback.
+			s.retryAfter = now.Add(time.Minute)
+			log.Printf("TLS renewal failed; retaining valid certificate: %v", err)
+			return s.current, nil
+		}
+		return nil, err
+	}
+	s.current = cert
+	s.retryAfter = time.Time{}
+	return cert, nil
+}
+
+func (s *generatedSource) renewCertificate() (*tls.Certificate, error) {
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating tls dir %s: %w", s.dir, err)
 	}
@@ -119,7 +167,11 @@ func (s *generatedSource) TLSConfig() (*tls.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading generated keypair: %w", err)
 	}
-	return serverConfig(&cert), nil
+	cert.Leaf, err = x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		return nil, err
+	}
+	return &cert, nil
 }
 
 func (s *generatedSource) Describe() string {
@@ -157,10 +209,11 @@ func (s *generatedSource) leafValid() bool {
 	if err != nil {
 		return false
 	}
-	if _, err := os.Stat(s.keyPath()); err != nil {
+	if _, err := tls.LoadX509KeyPair(s.certPath(), s.keyPath()); err != nil {
 		return false
 	}
-	if time.Now().Add(renewWindow).After(leaf.NotAfter) {
+	now := s.timeNow()
+	if now.Before(leaf.NotBefore) || !now.Add(renewWindow).Before(leaf.NotAfter) {
 		return false
 	}
 	// A mode switch must force regeneration. A self-signed leaf carries a
@@ -169,15 +222,24 @@ func (s *generatedSource) leafValid() bool {
 	if selfSigned := bytes.Equal(leaf.RawIssuer, leaf.RawSubject); selfSigned == s.withCA {
 		return false
 	}
+	if s.withCA {
+		ca, err := loadCert(s.caPath())
+		if err != nil || now.Before(ca.NotBefore) || leaf.NotAfter.After(ca.NotAfter) || leaf.CheckSignatureFrom(ca) != nil {
+			return false
+		}
+	}
 	dns, ips := splitHosts(s.hosts)
 	return sansMatch(leaf, dns, ips)
 }
 
 // ensureCA reuses a persisted, unexpired CA or mints a fresh one.
 func (s *generatedSource) ensureCA() (*x509.Certificate, *ecdsa.PrivateKey, error) {
-	if cert, err := loadCert(s.caPath()); err == nil && time.Now().Before(cert.NotAfter) {
-		if key, err := loadKey(s.caKeyPath()); err == nil {
-			return cert, key, nil
+	now := s.timeNow()
+	if cert, err := loadCert(s.caPath()); err == nil && cert.IsCA && !now.Before(cert.NotBefore) && now.Add(leafValidity).Before(cert.NotAfter) {
+		if key, err := loadKey(s.caKeyPath()); err == nil && cert.PublicKeyAlgorithm == x509.ECDSA {
+			if publicKey, ok := cert.PublicKey.(*ecdsa.PublicKey); ok && publicKey.Equal(&key.PublicKey) {
+				return cert, key, nil
+			}
 		}
 	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -187,8 +249,8 @@ func (s *generatedSource) ensureCA() (*x509.Certificate, *ecdsa.PrivateKey, erro
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial(),
 		Subject:               pkix.Name{CommonName: "fwrd local CA"},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(caValidity),
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(caValidity),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
@@ -223,8 +285,8 @@ func (s *generatedSource) generateLeaf(caCert *x509.Certificate, caKey *ecdsa.Pr
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial(),
 		Subject:               pkix.Name{CommonName: leafCN(dns)},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(leafValidity),
+		NotBefore:             s.timeNow().Add(-time.Hour),
+		NotAfter:              s.timeNow().Add(leafValidity),
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,

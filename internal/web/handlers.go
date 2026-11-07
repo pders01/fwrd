@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -280,19 +281,14 @@ func (s *Server) handleRefreshAll(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSetFeedDesk(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	feed, err := s.store.GetFeed(id)
-	if err != nil || feed == nil {
-		http.NotFound(w, r)
-		return
-	}
 	deskID, ok := editorial.NormalizeDeskID(r.FormValue("desk"))
 	if !ok {
 		setFlash(w, flashError, "Unknown desk.")
 		redirect(w, r, "/feeds/"+id)
 		return
 	}
-	feed.DeskID = deskID
-	if err := s.saveFeed(r.Context(), feed); err != nil {
+	feed, err := s.setFeedDesk(r.Context(), id, deskID)
+	if err != nil {
 		setFlash(w, flashError, "Couldn't update desk: "+err.Error())
 		redirect(w, r, "/feeds/"+id)
 		return
@@ -355,18 +351,7 @@ func (s *Server) handleOPMLImport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "feed management is disabled", http.StatusServiceUnavailable)
 		return
 	}
-	// Bound the whole request body, not just the in-memory portion:
-	// ParseMultipartForm's argument caps memory and spills the rest to
-	// disk, so without this a hostile body could fill the disk.
-	r.Body = http.MaxBytesReader(w, r.Body, opmlMaxUpload)
-	if err := r.ParseMultipartForm(opmlMaxUpload); err != nil {
-		setFlash(w, flashError, "Upload failed: "+err.Error())
-		redirect(w, r, "/feeds")
-		return
-	}
-	// RemoveAll deletes any temp files ParseMultipartForm spilled to disk;
-	// closing the file handle alone does not. Runs on every return below.
-	defer func() { _ = r.MultipartForm.RemoveAll() }()
+	// mutationForm has bounded and parsed the body and owns multipart cleanup.
 	file, _, err := r.FormFile("file")
 	if err != nil {
 		setFlash(w, flashError, "Choose an OPML file to import.")
@@ -423,11 +408,12 @@ func (s *Server) applyImportedDeskMetadata(r *http.Request, imported []opml.Feed
 			continue
 		}
 		feed := byURL[item.URL]
-		if feed == nil || feed.DeskID == item.DeskID {
+		if feed == nil {
 			continue
 		}
-		feed.DeskID = item.DeskID
-		if err := s.saveFeed(r.Context(), feed); err != nil {
+		// The snapshot is only an identity lookup. Apply the assignment to
+		// the current record atomically, even for repeated OPML entries.
+		if _, err := s.setFeedDesk(r.Context(), feed.ID, item.DeskID); err != nil {
 			return err
 		}
 	}
@@ -458,8 +444,24 @@ func redirect(w http.ResponseWriter, r *http.Request, to string) {
 // preventing the form from being abused as an open redirect. Anything not
 // starting with a single leading slash falls back to the index.
 func safeReturn(p string) string {
-	if strings.HasPrefix(p, "/") && !strings.HasPrefix(p, "//") {
-		return p
+	if !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") {
+		return "/"
 	}
-	return "/"
+	// Browsers treat backslashes as slashes in special URLs and discard
+	// some control bytes. Reject both raw and encoded forms rather than
+	// relying only on net/url's (non-browser) interpretation.
+	decoded, err := url.PathUnescape(p)
+	if err != nil {
+		return "/"
+	}
+	for _, value := range []string{p, decoded} {
+		if strings.ContainsRune(value, '\\') || strings.ContainsFunc(value, func(c rune) bool { return c < 0x20 || c == 0x7f }) {
+			return "/"
+		}
+	}
+	u, err := url.Parse(p)
+	if err != nil || u.IsAbs() || u.Host != "" || strings.HasPrefix(u.Path, "//") {
+		return "/"
+	}
+	return p
 }

@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -145,14 +146,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /favicon.ico", s.handleFavicon)
 	mux.HandleFunc("GET /opml/export", s.handleOPMLExport)
 
-	mux.HandleFunc("POST /feeds", s.handleAddFeed)
-	mux.HandleFunc("POST /opml/import", s.handleOPMLImport)
-	mux.HandleFunc("POST /feeds/{id}/refresh", s.handleRefreshFeed)
-	mux.HandleFunc("POST /feeds/{id}/desk", s.handleSetFeedDesk)
-	mux.HandleFunc("POST /feeds/{id}/delete", s.handleDeleteFeed)
-	mux.HandleFunc("POST /refresh", s.handleRefreshAll)
-	mux.HandleFunc("POST /read", s.handleToggleRead)
-	mux.HandleFunc("POST /star", s.handleToggleStar)
+	mux.HandleFunc("POST /feeds", mutationForm(s.handleAddFeed, mutationMaxBody))
+	mux.HandleFunc("POST /opml/import", mutationForm(s.handleOPMLImport, opmlMaxUpload))
+	mux.HandleFunc("POST /feeds/{id}/refresh", mutationForm(s.handleRefreshFeed, mutationMaxBody))
+	mux.HandleFunc("POST /feeds/{id}/desk", mutationForm(s.handleSetFeedDesk, mutationMaxBody))
+	mux.HandleFunc("POST /feeds/{id}/delete", mutationForm(s.handleDeleteFeed, mutationMaxBody))
+	mux.HandleFunc("POST /refresh", mutationForm(s.handleRefreshAll, mutationMaxBody))
+	mux.HandleFunc("POST /read", mutationForm(s.handleToggleRead, mutationMaxBody))
+	mux.HandleFunc("POST /star", mutationForm(s.handleToggleStar, mutationMaxBody))
 
 	// basicAuth is outermost so unauthenticated requests never reach a
 	// handler; the same-origin guard then gates the mutating routes.
@@ -195,7 +196,7 @@ func (s *Server) auditLog(next http.Handler) http.Handler {
 		s.audit.Log(&audit.Record{
 			Dir:        audit.In,
 			Method:     r.Method,
-			URL:        r.URL.RequestURI(),
+			URL:        audit.RedactURL(r.URL.RequestURI()),
 			Status:     sw.status,
 			Bytes:      sw.bytes,
 			DurationMS: time.Since(start).Milliseconds(),
@@ -280,8 +281,8 @@ func (s *Server) basicAuth(next http.Handler) http.Handler {
 	})
 }
 
-// sameOriginGuard rejects state-changing requests whose Origin/Referer host
-// does not match the request host. GET/HEAD are read-only and pass through.
+// sameOriginGuard rejects state-changing requests whose Origin/Referer origin
+// does not match the request scheme and authority. GET/HEAD are read-only and pass through.
 // This blocks cross-site form POSTs (CSRF) against the local server.
 func (s *Server) sameOriginGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -298,7 +299,7 @@ func (s *Server) sameOriginGuard(next http.Handler) http.Handler {
 }
 
 // sameOrigin reports whether the request's Origin (or, failing that,
-// Referer) host matches the Host it was sent to. A request with neither
+// Referer) matches the scheme and authority it was sent to. A request with neither
 // header is treated as same-origin: curl and other non-browser clients
 // omit them, and they cannot be the vehicle for a browser-driven CSRF.
 func sameOrigin(r *http.Request) bool {
@@ -313,7 +314,29 @@ func sameOrigin(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	return u.Host == r.Host
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	target, err := url.Parse(scheme + "://" + r.Host)
+	if err != nil || u.User != nil || target.User != nil || u.Opaque != "" || u.Hostname() == "" {
+		return false
+	}
+	// Browsers canonicalize host casing and omit default ports. Proxy headers
+	// are deliberately not trusted to determine the request's scheme.
+	return strings.EqualFold(u.Scheme, scheme) &&
+		strings.EqualFold(u.Hostname(), target.Hostname()) &&
+		originPort(u) == originPort(target)
+}
+
+func originPort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	if strings.EqualFold(u.Scheme, "https") {
+		return "443"
+	}
+	return "80"
 }
 
 // Listen binds addr and returns the listener, surfacing a bind failure (e.g.
@@ -433,16 +456,24 @@ func (s *Server) refreshAllFeeds(ctx context.Context) (feed.RefreshSummary, erro
 	return s.manager.RefreshAllFeedsContext(ctx)
 }
 
-func (s *Server) saveFeed(ctx context.Context, value *storage.Feed) error {
+func (s *Server) setFeedDesk(ctx context.Context, id, desk string) (*storage.Feed, error) {
 	if s.coordinator != nil {
-		return s.coordinator.SaveFeed(ctx, value)
+		return s.coordinator.SetFeedDesk(ctx, id, desk)
 	}
 	s.fallbackMu.Lock()
 	defer s.fallbackMu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
-	return s.store.SaveFeed(value)
+	updated, err := s.store.SetFeedDesk(id, desk)
+	if err == nil {
+		if s.manager != nil {
+			s.manager.NotifyDataUpdated(updated, nil)
+		} else if listener, ok := s.searcher.(search.UpdateListener); ok {
+			listener.OnDataUpdated(updated, nil)
+		}
+	}
+	return updated, err
 }
 
 func (s *Server) deleteFeed(ctx context.Context, id string) error {

@@ -35,7 +35,7 @@ func TestAuditLogMiddlewareCapturesStatusAndIP(t *testing.T) {
 	if got.Dir != audit.In {
 		t.Errorf("dir = %q, want in", got.Dir)
 	}
-	if got.Method != "GET" || got.URL != "/feeds?q=x" {
+	if got.Method != "GET" || got.URL != "/feeds?redacted" {
 		t.Errorf("method/url mismatch: %+v", got)
 	}
 	if got.Status != http.StatusCreated {

@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -20,10 +21,19 @@ func leafFromConfig(t *testing.T, s Source) *x509.Certificate {
 	if err != nil {
 		t.Fatalf("TLSConfig: %v", err)
 	}
-	if len(cfg.Certificates) != 1 {
-		t.Fatalf("want 1 certificate, got %d", len(cfg.Certificates))
+	var cert *tls.Certificate
+	if cfg.GetCertificate != nil {
+		cert, err = cfg.GetCertificate(&tls.ClientHelloInfo{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		if len(cfg.Certificates) != 1 {
+			t.Fatalf("want 1 certificate, got %d", len(cfg.Certificates))
+		}
+		cert = &cfg.Certificates[0]
 	}
-	leaf, err := x509.ParseCertificate(cfg.Certificates[0].Certificate[0])
+	leaf, err := x509.ParseCertificate(cert.Certificate[0])
 	if err != nil {
 		t.Fatalf("parse leaf: %v", err)
 	}

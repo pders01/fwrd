@@ -16,13 +16,13 @@
 <form action="/read" method="post" class="inline js-toggle" data-kind="read">
 <input type="hidden" name="id" value="{{.Article.ID}}">
 <input type="hidden" name="read" value="{{if .Article.Read}}0{{else}}1{{end}}">
-<input type="hidden" name="return" value="/article?id={{.Article.ID}}">
+<input type="hidden" name="return" value="/article?id={{urlquery .Article.ID}}">
 <button type="submit" class="link">{{if .Article.Read}}mark unread{{else}}mark read{{end}}</button>
 </form>
 <form action="/star" method="post" class="inline js-toggle" data-kind="star">
 <input type="hidden" name="id" value="{{.Article.ID}}">
 <input type="hidden" name="starred" value="{{if .Article.Starred}}0{{else}}1{{end}}">
-<input type="hidden" name="return" value="/article?id={{.Article.ID}}">
+<input type="hidden" name="return" value="/article?id={{urlquery .Article.ID}}">
 <button type="submit" class="link" aria-pressed="{{if .Article.Starred}}true{{else}}false{{end}}">{{if .Article.Starred}}★ saved{{else}}☆ save{{end}}</button>
 </form>
 </div>
