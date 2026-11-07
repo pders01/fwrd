@@ -1,10 +1,11 @@
 package feed
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"regexp"
-	"time"
 
 	"github.com/mmcdole/gofeed"
 	"github.com/pders01/fwrd/internal/storage"
@@ -48,7 +49,7 @@ func (p *Parser) ParseFeed(reader io.Reader, feedID string) (*ParsedFeed, error)
 	articles := make([]*storage.Article, 0, len(feed.Items))
 	for _, item := range feed.Items {
 		article := &storage.Article{
-			ID:          generateID(feedID, item.GUID),
+			ID:          generateID(feedID, itemIdentity(item)),
 			FeedID:      feedID,
 			Title:       item.Title,
 			Description: item.Description,
@@ -128,7 +129,22 @@ func generateID(feedID, guid string) string {
 	if guid != "" {
 		return fmt.Sprintf("%s:%s", feedID, guid)
 	}
-	return fmt.Sprintf("%s:%d", feedID, time.Now().UnixNano())
+	return feedID + ":empty"
+}
+
+// Prefer publisher identity, then the article URL. Content-only items use a
+// deterministic digest of stable publisher fields (never parse time).
+func itemIdentity(item *gofeed.Item) string {
+	if item.GUID != "" {
+		return item.GUID
+	}
+	if item.Link != "" {
+		return item.Link
+	}
+	content, _ := json.Marshal([]string{
+		item.Title, item.Description, item.Content, item.Published, item.Updated,
+	})
+	return fmt.Sprintf("sha256:%x", sha256.Sum256(content))
 }
 
 func uniqueStrings(strs []string) []string {
