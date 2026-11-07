@@ -268,5 +268,5 @@ func IsRetryable(err error) bool {
 		return true
 	}
 	var opErr *net.OpError
-	return errors.As(err, &opErr) && !opErr.Timeout()
+	return (errors.As(err, &opErr) && !opErr.Timeout()) || retryableTransportError(err)
 }

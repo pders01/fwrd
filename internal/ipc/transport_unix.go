@@ -25,6 +25,10 @@ func transportRunDir() string {
 	return filepath.Join(string(filepath.Separator), "tmp", "fwrd-"+strconv.Itoa(os.Getuid()))
 }
 
+// Unix network operations already report net.OpError or standard EOF/closed
+// sentinels. There are no additional native pipe errors to classify here.
+func retryableTransportError(error) bool { return false }
+
 // DialEndpoint connects to the Unix-domain IPC endpoint. Callers apply
 // handshake and operation deadlines to the returned connection.
 func DialEndpoint(addr string) (net.Conn, error) {

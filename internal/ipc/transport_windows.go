@@ -4,6 +4,7 @@ package ipc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 
@@ -49,6 +50,15 @@ func ListenEndpoint(endpoint Endpoint) (net.Listener, error) {
 		return nil, fmt.Errorf("listen pipe %s: %w", endpoint.Address, err)
 	}
 	return ln, nil
+}
+
+// retryableTransportError recognizes native errors from go-winio, whose
+// writes return Win32 errors directly rather than wrapping net.OpError.
+func retryableTransportError(err error) bool {
+	return errors.Is(err, winio.ErrFileClosed) ||
+		errors.Is(err, windows.ERROR_BROKEN_PIPE) ||
+		errors.Is(err, windows.ERROR_NO_DATA) ||
+		errors.Is(err, windows.ERROR_PIPE_NOT_CONNECTED)
 }
 
 // RemoveEndpoint is a no-op on Windows; named pipes disappear when the last
