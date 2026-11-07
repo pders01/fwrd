@@ -90,6 +90,8 @@ type App struct {
 	articlesCursor      string
 	articlesHasMore     bool
 	articlesLoadingMore bool
+	articlesSeq         uint64 // identifies the latest list request, including failures
+	articlesErr         error  // cleared on recovery without hiding unrelated errors
 
 	// Theme change plumbing. themeEvents is signaled (without payload)
 	// whenever an external source — SIGUSR1 or the macOS plist watcher —
@@ -475,26 +477,38 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.feedList.SetItems(items)
 
 	case articlesLoadedMsg:
-		if a.view == ViewArticles {
-			if msg.appendPage {
-				a.articles = append(a.articles, msg.articles...)
-				items := a.articleList.Items()
-				for _, art := range msg.articles {
-					items = append(items, articleItem{article: art, maxDescLen: a.config.UI.Article.MaxDescriptionLength})
-				}
-				a.articleList.SetItems(items)
-			} else {
-				a.articles = msg.articles
-				items := make([]list.Item, len(msg.articles))
-				for i, art := range msg.articles {
-					items[i] = articleItem{article: art, maxDescLen: a.config.UI.Article.MaxDescriptionLength}
-				}
-				a.articleList.SetItems(items)
-			}
-			a.articlesCursor = msg.cursor
-			a.articlesHasMore = msg.hasMore
-			a.articlesLoadingMore = false
+		if a.currentFeed == nil || msg.feedID != a.currentFeed.ID || msg.seq != a.articlesSeq {
+			return a, nil
 		}
+		a.articlesLoadingMore = false
+		if msg.err != nil {
+			a.err = msg.err
+			a.articlesErr = msg.err
+			// Keep the cursor and loaded items, but don't immediately retry in
+			// response to this error (or background spinner/status messages).
+			return a, nil
+		}
+		if a.articlesErr != nil && errors.Is(a.err, a.articlesErr) {
+			a.err = nil
+		}
+		a.articlesErr = nil
+		if msg.appendPage {
+			a.articles = append(a.articles, msg.articles...)
+			items := a.articleList.Items()
+			for _, art := range msg.articles {
+				items = append(items, articleItem{article: art, maxDescLen: a.config.UI.Article.MaxDescriptionLength})
+			}
+			a.articleList.SetItems(items)
+		} else {
+			a.articles = msg.articles
+			items := make([]list.Item, len(msg.articles))
+			for i, art := range msg.articles {
+				items[i] = articleItem{article: art, maxDescLen: a.config.UI.Article.MaxDescriptionLength}
+			}
+			a.articleList.SetItems(items)
+		}
+		a.articlesCursor = msg.cursor
+		a.articlesHasMore = msg.hasMore
 
 	case articleReadToggledMsg:
 		if msg.err != nil {
@@ -627,8 +641,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		newListModel, cmd := a.articleList.Update(msg)
 		a.articleList = newListModel
 		cmds = append(cmds, cmd)
-		if more := a.maybeLoadMoreArticles(); more != nil {
-			cmds = append(cmds, more)
+		// Keys also prefetch via KeyHandler. Background ticks/errors must not
+		// cause an unbounded retry loop when the store is unavailable.
+		if _, loaded := msg.(articlesLoadedMsg); loaded {
+			if more := a.maybeLoadMoreArticles(); more != nil {
+				cmds = append(cmds, more)
+			}
 		}
 	case ViewReader:
 		newViewport, cmd := a.viewport.Update(msg)
@@ -1092,6 +1110,9 @@ type feedsLoadedMsg struct {
 }
 
 type articlesLoadedMsg struct {
+	feedID     string
+	seq        uint64
+	err        error
 	articles   []*storage.Article
 	cursor     string
 	appendPage bool

@@ -23,6 +23,12 @@ func (a *App) loadFeeds() tea.Cmd {
 }
 
 func (a *App) loadArticles(feedID string) tea.Cmd {
+	// Never show the previous feed's articles while the new request is pending.
+	a.articles = nil
+	a.articleList.SetItems(nil)
+	a.articlesCursor = ""
+	a.articlesHasMore = false
+	a.articlesLoadingMore = false
 	return a.loadArticlesPage(feedID, "", false)
 }
 
@@ -38,11 +44,14 @@ func (a *App) loadMoreArticles(feedID, cursor string) tea.Cmd {
 // articlesLoadedMsg whose fields tell the Update handler whether to
 // replace or append, and where the next cursor sits.
 func (a *App) loadArticlesPage(feedID, cursor string, appendPage bool) tea.Cmd {
+	a.articlesSeq++
+	seq := a.articlesSeq
+	limit := pickPositive(a.config.UI.Article.ListLimit, DefaultArticleLimit)
+	store := a.store
 	return func() tea.Msg {
-		limit := pickPositive(a.config.UI.Article.ListLimit, DefaultArticleLimit)
-		articles, err := a.store.GetArticlesWithCursor(feedID, limit, cursor)
+		articles, err := store.GetArticlesWithCursor(feedID, limit, cursor)
 		if err != nil {
-			return errorMsg{err: wrapErr("load articles", err)}
+			return articlesLoadedMsg{feedID: feedID, seq: seq, appendPage: appendPage, err: wrapErr("load articles", err)}
 		}
 		nextCursor := ""
 		hasMore := false
@@ -51,6 +60,8 @@ func (a *App) loadArticlesPage(feedID, cursor string, appendPage bool) tea.Cmd {
 			nextCursor = articles[len(articles)-1].ID
 		}
 		return articlesLoadedMsg{
+			feedID:     feedID,
+			seq:        seq,
 			articles:   articles,
 			appendPage: appendPage,
 			cursor:     nextCursor,
