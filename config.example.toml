@@ -22,6 +22,9 @@ user_agent = "fwrd/1.0 (https://github.com/pders01/fwrd)"
 # Cap on parallel feed fetches during a refresh. Lower this if your
 # upstream rate-limits or you want gentler behaviour on shared networks.
 max_concurrent_refreshes = 5
+# Explicitly permit loopback/private feed and plugin requests for a trusted
+# intranet installation. Keep false for untrusted subscriptions/users.
+allow_private_networks = false
 
 [ui.colors]
 # Color scheme - accepts hex values or named colors
@@ -99,6 +102,8 @@ back = "esc"
 help = "?"
 
 [web]
+# Non-loopback serving without credentials is denied unless explicitly opted in.
+allow_unauthenticated = false
 # Reading font for the web view (fwrd serve). Uses the OS system font
 # library — nothing is bundled or fetched. Presets:
 #   "serif" (default) — system serif, e.g. New York / Georgia

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,12 +28,14 @@ const (
 )
 
 type Config struct {
-	Database DatabaseConfig `mapstructure:"database"`
-	Feed     FeedConfig     `mapstructure:"feed"`
-	UI       UIConfig       `mapstructure:"ui"`
-	Media    MediaConfig    `mapstructure:"media"`
-	Keys     KeyConfig      `mapstructure:"keys"`
-	Web      WebConfig      `mapstructure:"web"`
+	// SourcePath is the absolute loaded config file, not a persisted setting.
+	SourcePath string         `mapstructure:"-"`
+	Database   DatabaseConfig `mapstructure:"database"`
+	Feed       FeedConfig     `mapstructure:"feed"`
+	UI         UIConfig       `mapstructure:"ui"`
+	Media      MediaConfig    `mapstructure:"media"`
+	Keys       KeyConfig      `mapstructure:"keys"`
+	Web        WebConfig      `mapstructure:"web"`
 }
 
 type WebConfig struct {
@@ -46,6 +49,9 @@ type WebConfig struct {
 	// off by default (empty username), which suits the localhost-only
 	// default bind. Set it before exposing the server beyond loopback.
 	Auth WebAuthConfig `mapstructure:"auth"`
+	// AllowUnauthenticated explicitly opts into exposing a non-loopback web
+	// listener without credentials. It is false by default.
+	AllowUnauthenticated bool `mapstructure:"allow_unauthenticated"`
 	// TLS controls HTTPS for the web view. HTTPS is on by default with an
 	// auto-generated self-signed certificate; see WebTLSConfig.
 	TLS WebTLSConfig `mapstructure:"tls"`
@@ -105,6 +111,9 @@ type FeedConfig struct {
 	// parallel during RefreshAllFeeds. Set <= 0 to fall back to
 	// DefaultMaxConcurrentRefreshes.
 	MaxConcurrentRefreshes int `mapstructure:"max_concurrent_refreshes"`
+	// AllowPrivateNetworks explicitly permits intranet/loopback feed and plugin
+	// requests. Keep disabled for untrusted subscriptions or exposed services.
+	AllowPrivateNetworks bool `mapstructure:"allow_private_networks"`
 }
 
 type UIConfig struct {
@@ -267,7 +276,14 @@ func normalizeOverrides(v *viper.Viper, prefix string, defaults map[string]any) 
 			altPath = prefix + "." + altPath
 		}
 		if v.InConfig(altPath) {
-			v.Set(path, v.Get(altPath))
+			value := v.Get(altPath)
+			if env, exists := os.LookupEnv("FWRD_" + strings.ToUpper(strings.ReplaceAll(path, ".", "_"))); exists {
+				value = env
+			}
+			// Both spellings must decode to the same value, regardless of map
+			// iteration order; environment overrides still take precedence.
+			v.Set(path, value)
+			v.Set(altPath, value)
 		}
 	}
 }
@@ -325,6 +341,8 @@ func Load(configPath string) (*Config, error) {
 	}
 
 	v.SetEnvPrefix("FWRD")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AllowEmptyEnv(true)
 	v.AutomaticEnv()
 
 	if err := v.ReadInConfig(); err != nil {
@@ -345,9 +363,34 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
-	// Expand paths after loading
+	// Resolve file-relative paths once, before a service changes working dir.
+	if used := v.ConfigFileUsed(); used != "" {
+		base, err := filepath.Abs(filepath.Dir(used))
+		if err != nil {
+			return nil, fmt.Errorf("resolve config directory: %w", err)
+		}
+		config.SourcePath = filepath.Join(base, filepath.Base(used))
+		resolveRelativePaths(&config, base)
+	}
 	expandPaths(&config)
-
+	_, indexFromEnv := os.LookupEnv("FWRD_DATABASE_SEARCH_INDEX")
+	if !indexFromEnv && !v.InConfig("database.search_index") && !v.InConfig("database.searchindex") {
+		if config.Database.Path != cfg.Database.Path {
+			config.Database.SearchIndex = DerivedIndexPath(config.Database.Path)
+		}
+	}
+	if config.Database.SearchIndex == "" && config.Database.Path != ":memory:" {
+		config.Database.SearchIndex = DerivedIndexPath(config.Database.Path)
+	}
+	if (config.Web.Auth.Username == "") != (config.Web.Auth.Password == "") {
+		return nil, fmt.Errorf("web.auth requires both a non-empty username and password")
+	}
+	if config.Feed.HTTPTimeout <= 0 {
+		return nil, fmt.Errorf("feed.http_timeout must be positive")
+	}
+	if config.Database.Timeout < 0 || config.Feed.RefreshInterval < 0 || config.Feed.DefaultRetryAfter < 0 {
+		return nil, fmt.Errorf("database and feed durations must not be negative")
+	}
 	return &config, nil
 }
 
@@ -371,14 +414,44 @@ func expandPath(path string) string {
 	return validatedPath
 }
 
-// expandPaths expands all paths in the config
+// DerivedIndexPath keeps custom databases independent. Memory stores leave
+// index ownership to their caller, which can allocate a unique temporary index.
+func DerivedIndexPath(dbPath string) string {
+	if dbPath == ":memory:" || dbPath == "" {
+		return ""
+	}
+	return strings.TrimSuffix(dbPath, filepath.Ext(dbPath)) + ".bleve"
+}
+
+func pathFields(cfg *Config) []*string {
+	return []*string{&cfg.Database.Path, &cfg.Database.SearchIndex,
+		&cfg.Web.TLS.Dir, &cfg.Web.TLS.CertFile, &cfg.Web.TLS.KeyFile, &cfg.Web.Audit.Path}
+}
+
+func resolveRelativePaths(cfg *Config, base string) {
+	for _, path := range pathFields(cfg) {
+		if *path != "" && *path != ":memory:" && !filepath.IsAbs(*path) && !strings.HasPrefix(*path, "~") {
+			*path = filepath.Join(base, *path)
+		}
+	}
+}
+
+// expandPaths expands all filesystem paths, not just the database paths.
 func expandPaths(cfg *Config) {
-	cfg.Database.Path = expandPath(cfg.Database.Path)
-	cfg.Database.SearchIndex = expandPath(cfg.Database.SearchIndex)
+	for _, path := range pathFields(cfg) {
+		if *path != ":memory:" {
+			*path = expandPath(*path)
+		}
+	}
 }
 
 func Save(config *Config, path string) error {
+	return save(config, path, true)
+}
+
+func save(config *Config, path string, overwrite bool) error {
 	v := viper.New()
+	v.SetConfigType("toml")
 
 	// Convert durations to strings for TOML readability
 	dbCfg := map[string]any{
@@ -388,10 +461,12 @@ func Save(config *Config, path string) error {
 	}
 
 	feedCfg := map[string]any{
-		"http_timeout":        config.Feed.HTTPTimeout.String(),
-		"refresh_interval":    config.Feed.RefreshInterval.String(),
-		"default_retry_after": config.Feed.DefaultRetryAfter.String(),
-		"user_agent":          config.Feed.UserAgent,
+		"http_timeout":             config.Feed.HTTPTimeout.String(),
+		"refresh_interval":         config.Feed.RefreshInterval.String(),
+		"default_retry_after":      config.Feed.DefaultRetryAfter.String(),
+		"user_agent":               config.Feed.UserAgent,
+		"max_concurrent_refreshes": config.Feed.MaxConcurrentRefreshes,
+		"allow_private_networks":   config.Feed.AllowPrivateNetworks,
 	}
 
 	v.Set("database", dbCfg)
@@ -402,13 +477,50 @@ func Save(config *Config, path string) error {
 	v.Set("web", config.Web)
 
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
-
-	return v.WriteConfigAs(path)
+	var encoded bytes.Buffer
+	if err := v.WriteConfigTo(&encoded); err != nil {
+		return fmt.Errorf("encode config: %w", err)
+	}
+	var file *os.File
+	var err error
+	if overwrite {
+		file, err = os.CreateTemp(dir, ".fwrd-config-*")
+	} else {
+		file, err = os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	}
+	if err != nil {
+		return fmt.Errorf("create private config: %w", err)
+	}
+	name := file.Name()
+	complete := false
+	defer func() {
+		_ = file.Close()
+		if !complete || overwrite {
+			_ = os.Remove(name)
+		}
+	}()
+	if _, err = file.Write(encoded.Bytes()); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	if err = file.Sync(); err != nil {
+		return fmt.Errorf("sync config: %w", err)
+	}
+	if err = file.Close(); err != nil {
+		return fmt.Errorf("close config: %w", err)
+	}
+	if overwrite {
+		if err = os.Rename(name, path); err != nil {
+			return fmt.Errorf("replace config: %w", err)
+		}
+	}
+	complete = true
+	return nil
 }
 
+// GenerateDefaultConfig never overwrites an existing configuration or symlink.
 func GenerateDefaultConfig(path string) error {
-	return Save(defaultConfig(), path)
+	return save(defaultConfig(), path, false)
 }
