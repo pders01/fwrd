@@ -48,7 +48,8 @@ jobs:
       run: go mod download
 
     - name: Run unit tests
-      run: go test -v ${{ matrix.race }} -coverprofile=coverage.out ${{ matrix.packages }}
+      # Quote the entire flag: PowerShell can split an unquoted dotted value.
+      run: go test -v ${{ matrix.race }} '-coverprofile=coverage.out' ${{ matrix.packages }}
 
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest'
