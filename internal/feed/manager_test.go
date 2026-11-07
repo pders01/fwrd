@@ -131,6 +131,7 @@ func TestRefreshAllFeeds_NotifiesListeners(t *testing.T) {
 	defer store.Close()
 
 	manager := NewManager(store, cfg)
+	manager.SetPermissiveValidation(true) // explicit local HTTP test capability
 	rec := &recordingListener{}
 	manager.RegisterDataListener(rec)
 	manager.RegisterBatchScope(rec)
@@ -284,6 +285,7 @@ func TestAddFeedPreservesSubscribedAndResolvedIdentity(t *testing.T) {
 	require.NoError(t, err)
 	defer store.Close()
 	manager := NewManager(store, config.TestConfig())
+	manager.SetPermissiveValidation(true) // plugin resolves to a local test server
 	manager.PluginRegistry().Register(resolvingTestPlugin{resolved: backend.URL})
 
 	const subscribed = "https://news.example.org/front"
@@ -373,6 +375,7 @@ func TestRefreshFeedWithMockServer(t *testing.T) {
 	defer store.Close()
 
 	manager := NewManager(store, cfg)
+	manager.SetPermissiveValidation(true)
 
 	// Create a feed that needs refreshing
 	feed := &storage.Feed{
@@ -439,6 +442,7 @@ func TestRefreshFeed_RecordsAndClearsError(t *testing.T) {
 	defer store.Close()
 
 	manager := NewManager(store, cfg)
+	manager.SetPermissiveValidation(true)
 	manager.SetForceRefresh(true) // skip ETag/Last-Modified caching
 
 	lastGood := time.Now().Add(-2 * time.Hour)
@@ -545,6 +549,7 @@ func TestRefreshAllFeeds_RunsInParallel(t *testing.T) {
 	defer store.Close()
 
 	manager := NewManager(store, cfg)
+	manager.SetPermissiveValidation(true)
 
 	for i := range numFeeds {
 		feed := &storage.Feed{
@@ -599,6 +604,7 @@ func TestRefreshAllFeedsWithMockServer(t *testing.T) {
 	defer store.Close()
 
 	manager := NewManager(store, cfg)
+	manager.SetPermissiveValidation(true)
 
 	// Create multiple feeds that need refreshing
 	for i := range 3 {

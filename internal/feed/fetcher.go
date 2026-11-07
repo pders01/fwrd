@@ -9,6 +9,7 @@ import (
 	"github.com/pders01/fwrd/internal/audit"
 	"github.com/pders01/fwrd/internal/config"
 	"github.com/pders01/fwrd/internal/storage"
+	"github.com/pders01/fwrd/internal/validation"
 )
 
 type Fetcher struct {
@@ -16,17 +17,25 @@ type Fetcher struct {
 	config      *config.FeedConfig
 	userAgent   string
 	ignoreCache bool
+	policy      *validation.HTTPPolicy
 }
 
 func NewFetcher(cfg *config.Config) *Fetcher {
+	policy := new(validation.HTTPPolicy)
 	return &Fetcher{
-		client: &http.Client{
-			Timeout: cfg.Feed.HTTPTimeout,
-		},
+		client:      policy.NewHTTPClient(cfg.Feed.HTTPTimeout),
+		policy:      policy,
 		config:      &cfg.Feed,
 		userAgent:   cfg.Feed.UserAgent,
 		ignoreCache: false,
 	}
+}
+
+// SetPermissiveValidation explicitly allows private/local HTTP destinations.
+// It updates the existing shared client, including plugin calls and redirects.
+// Production callers must leave the secure default (false) in place.
+func (f *Fetcher) SetPermissiveValidation(allow bool) {
+	f.policy.SetPermissive(allow)
 }
 
 // SetIgnoreCache sets whether to ignore ETag/Last-Modified headers
@@ -42,7 +51,7 @@ func (f *Fetcher) Fetch(feed *storage.Feed) (*http.Response, bool, error) {
 func (f *Fetcher) FetchContext(ctx context.Context, feed *storage.Feed) (*http.Response, bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feed.URL, http.NoBody)
 	if err != nil {
-		return nil, false, fmt.Errorf("creating request: %w", err)
+		return nil, false, fmt.Errorf("creating request: %w", audit.SafeHTTPError(err))
 	}
 	// Tag the request so the audit RoundTripper (if installed) attributes it
 	// to feed fetching rather than a plugin call.
@@ -64,7 +73,7 @@ func (f *Fetcher) FetchContext(ctx context.Context, feed *storage.Feed) (*http.R
 
 	resp, err := f.client.Do(req)
 	if err != nil {
-		return nil, false, fmt.Errorf("fetching feed: %w", err)
+		return nil, false, fmt.Errorf("fetching feed: %w", audit.SafeHTTPError(err))
 	}
 
 	if resp.StatusCode == http.StatusNotModified {

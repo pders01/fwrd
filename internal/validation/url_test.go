@@ -114,8 +114,8 @@ func TestValidateAndNormalize(t *testing.T) {
 		{
 			name:        "URL with existing protocol but not http/https",
 			input:       "ftp://github.com/feed",
-			expected:    "https://ftp://github.com/feed", // Protocol addition happens before scheme validation
-			shouldError: false,                           // The validator adds https:// prefix to any URL without http:// or https://
+			shouldError: true,
+			errorMsg:    "http or https",
 		},
 		{
 			name:        "no hostname",

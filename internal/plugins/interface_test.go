@@ -61,7 +61,7 @@ func TestRegistry_Register(t *testing.T) {
 	registry.Register(plugin)
 
 	assert.Equal(t, 1, len(registry.plugins))
-	assert.Equal(t, plugin, registry.plugins[0])
+	assert.Equal(t, plugin, registry.ListPlugins()[0])
 }
 
 func TestRegistry_FindPlugin(t *testing.T) {
@@ -179,7 +179,7 @@ func TestRegistry_ListPlugins(t *testing.T) {
 	// Verify it returns a copy (modifying returned slice doesn't affect registry)
 	plugins[0] = nil
 	assert.Equal(t, 2, len(registry.plugins))
-	assert.NotNil(t, registry.plugins[0])
+	assert.NotNil(t, registry.ListPlugins()[0])
 }
 
 func TestFeedInfoBasics(t *testing.T) {

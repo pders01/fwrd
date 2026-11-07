@@ -25,10 +25,10 @@ import (
 // driving us OOM.
 const maxFeedBodySize int64 = 50 * 1024 * 1024 // 50 MiB
 
-// Manager orchestrates feed fetch/parse/store. All fields are either
-// immutable after construction or independently goroutine-safe (bbolt for
-// the store, net/http for the fetcher's client). Methods are safe to call
-// from multiple goroutines without external synchronisation.
+// Manager orchestrates feed fetch/parse/store. Configuration and listeners
+// must be wired before use. Application-level mutations and listener batches
+// must be serialized by the control coordinator; refresh workers may fetch
+// different feeds concurrently within that operation.
 type Manager struct {
 	store          *storage.Store
 	fetcher        *Fetcher
@@ -50,7 +50,7 @@ func NewManager(store *storage.Store, cfg *config.Config) *Manager {
 	// Initialize plugin registry with HTTP timeout from config
 	pluginRegistry := plugins.NewRegistry(cfg.Feed.HTTPTimeout)
 
-	return &Manager{
+	manager := &Manager{
 		store:          store,
 		fetcher:        NewFetcher(cfg),
 		parser:         NewParser(),
@@ -58,6 +58,11 @@ func NewManager(store *storage.Store, cfg *config.Config) *Manager {
 		urlValidator:   urlValidator,
 		pluginRegistry: pluginRegistry,
 	}
+	manager.pluginRegistry.SetHTTPClient(manager.fetcher.client)
+	if cfg.Feed.AllowPrivateNetworks {
+		manager.SetPermissiveValidation(true)
+	}
+	return manager
 }
 
 // SetForceRefresh configures the manager to ignore ETag/Last-Modified headers
@@ -108,6 +113,7 @@ func (m *Manager) PluginHTTPClient() *http.Client {
 
 // SetPermissiveValidation enables permissive URL validation for development/testing
 func (m *Manager) SetPermissiveValidation(permissive bool) {
+	m.fetcher.SetPermissiveValidation(permissive)
 	if permissive {
 		m.urlValidator = validation.NewPermissiveFeedURLValidator()
 	} else {
@@ -193,6 +199,15 @@ func (m *Manager) AddFeedContext(ctx context.Context, url string) (*storage.Feed
 		return nil, fmt.Errorf("invalid feed URL: %w", err)
 	}
 
+	existing, err := m.store.GetAllFeeds()
+	if err != nil {
+		return nil, fmt.Errorf("get existing subscriptions: %w", err)
+	}
+	for _, current := range existing {
+		if current.MatchesURL(normalizedURL) {
+			return current, nil
+		}
+	}
 	pluginCtx, cancel := context.WithTimeout(ctx, m.config.Feed.HTTPTimeout)
 	defer cancel()
 
@@ -211,6 +226,15 @@ func (m *Manager) AddFeedContext(ctx context.Context, url string) (*storage.Feed
 	actualFeedURL := feedInfo.FeedURL
 	if actualFeedURL == "" {
 		actualFeedURL = normalizedURL
+	}
+	actualFeedURL, err = m.urlValidator.ValidateAndNormalize(actualFeedURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid resolved feed URL: %w", err)
+	}
+	for _, current := range existing {
+		if current.MatchesURL(actualFeedURL) || current.ID == generateFeedID(actualFeedURL) {
+			return current, nil
+		}
 	}
 
 	subscribedAt := time.Now()
@@ -246,15 +270,20 @@ func (m *Manager) AddFeedContext(ctx context.Context, url string) (*storage.Feed
 	applyOnboardingState(feed, articles)
 
 	m.fetcher.UpdateFeedMetadata(feed, resp)
-	if err := ctx.Err(); err != nil {
-		return nil, err
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
 	}
 
-	if err := m.store.SaveFeed(feed); err != nil {
-		return nil, fmt.Errorf("saving feed: %w", err)
+	articles, err = m.store.CommitFeed(feed, articles, true)
+	if errors.Is(err, storage.ErrFeedExists) {
+		return m.store.GetFeed(feed.ID)
 	}
-	if err := m.store.SaveArticles(articles); err != nil {
-		return nil, fmt.Errorf("saving articles: %w", err)
+	if err != nil {
+		return nil, fmt.Errorf("saving subscription: %w", err)
+	}
+	feed, err = m.store.GetFeed(feed.ID)
+	if err != nil {
+		return nil, fmt.Errorf("read committed subscription: %w", err)
 	}
 
 	m.notifyDataUpdated(feed, articles)
@@ -298,7 +327,7 @@ func (m *Manager) refreshFeedByIDContext(ctx context.Context, feedID string, not
 		// Persist the failure so /feeds can surface a stale/error badge.
 		// Best-effort: a save error here is subordinate to the fetch error.
 		recordFeedError(feed, err)
-		_ = m.store.SaveFeed(feed)
+		_, _ = m.store.CommitFeed(feed, nil, false)
 		return feed, nil, fmt.Errorf("fetching feed: %w", err)
 	}
 
@@ -306,7 +335,7 @@ func (m *Manager) refreshFeedByIDContext(ctx context.Context, feedID string, not
 		// 304/unchanged is a successful round-trip — clear any prior error.
 		feed.LastFetched = time.Now()
 		clearFeedError(feed)
-		if saveErr := m.store.SaveFeed(feed); saveErr != nil {
+		if _, saveErr := m.store.CommitFeed(feed, nil, false); saveErr != nil {
 			return feed, nil, fmt.Errorf("saving feed metadata: %w", saveErr)
 		}
 		return feed, nil, nil
@@ -319,7 +348,7 @@ func (m *Manager) refreshFeedByIDContext(ctx context.Context, feedID string, not
 			return feed, nil, ctxErr
 		}
 		recordFeedError(feed, err)
-		_ = m.store.SaveFeed(feed)
+		_, _ = m.store.CommitFeed(feed, nil, false)
 		return feed, nil, fmt.Errorf("parsing feed: %w", err)
 	}
 	articles := parsed.Articles
@@ -328,19 +357,21 @@ func (m *Manager) refreshFeedByIDContext(ctx context.Context, feedID string, not
 	m.fetcher.UpdateFeedMetadata(feed, resp)
 	feed.UpdatedAt = time.Now()
 	clearFeedError(feed)
-	if err := ctx.Err(); err != nil {
-		return feed, nil, err
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return feed, nil, ctxErr
 	}
 
-	if err := m.store.SaveFeed(feed); err != nil {
-		return feed, nil, fmt.Errorf("saving feed: %w", err)
-	}
-	// Apply the cutoff only to new history. Merge existing reader state in
-	// the same write transaction as content, so concurrent actions aren't lost.
+	// Validators, fetch timestamps, content and current reader state commit
+	// together. A rejected article must not make subsequent fetches return 304
+	// for content that was never persisted.
 	applyOnboardingState(feed, articles)
-	articles, err = m.store.MergeArticles(articles)
+	articles, err = m.store.CommitFeed(feed, articles, false)
 	if err != nil {
-		return feed, nil, fmt.Errorf("saving articles: %w", err)
+		return feed, nil, fmt.Errorf("saving refreshed feed: %w", err)
+	}
+	feed, err = m.store.GetFeed(feed.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read committed refreshed feed: %w", err)
 	}
 
 	if notify {
@@ -488,9 +519,12 @@ func applyParsedIdentity(feed *storage.Feed, parsed *ParsedFeed) {
 	if feed == nil || parsed == nil {
 		return
 	}
-	if feed.SubscribedTitle != "" {
+	switch {
+	case feed.TitleOverride != "":
+		feed.Title = feed.TitleOverride
+	case feed.SubscribedTitle != "":
 		feed.Title = feed.SubscribedTitle
-	} else if strings.TrimSpace(parsed.Title) != "" {
+	case strings.TrimSpace(parsed.Title) != "":
 		feed.Title = strings.TrimSpace(parsed.Title)
 	}
 	if feed.Title == "" {

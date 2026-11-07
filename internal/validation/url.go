@@ -53,14 +53,14 @@ func (v *FeedURLValidator) ValidateAndNormalize(input string) (string, error) {
 	}
 
 	// Add protocol if missing (default to HTTPS for security)
-	if !strings.HasPrefix(input, "http://") && !strings.HasPrefix(input, "https://") {
+	if !strings.Contains(input, "://") {
 		input = "https://" + input
 	}
 
 	// Parse URL
 	parsedURL, err := url.Parse(input)
 	if err != nil {
-		return "", fmt.Errorf("invalid URL format: %w", err)
+		return "", fmt.Errorf("invalid URL format")
 	}
 
 	// Validate scheme
@@ -69,7 +69,7 @@ func (v *FeedURLValidator) ValidateAndNormalize(input string) (string, error) {
 	}
 
 	// Validate host
-	if parsedURL.Host == "" {
+	if parsedURL.Hostname() == "" || parsedURL.Opaque != "" {
 		return "", fmt.Errorf("URL must have a valid hostname")
 	}
 
@@ -89,13 +89,19 @@ func (v *FeedURLValidator) ValidateAndNormalize(input string) (string, error) {
 // validateHostSecurity performs security checks on the hostname
 func (v *FeedURLValidator) validateHostSecurity(host string) error {
 	// Extract hostname without port
-	hostname := host
-	if strings.Contains(host, ":") {
+	hostname := strings.TrimSuffix(strings.ToLower(host), ".")
+	if strings.HasPrefix(hostname, "[") && strings.HasSuffix(hostname, "]") {
+		hostname = strings.Trim(hostname, "[]")
+	} else if strings.Contains(hostname, ":") {
 		var err error
-		hostname, _, err = net.SplitHostPort(host)
+		hostname, _, err = net.SplitHostPort(hostname)
 		if err != nil {
 			return fmt.Errorf("invalid host format: %w", err)
 		}
+	}
+
+	if strings.Contains(hostname, "%") {
+		return fmt.Errorf("scoped IP destinations are not permitted")
 	}
 
 	// Check for localhost if not allowed
@@ -143,38 +149,13 @@ func isLocalhost(hostname string) bool {
 
 // isPrivateIP checks if an IP address is in a private range
 func isPrivateIP(ip net.IP) bool {
-	// Private IPv4 ranges:
-	// 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
-	// Link-local: 169.254.0.0/16
-	// Loopback: 127.0.0.0/8
-
-	private := []string{
-		"10.0.0.0/8",
-		"172.16.0.0/12",
-		"192.168.0.0/16",
-		"169.254.0.0/16", // Link-local
-		"127.0.0.0/8",    // Loopback
+	if ip == nil || !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+		return true
 	}
-
-	for _, cidr := range private {
-		_, block, _ := net.ParseCIDR(cidr)
-		if block != nil && block.Contains(ip) {
-			return true
-		}
+	// Shared carrier-grade NAT is not a public destination either.
+	if v4 := ip.To4(); v4 != nil {
+		return v4[0] == 0 || (v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127)
 	}
-
-	// Check IPv6 private ranges
-	if ip.To4() == nil { // IPv6
-		// fc00::/7 (Unique local address)
-		// fe80::/10 (Link-local)
-		return strings.HasPrefix(ip.String(), "fc") ||
-			strings.HasPrefix(ip.String(), "fd") ||
-			strings.HasPrefix(ip.String(), "fe8") ||
-			strings.HasPrefix(ip.String(), "fe9") ||
-			strings.HasPrefix(ip.String(), "fea") ||
-			strings.HasPrefix(ip.String(), "feb")
-	}
-
 	return false
 }
 

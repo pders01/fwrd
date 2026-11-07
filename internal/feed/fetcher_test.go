@@ -104,6 +104,7 @@ func TestFetcher_Fetch(t *testing.T) {
 			tt.feed.URL = server.URL
 			cfg := config.TestConfig()
 			fetcher := NewFetcher(cfg)
+			fetcher.SetPermissiveValidation(true)
 
 			resp, updated, err := fetcher.Fetch(tt.feed)
 
