@@ -3,6 +3,7 @@ package topics
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // tokenize splits text into a bag of significant word counts: lowercased
@@ -129,15 +130,21 @@ func plain(s string) string {
 // would otherwise cluster as bogus topics. A URL run ends at whitespace or
 // an angle bracket.
 func stripURLs(s string) string {
-	lower := strings.ToLower(s)
 	var b strings.Builder
 	for i := 0; i < len(s); {
-		if strings.HasPrefix(lower[i:], "http://") ||
-			strings.HasPrefix(lower[i:], "https://") ||
-			strings.HasPrefix(lower[i:], "www.") {
+		// Only fold the ASCII scheme, not the whole string: Unicode case
+		// folding can change byte lengths (e.g. İ), invalidating offsets.
+		rest := s[i:]
+		if asciiPrefixFold(rest, "http://") ||
+			asciiPrefixFold(rest, "https://") ||
+			asciiPrefixFold(rest, "www.") {
 			j := i
-			for j < len(s) && !isURLBoundary(rune(s[j])) {
-				j++
+			for j < len(s) {
+				r, size := utf8.DecodeRuneInString(s[j:])
+				if isURLBoundary(r) {
+					break
+				}
+				j += size
 			}
 			b.WriteByte(' ')
 			i = j
@@ -149,8 +156,24 @@ func stripURLs(s string) string {
 	return b.String()
 }
 
+func asciiPrefixFold(s, prefix string) bool {
+	if len(s) < len(prefix) {
+		return false
+	}
+	for i := range prefix {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != prefix[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func isURLBoundary(r rune) bool {
-	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '<' || r == '>' || r == '"' || r == '\''
+	return unicode.IsSpace(r) || r == '<' || r == '>' || r == '"' || r == '\''
 }
 
 // stopwords is a compact English + web/blog boilerplate list. It does not
