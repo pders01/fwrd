@@ -168,7 +168,9 @@ For new subscriptions, fwrd preserves both the URL entered by the user and any
 resolved plugin/fetch URL so source provenance remains inspectable. It records
 the subscription time and marks older or undated imported history read; this
 onboarding rule is not retroactively applied to existing feeds, and refreshes
-preserve existing read/star state.
+preserve existing read/star state. Re-adding an existing subscription is
+idempotent. Feed validators, fetch timestamps and article content commit in
+one transaction, so a failed save cannot suppress the next fetch with a 304.
 
 The server holds the database and search index open for its lifetime. A TUI or
 feed CLI command targeting the same `--db` automatically connects to that
@@ -186,8 +188,11 @@ The default `127.0.0.1` bind is reachable only from the local machine,
 which suits personal use and needs no auth. To reach the web view from
 another device you must bind a non-loopback address (e.g.
 `--addr 0.0.0.0:8080`) — and then **anyone who can reach that address can
-read and modify your feeds.** `serve` prints a warning when it binds
-off-box without auth configured.
+read and modify your feeds.** Non-loopback serving now requires configured
+authentication. To deliberately expose an unauthenticated instance, pass
+`--allow-unauthenticated` (also supported by `service install`) or set
+`[web] allow_unauthenticated = true`. This is an explicit security exception,
+not the default.
 
 Two ways to protect it:
 
@@ -210,6 +215,24 @@ Two ways to protect it:
 - **Reverse proxy.** Front fwrd with nginx/Caddy/Traefik handling TLS and
   authentication, and keep fwrd bound to `127.0.0.1`. This is the
   recommended setup for anything beyond a trusted LAN.
+
+#### Configuration and outbound requests
+
+Builds require **Go 1.26.10 or newer**. Nested environment settings use
+underscore-separated names, for example `FWRD_DATABASE_PATH`,
+`FWRD_WEB_AUTH_USERNAME`, and `FWRD_WEB_AUTH_PASSWORD`. Both authentication
+fields must be supplied together. File-relative database, index, certificate,
+and audit-log paths resolve against the configuration file's directory.
+Generated/saved configuration files are private (`0600` on Unix), and
+`config generate` refuses to overwrite an existing file.
+
+Feed and Lua-plugin requests reject loopback, private and link-local
+addresses at connection time, including DNS results and redirects. For a
+trusted intranet reader, explicitly set `[feed] allow_private_networks = true`
+(or `FWRD_FEED_ALLOW_PRIVATE_NETWORKS=true`). This relaxes the boundary for all
+subscriptions/plugins in that process; do not enable it for untrusted users.
+Outbound proxy environment variables are intentionally ignored because proxy-side
+DNS resolution would bypass this policy.
 
 #### HTTPS / TLS
 
@@ -305,7 +328,7 @@ Install `fwrd serve` as a per-user service — a systemd user unit on Linux, a
 launchd LaunchAgent on macOS. No root; it writes under your home directory.
 
 ```bash
-./fwrd service install     # defaults to --addr 0.0.0.0:8080 --mdns, HTTPS on
+./fwrd service install     # private default: 127.0.0.1:8080, HTTPS on
 ./fwrd service uninstall
 ```
 
@@ -316,16 +339,20 @@ mDNS name, or TLS with the same `--addr` / `--mdns` / `--mdns-name` /
 
 ```bash
 # Multi-homed host: auto-detect IPs on en0 and en9
-./fwrd service install --addr 0.0.0.0:5336 --mdns-iface en0,en9 --tls-mode local-ca
+./fwrd service install --addr 0.0.0.0:5336 --mdns --mdns-iface en0,en9 --tls-mode local-ca
 ```
 
 Using `--mdns-iface` instead of `--mdns-ip` keeps the service working across
 DHCP address changes — fwrd resolves each interface's current IP at startup.
 If you do need fixed addresses (e.g. alias IPs from `fwrd net up`), pass
 `--mdns-ip`; be aware those IPs must stay in sync with your network setup.
-Because the default bind is LAN-facing and unauthenticated, set `[web.auth]`
-(see above) when installing on a shared network; HTTPS (the default) keeps
-those credentials encrypted in transit.
+The default bind is loopback-only and mDNS is off. Configure `[web.auth]`
+before opting into a LAN bind; HTTPS (the default) keeps those credentials
+encrypted in transit. Service configuration, database and certificate paths
+are resolved before installation, so the service does not depend on your
+shell's working directory. Environment-based service settings must also be
+provided in the service manager's environment; terminal variables are not
+persisted as credentials in unit/plist arguments.
 
 If the chosen port is already in use, `serve` now fails fast with a clear
 error instead of pretending to start. As a background service it retries a few
@@ -527,7 +554,10 @@ Scripts run on a sandboxed gopher-lua runtime:
     (or whole match) using Go RE2 syntax
   - `log.info(msg)` / `log.warn(msg)` route to fwrd's debug log
 
-A 256 KiB script-size cap and a 30-second per-call timeout (matching
+Loading and URL routing have a two-second execution ceiling. JSON conversion
+rejects cycles and enforces depth, node, and byte budgets. Installed plugins
+still require trust: the capability sandbox is not process-level memory isolation.
+A 256 KiB script-size cap and a 30-second enhancement timeout (matching
 `AddFeed`) prevent runaway scripts. Plugin HTTP requests share the
 fetcher's User-Agent and timeout so plugin-driven traffic looks like
 fwrd to upstreams.

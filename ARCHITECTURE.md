@@ -47,8 +47,14 @@ Handles high-performance local data persistence:
 - **Optimized indexes**: Published-date index for efficient article sorting
 - **Models**: Struct definitions for feeds, articles with comprehensive metadata
 - **Store**: Database operations abstraction with transaction management
-- **Refresh merges**: Fetched content and existing read/starred flags are merged
-  in one bbolt write transaction; new articles keep their onboarding state
+- **Atomic feed commits**: Subscription creation/refresh commits validators,
+  timestamps, content and current read/starred flags in one bbolt transaction.
+  New articles keep onboarding state; duplicate creation is idempotent
+- **Field-specific mutations**: Desk assignment and title overrides update only
+  existing records; refresh preserves these user-owned fields
+- **Ordered indexes**: Signed seconds/nanoseconds support pre-epoch and undated
+  articles. Global and per-feed cursor reads decode only the requested page.
+  Existing derived indexes migrate transactionally at database open
 
 ### internal/tui
 Implements the sophisticated terminal user interface:
@@ -102,7 +108,7 @@ it. It reaches near-parity with the other front-ends:
   mark articles read/unread. These are `POST`-only and use Post/Redirect/Get
   (303) so a browser refresh won't re-submit
 - **CSRF defense**: a same-origin guard rejects non-GET requests whose
-  `Origin`/`Referer` host doesn't match the request host. With no cookies or
+  `Origin`/`Referer` scheme and authority don't match the request origin. With no cookies or
   sessions there's no credential to steal, but the guard still blocks forged
   cross-site form posts (e.g. a feed-delete). Caller-supplied redirect targets
   are constrained to local paths to prevent open redirects
@@ -119,12 +125,39 @@ it. It reaches near-parity with the other front-ends:
 - **IPC reliability**: Storage and long-running feed operations use separate
   persistent connections. Idle connections remain open; handshake and partial
   frame reads are bounded. Calls include queueing/reconnection in their timeout,
-  support cancellation, and retry read-only methods at most once after a
+  propagate request deadlines/disconnect cancellation to queued and running
+  server operations, and retry read-only methods at most once after a
   transport failure. Mutations are never automatically replayed because a lost
   response does not establish whether they committed
 - **TUI pagination**: Results and failures carry feed/request identities so stale
   responses cannot replace another feed's list. Failed pages retain their cursor
-  and loaded items for a subsequent user-triggered retry
+  and loaded items for a subsequent user-triggered retry. Search and reader
+  completions carry their own generation/target identities as well; worker
+  commands snapshot inputs and never mutate the live model
+
+### Runtime ownership and security boundaries
+
+- Local CLI/TUI and serve mutations share the coordinator ownership model.
+  Listener batch scopes are exclusive from BeginBatch through CommitBatch;
+  search hits hydrate authoritative storage records instead of partial articles
+- App shutdown cancels commands/watchers, drains active work, and closes owned
+  indexes. Renderers are exclusively leased for each render; read/star changes
+  use per-article sequenced intents, applied only on the Update goroutine
+- Non-loopback CLI serving requires credentials or explicit unauthenticated
+  consent; service installation defaults to loopback. Configuration has one
+  loader, nested environment bindings and private, atomic file replacement
+- Outbound feed/plugin requests use a shared DNS-pinning transport policy,
+  including redirects. Proxy environment variables are deliberately ignored;
+  explicit private-network mode is a trusted-intranet exception
+- Web mutation bodies and concurrent TLS classification are bounded. Generated
+  certificates renew on handshake, retaining a still-valid certificate across
+  transient renewal failures but never serving an expired cached certificate
+- Lua loading/routing have a two-second ceiling; enhancement has a thirty-second
+  ceiling and caller cancellation. JSON conversion has cycle/depth/node/byte
+  budgets. This is a capability sandbox, not process-level memory isolation;
+  installed plugins and native Go extensions still require trust
+- Untrusted terminal text is sanitized before styling; URL credentials/query
+  data are redacted from HTTP audit/error messages
 
 ### internal/validation
 Provides comprehensive security validation:
