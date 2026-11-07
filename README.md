@@ -1,29 +1,58 @@
 # fwrd
 
-A fast, terminal-based RSS feed aggregator with full-text search capabilities, built with Go and Charm.sh tools. **fwrd** helps you navigate through time as expressed by new content, while being a respectful netizen that honors server resources.
+A terminal-based RSS feed aggregator with full-text search, built with Go and Charm.sh tools. **fwrd** provides terminal, command-line, and web readers backed by local storage and conditional HTTP requests.
+
+> **Upgrading from v1?** Read [Upgrading to v2](#upgrading-to-v2) before opening an existing database.
 
 ## Features
 
 - **Triple Interface**: Interactive TUI (Bubble Tea) + Command-line interface (Cobra) + web view (`fwrd serve`)
 - **Newspaper web view**: The web front page is a source-balanced newspaper — a scored lead, stable editorial desks, and cross-source developing topics; feeds are managed at `/feeds`
 - **Auto light/dark**: Every front-end follows the system light/dark setting — the web view via CSS, the TUI by detecting the terminal/OS appearance (override with `[ui] theme`)
-- **Zero-config LAN access**: `serve --mdns` advertises the web view at `https://fwrd.local:8080` over mDNS; `fwrd service install` runs it as a systemd/launchd background service; `fwrd net up` exposes it at a bare `https://fwrd.local` (ports 80+443) via a dedicated alias IP + firewall redirect, without colliding with the host's own privileged ports
+- **Opt-in LAN access**: After configuring authentication and a LAN bind, `serve --mdns` advertises `https://fwrd.local:8080`. Optional user services and alias-IP/firewall redirects support background operation and bare `https://fwrd.local`; see [Exposing the web view](#exposing-the-web-view)
 - **Full‑text search**: Bleve‑powered search across feeds and articles with debounced input
 - **Comprehensive CLI**: Complete feed management from command line (add, list, delete, refresh)
-- **Smart caching**: Honors ETag and Last-Modified; handles 304/Retry-After responses
+- **Conditional fetching**: Sends ETag/Last-Modified validators and handles 304 responses
 - **Security-focused**: URL validation, path sanitization, content size limits
 - **Media integration**: Detects media types and opens in appropriate applications
 - **Local storage**: BoltDB-backed offline reading with optimized indexing
-- **Lua scriptable plugins**: Drop a `.lua` file into `~/.config/fwrd/plugins/` to add a feed-URL handler — no recompile, hot-reload included
+- **Lua scriptable plugins**: Add a `.lua` feed-URL handler without recompiling; the local TUI supports hot reload
 - **Logging**: Styled, leveled CLI output (charmbracelet/log) for startup and plugin/serve diagnostics, plus a separate file-based debug log with configurable levels
-- **Cross-platform**: Builds for Linux, macOS, Windows (amd64, arm64, arm)
+- **Cross-platform releases**: Linux (amd64, arm64, arm), macOS (amd64, arm64), Windows (amd64)
+
+## Upgrading to v2
+
+1. **Stop all fwrd processes**, including background services, and back up your
+   configured database file and configuration before upgrading.
+2. Install the new binary, or build it with **Go 1.26.10 or newer**. Restart the
+   server and clients together; do not mix v1 and v2 processes.
+3. **Review network exposure.** Newly installed services bind to `127.0.0.1:8080`
+   with mDNS off. Existing units/plists retain their previous arguments, but an
+   unauthenticated LAN bind now fails to start. Configure both `[web.auth]`
+   credentials or deliberately opt in with `--allow-unauthenticated`.
+4. For trusted intranet feeds, explicitly set `[feed] allow_private_networks = true`.
+   DNS results and redirects now enforce the same destination restrictions as
+   submitted URLs. Outbound proxy environment variables are not honored.
+5. Relative database, index, certificate, and audit paths in configuration now
+   resolve against the **configuration file's directory**, not the shell's
+   working directory. Edit existing configuration rather than running
+   `config generate`, which now refuses to overwrite files.
+6. The first database open **transactionally rebuilds derived indexes**. Allow
+   extra startup time for large stores. Migration errors leave the transaction
+   uncommitted; do not delete source data to bypass them. Downgrading after
+   migration is unsupported—restore your pre-upgrade backup if you need v1.
+
+See [SECURITY_REMEDIATION.md](SECURITY_REMEDIATION.md) for the complete fix
+checklist, validation results, and remaining trust assumptions.
 
 ## Installation
 
 ### Using Go
 
+Requires Go 1.26.10 or newer. From a checkout of this repository:
+
 ```bash
-go build -o fwrd cmd/rss/main.go
+go build -o fwrd ./cmd/rss
 ```
 
 ### Using Homebrew
@@ -70,11 +99,11 @@ theme = "auto"   # "auto" (default, detect) / "light" / "dark"
 # Show version
 ./fwrd version
 
-# Generate default config
+# Generate default config (refuses to overwrite an existing file)
 ./fwrd config generate
 
 # Feed management
-./fwrd feed add "https://example.com/feed.xml"
+./fwrd feed add "https://go.dev/blog/feed.atom"
 ./fwrd feed list
 ./fwrd feed refresh
 ./fwrd feed delete <feed-id>
@@ -102,11 +131,17 @@ markdown — the web view renders article content
 as sanitized HTML, the form it was authored in.
 
 ```bash
-./fwrd serve                          # https://127.0.0.1:8080 (self-signed)
-./fwrd serve --addr 127.0.0.1:9000    # custom bind address
-./fwrd serve --tls=false              # plain HTTP
-./fwrd serve --addr 0.0.0.0:8080 --mdns  # LAN-reachable at https://fwrd.local:8080
+./fwrd serve                         # https://127.0.0.1:8080 (self-signed)
+./fwrd serve --addr 127.0.0.1:9000     # custom loopback address
+./fwrd serve --tls=false             # plain HTTP on loopback
+
+# LAN: configure both [web.auth] credentials first (see below)
+./fwrd serve --addr 0.0.0.0:8080 --mdns
 ```
+
+LAN examples throughout this guide assume that authentication is configured;
+see [Exposing the web view](#exposing-the-web-view). mDNS advertises an address:
+it does not change the bind address or configure authentication.
 
 Near-parity with the TUI/CLI:
 
@@ -184,15 +219,14 @@ replayed automatically, since a lost response can hide a committed operation.
 
 #### Exposing the web view
 
-The default `127.0.0.1` bind is reachable only from the local machine,
-which suits personal use and needs no auth. To reach the web view from
-another device you must bind a non-loopback address (e.g.
-`--addr 0.0.0.0:8080`) — and then **anyone who can reach that address can
-read and modify your feeds.** Non-loopback serving now requires configured
-authentication. To deliberately expose an unauthenticated instance, pass
-`--allow-unauthenticated` (also supported by `service install`) or set
-`[web] allow_unauthenticated = true`. This is an explicit security exception,
-not the default.
+The default `127.0.0.1` bind is reachable only from the local machine and
+requires no authentication. To allow other devices, configure authentication
+and bind a non-loopback address such as `--addr 0.0.0.0:8080`.
+
+Unauthenticated non-loopback serving is refused unless explicitly enabled with
+`--allow-unauthenticated` (also supported by `service install`) or
+`[web] allow_unauthenticated = true`. **With that exception enabled, anyone
+who can reach the listener can read and modify your feeds.**
 
 Two ways to protect it:
 
@@ -244,9 +278,10 @@ plain HTTP.
 
 The certificate comes from one of three sources (`--tls-mode`, or `[web.tls]`):
 
-- **`self-signed`** (default) — a self-signed leaf, regenerated automatically
-  when the advertised host set changes. Zero setup, but browsers show a
-  one-time "not private" warning. Persisted under `~/.fwrd/tls`.
+- **`self-signed`** (default) — a self-signed leaf, persisted under `~/.fwrd/tls`.
+  It renews near expiry and is regenerated when the configured host set changes
+  on restart. Browsers warn unless the certificate is trusted; renewal can
+  require trusting the replacement certificate.
 - **`local-ca`** — a local CA plus a leaf it signs, so you can be warning-free.
   See [Trusting the local CA](#trusting-the-local-ca) below.
 - **`file`** — bring your own: `--tls-cert cert.pem --tls-key key.pem` (setting
@@ -263,14 +298,17 @@ mode    = "self-signed" # or "local-ca" / "file"
 
 The generated certificate's SANs cover `localhost`, `127.0.0.1`/`::1`, the host
 name, `<mdns-name>.local`, every `--mdns-ip`, and a concrete `--addr` host.
+Generated certificates renew during TLS handshakes without requiring a restart.
+A transient renewal error retains a still-valid certificate, never an expired
+one. File-mode certificates are loaded at startup; restart after replacing them.
 
 ##### Trusting the local CA
 
 In `local-ca` mode fwrd writes a local certificate authority to
 `~/.fwrd/tls/ca.pem` and signs the server certificate with it. Browsers stay
-warning-free **once that CA is trusted on each device that visits** — a
-one-time step per device (the CA is stable; fwrd reuses it across cert
-regenerations).
+warning-free **once that CA is trusted on each device that visits**. The CA
+is reused across leaf renewals until it too needs rotation. When the CA rotates,
+install the replacement `ca.pem` on each client again.
 
 ```bash
 # macOS — trust system-wide (Safari and Chrome):
@@ -297,9 +335,9 @@ copy it into the system anchors (e.g. `/usr/local/share/ca-certificates/` +
 
 #### Reach it at `fwrd.local` (mDNS)
 
-`--mdns` advertises the web view on the local network over multicast DNS, so
-any device on the same LAN can reach it at `https://fwrd.local:8080` — no DNS,
-hosts file, or static IP. Change the label with `--mdns-name <name>`
+With a LAN bind and authentication configured, `--mdns` advertises the web
+view over multicast DNS at `https://fwrd.local:8080`—no manual DNS or hosts-file
+entry is needed. Change the label with `--mdns-name <name>`
 (advertised as `<name>.local`). (mDNS still advertises an `_http._tcp` record;
 only the URL scheme differs.)
 
@@ -335,10 +373,11 @@ launchd LaunchAgent on macOS. No root; it writes under your home directory.
 `install` writes the unit/plist (pointing at the running binary, forwarding
 any `--config`/`--db` you pass), then enables and starts it. Override the bind,
 mDNS name, or TLS with the same `--addr` / `--mdns` / `--mdns-name` /
-`--mdns-iface` / `--tls` / `--tls-mode` flags — they are forwarded verbatim into the unit.
+`--mdns-iface` / `--tls` / `--tls-mode` flags. Paths are resolved before
+installation, then arguments are encoded for the platform's service manager.
 
 ```bash
-# Multi-homed host: auto-detect IPs on en0 and en9
+# After configuring [web.auth], auto-detect IPs on en0 and en9
 ./fwrd service install --addr 0.0.0.0:5336 --mdns --mdns-iface en0,en9 --tls-mode local-ca
 ```
 
@@ -354,10 +393,10 @@ shell's working directory. Environment-based service settings must also be
 provided in the service manager's environment; terminal variables are not
 persisted as credentials in unit/plist arguments.
 
-If the chosen port is already in use, `serve` now fails fast with a clear
-error instead of pretending to start. As a background service it retries a few
-times and then gives up: on Linux the unit enters `failed`
-(`systemctl --user status fwrd`); on macOS launchd keeps the error in
+If the chosen port is already in use, `serve` fails fast with a clear error.
+On Linux, systemd retries within the unit's five-starts-per-minute limit and
+then enters `failed` (`systemctl --user status fwrd`). On macOS, the launchd
+agent uses `KeepAlive=true` and continues relaunching; errors appear in
 `~/.fwrd/serve.err.log` (see [Viewing logs](#viewing-logs)).
 
 #### Serving on port 80 (`fwrd net`)
@@ -369,7 +408,7 @@ them in the server itself:
 
 ```bash
 sudo fwrd net up --alias-ip 192.168.1.240
-# then, as your normal user (serve is HTTPS by default):
+# After configuring [web.auth], run as your normal user (HTTPS by default):
 fwrd serve --addr 0.0.0.0:8080 --mdns --mdns-ip 192.168.1.240
 # reachable from any LAN device at:  https://fwrd.local
 #   (http://fwrd.local auto-upgrades to it)
@@ -379,21 +418,23 @@ fwrd net status               # show the active binding, if any
 
 `net up` maps **both `:80` and `:443`** of the alias onto the serve port, so the
 bare `https://fwrd.local` works and a cleartext `http://fwrd.local` 308-upgrades
-to it. The browser warning is one-time per device; for a warning-free name,
-trust the local CA once (`fwrd serve --tls-mode local-ca`, see the HTTPS section
-above).
+to it. For a warning-free name, use `--tls-mode local-ca` and trust its CA on
+each client (see [Trusting the local CA](#trusting-the-local-ca)). CA rotation
+requires updating that trust.
 
 On a multi-homed host (several LANs at once), repeat `--alias-ip` once per LAN
 to get `https://fwrd.local` on each, and advertise them all:
 
 ```bash
 sudo fwrd net up --alias-ip 192.168.1.240 --alias-ip 192.168.178.240
+# Requires both [web.auth] credentials:
 fwrd serve --addr 0.0.0.0:8080 --mdns --mdns-ip 192.168.1.240 --mdns-ip 192.168.178.240
 ```
 
 > **Cleartext-only mode.** To skip HTTPS entirely, pass `--https=false` to
 > `net up` (maps `:80` alone) and `--tls=false` to `serve` (plain HTTP) — then
-> the bare name is `http://fwrd.local` with no TLS and no warning.
+> the bare name is `http://fwrd.local`. This provides **no transport encryption**;
+> do not send Basic Auth credentials over an untrusted network in this mode.
 
 `--iface` is auto-detected from each alias IP's subnet (the IP already says
 which network it's on), so you just pick an unused IP on each LAN; pass
@@ -404,7 +445,8 @@ reusable library — [`github.com/pders01/dotlocal`](https://github.com/pders01/
 for any app built on the same `go:embed`'d local-service pattern.
 
 `net up` gives fwrd its **own** LAN IP (an alias on your interface) and installs
-a firewall redirect from that IP's port 80 to fwrd's unprivileged port — `pf`
+firewall redirects from that IP's ports 80 and 443 (by default) to fwrd's
+unprivileged port—`pf`
 on macOS, `nftables` on Linux. The redirect runs in the kernel's PREROUTING/rdr
 path, *before* the socket lookup, so it works even when the host already binds
 `0.0.0.0:80`; and because fwrd has a dedicated IP, the redirect never touches
@@ -442,7 +484,12 @@ JSON-lines log at `~/.fwrd/audit.log` — both directions:
   and the Basic-Auth username (never the password);
 - **outbound** — requests fwrd makes (`dir:"out"`): feed fetches
   (`source:"feed"`) and Lua-plugin `http.get` calls (`source:"plugin"`), with
-  the URL, status, and any transport error.
+  the redacted URL, status, and a sanitized transport error.
+
+Both directions remove URL userinfo, fragments, and query data. URL paths
+remain visible and may contain sensitive identifiers. Files are opened with
+private permissions on Unix, but old log contents and backups are not rewritten;
+review previously recorded secrets if applicable.
 
 ```bash
 fwrd serve --audit                 # enable for this run
@@ -490,8 +537,14 @@ Note: The modifier key defaults to `ctrl` and can be changed in config.
 - Search is backed by a Bleve index by default:
   - Default DB path `~/.fwrd/fwrd.db` ⇒ index at `~/.fwrd/index.bleve`
   - Custom DB path ⇒ index sits next to the DB with a `.bleve` suffix
-- The index is created on first run, re‑indexed at startup, and updated on add/refresh/delete of feeds and articles.
-- To force a rebuild, remove the index directory and start fwrd again.
+- A new or empty index is populated from the database. A nonempty existing
+  index is reused and updated incrementally on add/refresh/delete; it is not
+  rebuilt on every startup.
+- A TUI connected to `serve` uses store-backed basic search rather than opening
+  the server's Bleve index. Its scoring and coverage differ from web/local Bleve
+  search: it scans at most 200 recent articles per feed.
+- To force a rebuild, stop every process owning the index, remove the configured
+  index directory (not the database file), and restart its owner.
 
 Status Bar
 
@@ -513,18 +566,23 @@ the channel's feed.
   yourplugin.lua  # add your own
 ```
 
-The directory is seeded with the bundled defaults on first run. fwrd
-hot-reloads the directory: editing a `.lua` file picks up changes
-without a restart, and deleting a file unregisters the plugin.
+`$XDG_CONFIG_HOME/fwrd/plugins/` overrides the directory shown above when
+`XDG_CONFIG_HOME` is set. Bundled defaults are seeded when missing.
+
+The **local TUI** watches this directory: edits reload plugins and deleting a
+file unregisters its plugin. `serve` loads plugins at startup and must be
+restarted to pick up changes; an IPC-connected TUI uses those server-owned
+plugins. Standalone mutating CLI sessions load plugins on each invocation.
 
 ### Plugin shape
 
-Each script returns a table with four required fields:
+Each script returns a table with required `name`, `can_handle`, and `enhance`
+fields. `priority` is optional and defaults to zero:
 
 ```lua
 return {
   name = "example",
-  priority = 50,                          -- higher wins when multiple plugins match
+  priority = 50,                          -- optional; higher wins
   can_handle = function(url)
     return string.find(url, "://example.com/", 1, true) ~= nil
   end,
@@ -552,25 +610,27 @@ Scripts run on a sandboxed gopher-lua runtime:
   - `json.parse(s)` / `json.encode(v)` return `(value, err)`
   - `regex.match(pattern, subject)` returns the first capture group
     (or whole match) using Go RE2 syntax
-  - `log.info(msg)` / `log.warn(msg)` route to fwrd's debug log
+  - `log.info(msg)` / `log.warn(msg)` use the host logger: stderr for CLI/serve,
+    and the opt-in debug log in the local TUI
 
 Loading and URL routing have a two-second execution ceiling. JSON conversion
 rejects cycles and enforces depth, node, and byte budgets. Installed plugins
 still require trust: the capability sandbox is not process-level memory isolation.
-A 256 KiB script-size cap and a 30-second enhancement timeout (matching
-`AddFeed`) prevent runaway scripts. Plugin HTTP requests share the
-fetcher's User-Agent and timeout so plugin-driven traffic looks like
-fwrd to upstreams.
+Scripts have a 256 KiB size cap and a 30-second enhancement ceiling; a shorter
+caller deadline takes precedence. Manager-owned plugin requests share the
+fetcher's HTTP client, timeout, and destination policy. The feed User-Agent is
+set on feed requests, not injected automatically into plugin requests; plugins
+can supply one through `http.get` headers.
 
-## Architecture
+## Network behavior
 
-The reader is designed to be a good netizen:
-- Sends proper User-Agent headers
-- Honors 304 Not Modified responses
-- Stores and sends If-None-Match (ETag) headers
-- Stores and sends If-Modified-Since headers
-- Implements rate limiting per host
-- Respects Retry-After headers
+- Feed fetches send the configured User-Agent and conditional ETag/Last-Modified
+  headers, and handle 304 Not Modified responses.
+- Refreshes check each feed's `refresh_interval`; bulk refresh concurrency is
+  bounded by `max_concurrent_refreshes`.
+- There is **no per-host rate limiter or automatic Retry-After backoff**. A
+  helper parses numeric Retry-After values, but fetching does not schedule
+  retries from that result. HTTP 429/503 responses are reported as errors.
 
 ## Testing
 
@@ -593,11 +653,10 @@ make coverage
 make test-race
 ```
 
-Bleve index debug (optional)
-
 ```bash
-# Inspect the existing on-disk index (used for debugging)
-go test -tags=bleve -v -run TestDebugExistingIndex ./internal/search
+# Check formatting/static analysis and reachable dependency vulnerabilities
+make lint
+make security
 ```
 
 ### Integration testing
@@ -617,7 +676,7 @@ make build
 # Build and run
 make run
 
-# Install to GOPATH/bin
+# Install to GOBIN, or GOPATH/bin when GOBIN is unset
 make install
 
 # Build Docker image
@@ -632,6 +691,9 @@ make lint              # also installs the pinned linter if missing
 make release            # requires GoReleaser installed locally
 make release-snapshot   # builds artifacts but does not publish
 ```
+
+Pushing a version tag triggers [the release workflow](.github/workflows/release.yml).
+Creating a tag locally does not publish a release.
 
 ## Dependencies
 
@@ -663,4 +725,7 @@ Defaults (examples):
 - macOS: Video iina→mpv→vlc • Image Preview/open • Audio mpv→vlc • PDF Preview/open
 - Linux: Video mpv→vlc→mplayer • Image sxiv→feh→eog/xdg-open • Audio mpv→vlc→mplayer • PDF zathura→evince→xdg-open
 
-If no specific player is found, fwrd falls back to the platform default opener (`open`, `xdg-open`, `start`).
+If no specific player is found, fwrd falls back to the platform opener: `open`
+on macOS, `xdg-open` on Linux, or the Windows URL handler (`start` in config,
+implemented without a command shell). Only absolute HTTP(S) launch targets are
+accepted; local files and custom URI schemes are rejected.

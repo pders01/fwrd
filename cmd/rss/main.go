@@ -143,9 +143,9 @@ func init() {
 	// serve flags
 	serveCmd.Flags().BoolVar(&serveAllowUnauthenticated, "allow-unauthenticated", false, "explicitly allow non-loopback serving without authentication")
 	serveCmd.Flags().StringVar(&serveAddr, "addr", "127.0.0.1:8080", "address to bind the web server")
-	serveCmd.Flags().BoolVar(&serveMDNS, "mdns", false, "advertise the web view on the LAN over mDNS (e.g. http://fwrd.local:PORT)")
+	serveCmd.Flags().BoolVar(&serveMDNS, "mdns", false, "advertise the web view on the LAN over mDNS (e.g. https://fwrd.local:PORT)")
 	serveCmd.Flags().StringVar(&serveMDNSName, "mdns-name", "fwrd", "mDNS hostname label; advertised as <name>.local")
-	serveCmd.Flags().StringArrayVar(&serveMDNSIPs, "mdns-ip", nil, "advertise <name>.local for these alias IP(s) from `fwrd net up`, each scoped to its subnet (repeatable); default: all LAN interfaces")
+	serveCmd.Flags().StringArrayVar(&serveMDNSIPs, "mdns-ip", nil, "advertise <name>.local for these alias IP(s) from fwrd net up, each scoped to its subnet (repeatable); default: all LAN interfaces")
 	serveCmd.Flags().StringVar(&serveMDNSIface, "mdns-iface", "", "comma-separated interfaces to advertise on (e.g. en0,en9); default: auto-detected LAN interfaces")
 	serveCmd.Flags().BoolVar(&serveTLS, "tls", true, "serve over HTTPS (auto self-signed cert); --tls=false for plain HTTP")
 	serveCmd.Flags().StringVar(&serveTLSMode, "tls-mode", "", "TLS cert source: self-signed (default) | local-ca | file")
@@ -176,7 +176,7 @@ func init() {
 	serviceInstallCmd.Flags().StringVar(&svcAddr, "addr", "127.0.0.1:8080", "address the service binds")
 	serviceInstallCmd.Flags().BoolVar(&svcMDNS, "mdns", false, "advertise the service over mDNS as <name>.local")
 	serviceInstallCmd.Flags().StringVar(&svcMDNSName, "mdns-name", "fwrd", "mDNS hostname label; advertised as <name>.local")
-	serviceInstallCmd.Flags().StringArrayVar(&svcMDNSIPs, "mdns-ip", nil, "advertise these alias IP(s) from `fwrd net up`, each scoped to its subnet (repeatable); for bare http://<name>.local on port 80")
+	serviceInstallCmd.Flags().StringArrayVar(&svcMDNSIPs, "mdns-ip", nil, "advertise these alias IP(s) from fwrd net up, each scoped to its subnet (repeatable); for bare HTTP/HTTPS access")
 	serviceInstallCmd.Flags().StringVar(&svcMDNSIface, "mdns-iface", "", "comma-separated interfaces to advertise on; default: auto-detected LAN interfaces")
 	serviceInstallCmd.Flags().BoolVar(&svcTLS, "tls", true, "serve over HTTPS (auto self-signed cert); --tls=false for plain HTTP")
 	serviceInstallCmd.Flags().StringVar(&svcTLSMode, "tls-mode", "", "TLS cert source: self-signed (default) | local-ca | file")
@@ -232,15 +232,16 @@ var serviceUninstallCmd = &cobra.Command{
 
 var netCmd = &cobra.Command{
 	Use:   "net",
-	Short: "Expose fwrd at http://fwrd.local on port 80 (alias IP + firewall redirect)",
-	Long: `net makes the web view reachable at http://<name>.local (port 80) without
-binding a privileged port and without colliding with any server the host
-already runs on port 80.
+	Short: "Expose fwrd at https://fwrd.local using alias-IP firewall redirects",
+	Long: `net maps an alias IP's ports 80 and 443 to fwrd's unprivileged serve
+port by default, without colliding with another server on the host.
+Use --https=false to redirect only --port.
 
 It gives fwrd its own LAN IP (an alias on your network interface) and installs
-a firewall redirect — pf on macOS, nftables on Linux — from that IP's port 80
-to fwrd's unprivileged port. fwrd then advertises <name>.local pointing at the
-alias IP (serve --mdns-ip).
+firewall redirects — pf on macOS, nftables on Linux — from that IP's public
+ports to fwrd's serve port. Run serve with a LAN bind, configured authentication,
+and --mdns --mdns-ip to advertise the alias IP. Networking setup does not
+configure authentication or change serve's loopback-only default.
 
 Because it changes interface and firewall state, "net up"/"net down" need root
 (sudo). The binding is not reboot-persistent; re-run "fwrd net up" afterward.`,
@@ -248,7 +249,7 @@ Because it changes interface and firewall state, "net up"/"net down" need root
 
 var netUpCmd = &cobra.Command{
 	Use:   "up",
-	Short: "Assign the alias IP and install the port-80 redirect (needs sudo)",
+	Short: "Assign the alias IP and install firewall redirects (needs sudo)",
 	Run:   runNetUp,
 }
 
@@ -260,7 +261,7 @@ var netDownCmd = &cobra.Command{
 
 var netStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show the active port-80 binding, if any",
+	Short: "Show active alias-IP firewall redirects, if any",
 	Run:   runNetStatus,
 }
 
@@ -291,7 +292,7 @@ var configCmd = &cobra.Command{
 
 var configGenCmd = &cobra.Command{
 	Use:   "generate",
-	Short: "Generate default configuration file",
+	Short: "Generate default configuration without overwriting an existing file",
 	Run: func(_ *cobra.Command, _ []string) {
 		home, _ := os.UserHomeDir()
 		configDir := filepath.Join(home, ".config", "fwrd")

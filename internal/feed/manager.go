@@ -100,10 +100,10 @@ func (m *Manager) UseAuditLogger(l *audit.Logger) {
 	m.fetcher.client.Transport = &audit.RoundTripper{Base: base, Log: l}
 }
 
-// PluginHTTPClient returns the HTTP client plugins should use for
-// outbound requests. Sharing the fetcher's client keeps the User-Agent,
-// timeout, and TLS settings consistent between core feed fetches and
-// plugin-driven enhancement calls.
+// PluginHTTPClient returns the shared timeout/TLS/destination-policy client
+// for plugin requests. The feed User-Agent is set on individual feed requests;
+// plugins must supply their own User-Agent header if they want to override
+// net/http's default.
 func (m *Manager) PluginHTTPClient() *http.Client {
 	if m.fetcher == nil {
 		return nil

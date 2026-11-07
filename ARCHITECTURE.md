@@ -2,7 +2,9 @@
 
 ## Overview
 
-fwrd is a fast, terminal-based RSS aggregator built with Go using both interactive TUI (Charm.sh ecosystem) and CLI interfaces (Cobra). The application follows a modular, security-focused architecture with clearly separated components and comprehensive validation systems.
+fwrd is a Go RSS aggregator with a Bubble Tea TUI, Cobra CLI, and HTTP web
+reader. Storage, fetching, search, and editorial composition are shared across
+frontends. The runtime ownership and security boundaries are described below.
 
 ## Components
 
@@ -11,18 +13,29 @@ The entry point of the application. Uses Cobra CLI framework to handle commands 
 
 ### internal/config
 Manages application configuration from multiple sources:
-- TOML config files with automatic generation
+- TOML config files, generated explicitly with `fwrd config generate`
 - Environment variables
 - Command-line flags with validation
 - Path normalization and expansion at load time
 
 Uses Viper for unified configuration management with support for config overrides and search index path customization.
 
+### internal/control and internal/ipc
+`Session` selects a local store or an RPC-backed store for an existing serve
+process. `MutationCoordinator` serializes feed lifecycle operations and their
+search notifications. The framed JSON protocol uses Unix sockets or Windows
+named pipes, with database identity checks, cancellation, resource budgets,
+and read-only transport retries.
+
 ### internal/feed
-Handles RSS/Atom feed fetching and parsing with comprehensive validation:
-- Fetcher: HTTP client with smart caching (ETag, Last-Modified), rate limiting, and force-refresh support
-- Parser: Uses gofeed library with content size limits for security
-- Manager: Coordinates fetching, parsing, validation, and storage with error handling
+Handles RSS/Atom/JSON feed fetching and parsing:
+- Fetcher: Conditional ETag/Last-Modified requests, 304 handling, configurable
+  HTTP timeout, cache bypass, and a shared destination-policy transport
+- Parser: Uses gofeed and derives stable identities for GUID-less articles
+- Manager: Applies per-feed refresh intervals, bounds parallel bulk refreshes,
+  and commits feed metadata/articles atomically before notifying listeners
+- No per-host rate limiter or automatic Retry-After scheduling is implemented;
+  the numeric Retry-After parsing helper is not used to schedule fetches
 
 ### internal/media
 Manages media playback and URL handling:
@@ -31,14 +44,18 @@ Manages media playback and URL handling:
 - Media types: Detects media types from URLs and file extensions
 
 ### internal/search
-Provides high-performance full‑text search functionality:
-- **Bleve engine** (default): Robust full‑text indexing with streaming/chunked processing to prevent OOM
-  - Index lifecycle: created on first use, reindexed at startup from existing DB, incrementally updated
-  - Smart batching: Uses streaming indexing for large datasets with memory management
-  - Default index path when DB is `~/.fwrd/fwrd.db`: `~/.fwrd/index.bleve`
-  - For custom DB path, index is placed next to DB with `.bleve` suffix
-  - Configurable index path override via config
-- **Basic engine fallback**: Lightweight in‑memory scorer used only if Bleve initialization fails
+- **Bleve engine**: Used by local TUI sessions and serve when available. A new
+  or empty index is populated from storage; a nonempty index is reused and
+  updated incrementally. Startup does not rebuild every existing index
+  - Index writes are batched; batch scopes have exclusive ownership
+  - Default index: `~/.fwrd/index.bleve` for `~/.fwrd/fwrd.db`
+  - Custom databases derive a neighboring `.bleve` path unless explicitly
+    overridden through configuration
+  - Search hits hydrate authoritative articles from storage
+- **Basic engine**: Store-backed scoring used by IPC-connected TUIs and as an
+  initialization fallback. It scans up to 200 recent articles per feed, so
+  coverage and scoring differ from Bleve. Serve and mutating CLI sessions
+  report index-lock errors rather than silently falling back on that error
 
 ### internal/storage
 Handles high-performance local data persistence:
@@ -66,12 +83,18 @@ Implements the sophisticated terminal user interface:
 - **Components**: Shared UI component library to reduce code duplication
 - **Search UX**: Debounced input (~200ms), brief status flashes (500ms), in‑article search with global fallback
 
+### internal/terminaltext and internal/service
+`terminaltext.Safe` strips untrusted terminal controls before application
+styling. `service` installs per-user systemd units or launchd agents, resolves
+paths before installation, and quotes systemd arguments. Service installation
+is loopback-only with mDNS off unless explicitly configured otherwise.
+
 ### internal/plugins
 Defines the `Plugin` interface, `FeedInfo` result type, and a thread-safe
-`Registry`. The registry is consulted by `feed.Manager.AddFeed` to enhance
-a URL before fetch — for example, turning a subreddit listing URL into
-its `.rss` endpoint. `Registry.Replace` and `Registry.Unregister`
-support runtime plugin churn (see `internal/plugins/lua` below).
+`Registry`. AddFeed consults it before fetching. Plugin callbacks execute
+outside registry locks; context-aware routing supports cancellation.
+`ReplacePath` and `UnregisterPath` track script ownership by file so renaming
+a plugin cannot leave a stale registration behind.
 
 ### internal/plugins/lua
 Implements the scriptable plugin runtime on top of gopher-lua:
@@ -81,15 +104,28 @@ Implements the scriptable plugin runtime on top of gopher-lua:
   `json.parse`/`encode`, `regex.match`, `log.info`/`warn`)
 - **Plugin**: adapts a sandboxed `*lua.LState` to the
   `plugins.Plugin` interface. Each plugin owns its own state and
-  serialises calls through a mutex because gopher-lua states are not
-  goroutine-safe
-- **Loader**: scans `~/.config/fwrd/plugins/`, validates each script's
-  returned table, and registers a `Plugin` per file. A 256 KiB
+  serialises calls through a context-aware admission gate because gopher-lua
+  states are not goroutine-safe
+- **Loader**: scans `$XDG_CONFIG_HOME/fwrd/plugins/` (falling back to
+  `~/.config/fwrd/plugins/`), validates each script's returned table, and
+  registers a `Plugin` per file. A 256 KiB
   script-size cap is enforced before the VM runs
 - **Embed/EnsureDefaults**: ships `reddit.lua` and `youtube.lua` via
   `//go:embed` and seeds them into the plugin directory on first run
-- **Watcher**: uses fsnotify to hot-reload edits, unregister deletes,
-  and keep a previously-working plugin in place when a save is bad
+- **Watcher**: The local TUI uses fsnotify to hot-reload edits, unregister
+  deletes, and retain a working plugin when a save is bad. Serve loads plugins
+  once at startup; IPC clients use those server-owned plugins. Standalone
+  mutating CLI sessions load plugins per invocation
+
+### internal/editorial and internal/topics
+`editorial` composes a bounded candidate set into a lead and source-balanced
+stable desks, and exposes diagnostic reports. `topics` clusters article text
+into cross-source developing topics used within that composition.
+
+### internal/audit
+Optional JSON-lines HTTP records cover inbound requests and shared-client
+outbound traffic. URL userinfo, fragments, and query data are redacted; paths
+remain visible. This is distinct from the plain-text debug logger.
 
 ### internal/web
 An HTTP front-end over the same storage, feed, and search backends the TUI
@@ -101,17 +137,16 @@ it. It reaches near-parity with the other front-ends:
   with the searcher as a `DataListener`/`BatchScope` so feeds added or refreshed
   via the web are indexed for search, exactly as in the TUI
 - **Read handlers**: feed list (with unread counts), per-feed article list
-  (cursor pagination), single article, and search. Article IDs are composite
-  (`feedID:articleURL`) so they ride in a query parameter rather than a path
-  segment
-- **Write handlers**: add / refresh (per-feed and all) / delete feeds, and
-  mark articles read/unread. These are `POST`-only and use Post/Redirect/Get
+  (cursor pagination), single article, and search. Article IDs are opaque
+  composite strings derived from feed and item identities, so they ride in
+  query parameters rather than path segments
+- **Write handlers**: add/refresh/delete feeds, assign desks, import OPML,
+  and change article read/starred state. These are `POST`-only and use Post/Redirect/Get
   (303) so a browser refresh won't re-submit
 - **CSRF defense**: a same-origin guard rejects non-GET requests whose
-  `Origin`/`Referer` scheme and authority don't match the request origin. With no cookies or
-  sessions there's no credential to steal, but the guard still blocks forged
-  cross-site form posts (e.g. a feed-delete). Caller-supplied redirect targets
-  are constrained to local paths to prevent open redirects
+  `Origin`/`Referer` scheme and authority don't match the request origin.
+  It protects state-changing forms alongside optional HTTP Basic Auth.
+  Caller-supplied redirect targets are constrained to local paths
 - **Render**: `html/template` with `//go:embed`-ed templates and CSS. Article
   HTML is run through the same `bluemonday.UGCPolicy` sanitizer the TUI uses
   before being marked `template.HTML` — the security boundary for untrusted
@@ -170,8 +205,10 @@ Provides comprehensive security validation:
 File-based diagnostic logging, separate from the CLI's user-facing output:
 - **Configurable Levels**: Debug, info, warn, error logging levels
 - **File Logging**: Persistent logging to `~/.fwrd/fwrd.log`, opt-in via `--debug`
-- **Structured Output**: JSON-formatted logs for machine processing
-- **Performance Monitoring**: Operation timing and resource usage tracking
+- **Format**: Timestamped plain text with levels and optional `key=value`
+  fields; debug logging is not JSON
+- **Concurrency**: Logger writes and lifecycle changes are synchronized;
+  untrusted terminal controls are removed before messages are persisted
 
 The CLI's *operational* output (startup, plugin load, `serve` diagnostics) is
 separate: it goes to stderr through `charmbracelet/log` (styled level badges,
@@ -184,43 +221,43 @@ remains the verbose file sink; the two do not overlap.
 1. User runs `fwrd` command
 2. Cobra CLI processes flags and initializes config/logging
 3. Config is loaded, validated, and paths are normalized
-4. Database and search index are initialized
-5. TUI is started with Bubbletea framework
-6. Feed manager fetches/parses feeds with validation
-7. Articles are stored in BoltDB and indexed for search
+4. Session opens storage locally, or connects to the matching serve process
+5. Local TUI owns its manager/Bleve index; a remote TUI uses store-backed search
+6. Bubble Tea commands request feed operations through the local/server coordinator
+7. The database owner commits articles and metadata, then notifies search
 8. User navigates through TUI with real-time search
 9. Media launcher opens URLs in external applications
 
 ### CLI Mode
 1. User runs `fwrd [command]` (e.g., `fwrd feed add`)
 2. Cobra CLI routes to appropriate command handler
-3. Config and database are initialized
-4. Command executes directly (add feed, list feeds, etc.)
+3. Configuration is loaded and a local or IPC session opens the database
+4. Reads use the store facade; feed mutations use coordinated local or remote operations
 5. Results are output to terminal and program exits
 
 ## Key Features
 
 ### Security-First Architecture
-- **URL Validation**: Comprehensive validation prevents malicious feed URLs
+- **URL Validation**: Submitted URLs, DNS destinations, and redirects share an explicit network policy
 - **Path Sanitization**: Directory traversal protection and secure file handling
 - **Content Limits**: Article size limits prevent resource exhaustion attacks
-- **Input Validation**: All user inputs are validated and sanitized
+- **Input Handling**: Route-specific checks, bounded form parsing, HTML sanitization, and terminal-text sanitization
 
 ### High-Performance Storage
 - **Optimized Indexing**: Published-date indexes for efficient article sorting
 - **Cursor-based Pagination**: Memory-efficient handling of large datasets
-- **Streaming Search Indexing**: Chunked processing prevents OOM on large feeds
+- **Batched Search Indexing**: Chunked writes and exclusively owned batch scopes
 - **Smart Caching**: ETag/Last-Modified support reduces bandwidth usage
 
 ### Polite Network Behavior
 - **HTTP Caching**: Respects ETag and Last-Modified headers
-- **Rate Limiting**: Per-host rate limiting prevents server overload
-- **Retry-After**: Honors server retry requests
+- **Refresh Controls**: Per-feed refresh intervals and bounded bulk-fetch concurrency
+- **Limitations**: No per-host limiter or automatic Retry-After backoff
 - **Proper Headers**: Sends appropriate User-Agent and caching headers
 
 ### Cross-Platform Excellence
 - **GoReleaser**: Multi-platform binary generation (Linux, Windows, macOS)
-- **Architecture Support**: amd64, arm64, and arm architectures
+- **Release Targets**: Linux amd64/arm64/arm, macOS amd64/arm64, Windows amd64
 - **Native Media Handling**: Platform-specific media player integration
 - **TOML Configuration**: Cross-platform configuration management
 
