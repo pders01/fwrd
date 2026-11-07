@@ -1,9 +1,9 @@
-.PHONY: build test test-unit test-integration clean run install-caddy tools lint modernize coverage help release release-snapshot
+.PHONY: build test test-unit test-integration clean run install-caddy tools lint security modernize coverage help release release-snapshot
 
 # Variables
 BINARY_NAME=fwrd
 BINARY_PATH=./$(BINARY_NAME)
-MAIN_PATH=cmd/rss/main.go
+MAIN_PATH=./cmd/rss
 COVERAGE_FILE=coverage.out
 COVERAGE_HTML=coverage.html
 TOOLS_DIR=$(CURDIR)/.tools/bin
@@ -37,7 +37,7 @@ test: test-unit test-integration
 ## test-unit: Run unit tests only
 test-unit:
 	@echo "Running unit tests..."
-	@go test -v ./internal/...
+	@go test -v ./cmd/... ./internal/...
 
 ## test-integration: Run integration tests (requires Caddy)
 test-integration: check-caddy
@@ -60,10 +60,10 @@ coverage:
 ## tools: Install pinned development tools under .tools/bin
 tools: $(GOLANGCI_LINT)
 
-$(GOLANGCI_LINT):
+$(GOLANGCI_LINT): go.mod go.sum
 	@echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."
 	@mkdir -p $(TOOLS_DIR)
-	@GOBIN=$(TOOLS_DIR) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	@GOTOOLCHAIN=$$(go env GOVERSION) GOBIN=$(TOOLS_DIR) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 ## lint: Run Go linters
 lint: $(GOLANGCI_LINT)
@@ -71,6 +71,10 @@ lint: $(GOLANGCI_LINT)
 	@$(GOLANGCI_LINT) run ./...
 	@echo "Running gofmt..."
 	@gofmt -l -s .
+
+## security: Scan reachable dependencies for known vulnerabilities
+security:
+	@go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
 ## modernize: Apply Go-idiom upgrades (any, min/max, range-over-int, etc.) via gopls.
 ##            Requires gopls on PATH; install with: go install golang.org/x/tools/gopls@latest
@@ -100,8 +104,9 @@ clean:
 ## install: Install fwrd to GOPATH/bin
 install:
 	@echo "Installing $(BINARY_NAME) to GOPATH/bin..."
-	@go build -o $(shell go env GOBIN)/$(BINARY_NAME) $(MAIN_PATH) 2>/dev/null || \
-		go build -o $(shell go env GOPATH)/bin/$(BINARY_NAME) $(MAIN_PATH)
+	@install_dir="$$(go env GOBIN)"; \
+		if [ -z "$$install_dir" ]; then install_dir="$$(go env GOPATH)/bin"; fi; \
+		mkdir -p "$$install_dir" && go build -o "$$install_dir/$(BINARY_NAME)" $(MAIN_PATH)
 	@echo "Installation complete"
 
 ## deps: Download and tidy dependencies
