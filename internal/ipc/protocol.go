@@ -5,11 +5,14 @@
 package ipc
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"time"
 )
 
 // MaxFrameSize limits the size of a single IPC frame to prevent a
@@ -178,11 +181,33 @@ func ReadFrame(r io.Reader) ([]byte, error) {
 	return body, nil
 }
 
+// ReadRequestFrame permits an authenticated connection to remain idle, but
+// bounds the time to finish a frame once its first byte arrives. Shutdown can
+// still interrupt the idle read by closing conn.
+func ReadRequestFrame(conn net.Conn, timeout time.Duration) ([]byte, error) {
+	var first [1]byte
+	if _, err := io.ReadFull(conn, first[:]); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, ErrConnClosed
+		}
+		return nil, fmt.Errorf("read first byte: %w", err)
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return nil, fmt.Errorf("set frame deadline: %w", err)
+	}
+	defer conn.SetReadDeadline(time.Time{})
+	return ReadFrame(io.MultiReader(bytes.NewReader(first[:]), conn))
+}
+
 // --- helpers ---
 
 // IsRetryable reports whether err indicates a connection-level failure
 // where a fresh handshake might succeed. Protocol errors and data
 // rejections (mismatch, unknown method) are not retryable.
 func IsRetryable(err error) bool {
-	return errors.Is(err, ErrConnClosed) || errors.Is(err, io.EOF)
+	if errors.Is(err, ErrConnClosed) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	var opErr *net.OpError
+	return errors.As(err, &opErr) && !opErr.Timeout()
 }

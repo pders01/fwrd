@@ -231,11 +231,10 @@ func (s *RPCServer) handleConn(conn net.Conn) {
 	}
 	_ = conn.SetDeadline(time.Time{})
 
-	// Dispatch loop. The read deadline bounds peers that send only part of a
-	// frame; it is cleared while an operation itself is executing.
+	// Idle clients may stay connected indefinitely. Once a frame starts,
+	// require it to complete promptly so partial frames cannot pin a handler.
 	for {
-		_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-		body, err := ipc.ReadFrame(conn)
+		body, err := ipc.ReadRequestFrame(conn, 30*time.Second)
 		if err != nil {
 			if !errors.Is(err, io.EOF) && !errors.Is(err, ipc.ErrConnClosed) {
 				log.Printf("ipc read: %v", err)

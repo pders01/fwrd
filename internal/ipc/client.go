@@ -29,17 +29,20 @@ const (
 )
 
 // Client is an IPC client with a persistent connection and one in-flight
-// request at a time. It is safe for concurrent use: the mutex serializes
-// all calls.
+// request at a time. Calls queue with context-aware deadlines; Close can
+// interrupt in-flight I/O without waiting for the request to finish.
 type Client struct {
 	addr       string
 	databaseID string
 	clientID   string
 
-	mu     sync.Mutex
-	conn   net.Conn
-	reqID  uint64
-	closed bool
+	mu         sync.Mutex // protects connection state, never held during I/O
+	conn       net.Conn
+	reqID      uint64
+	closed     bool
+	gate       chan struct{}      // serializes calls and reconnects
+	done       chan struct{}      // wakes queued calls on Close
+	connecting context.CancelFunc // interrupts a dial/handshake on Close
 }
 
 // NewClient creates a client, connects, and performs the database
@@ -50,24 +53,41 @@ func NewClient(addr, databaseID string) (*Client, error) {
 		databaseID: databaseID,
 		clientID:   ClientIdent(),
 	}
-	if err := c.connect(); err != nil {
+	if _, err := c.connect(context.Background()); err != nil {
 		return nil, err
 	}
 	return c, nil
 }
 
-// connect dials and performs the handshake. Caller must hold c.mu.
-func (c *Client) connect() error {
-	conn, err := DialEndpoint(c.addr)
-	if err != nil {
-		return fmt.Errorf("connect: %w", err)
+// connect dials and handshakes within the caller's remaining time budget.
+// The caller serializes connection establishment using gate.
+func (c *Client) connect(ctx context.Context) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(ctx, handshakeTimeout)
+	defer cancel()
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil, ErrConnClosed
 	}
+	c.connecting = cancel
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		c.connecting = nil
+		c.mu.Unlock()
+	}()
+	conn, err := DialEndpointContext(ctx, c.addr)
+	if err != nil {
+		return nil, fmt.Errorf("connect: %w", err)
+	}
+	stopCancel := closeOnCancel(ctx, conn)
+	defer stopCancel()
 
 	// Set a deadline for the handshake exchange.
-	deadline := time.Now().Add(handshakeTimeout)
+	deadline, _ := ctx.Deadline()
 	if deadlineErr := conn.SetDeadline(deadline); deadlineErr != nil {
 		conn.Close()
-		return fmt.Errorf("set deadline: %w", deadlineErr)
+		return nil, fmt.Errorf("set deadline: %w", deadlineErr)
 	}
 
 	// Send handshake.
@@ -78,56 +98,68 @@ func (c *Client) connect() error {
 	}
 	if writeErr := WriteFrame(conn, hs); writeErr != nil {
 		conn.Close()
-		return fmt.Errorf("write handshake: %w", writeErr)
+		return nil, fmt.Errorf("write handshake: %w", writeErr)
 	}
 
 	// Read handshake response.
 	body, err := ReadFrame(conn)
 	if err != nil {
 		conn.Close()
-		return fmt.Errorf("read handshake response: %w", err)
+		return nil, fmt.Errorf("read handshake response: %w", err)
 	}
 
 	var resp Handshake
 	if err := json.Unmarshal(body, &resp); err != nil {
 		conn.Close()
-		return fmt.Errorf("unmarshal handshake response: %w", err)
+		return nil, fmt.Errorf("unmarshal handshake response: %w", err)
 	}
 
 	if resp.Error != nil {
 		conn.Close()
-		return fmt.Errorf("handshake: %w", resp.Error)
+		return nil, fmt.Errorf("handshake: %w", resp.Error)
 	}
 	if resp.Version != ProtocolVersion {
 		conn.Close()
-		return fmt.Errorf("%w: server=%d client=%d", ErrProtocol, resp.Version, ProtocolVersion)
+		return nil, fmt.Errorf("%w: server=%d client=%d", ErrProtocol, resp.Version, ProtocolVersion)
 	}
 	if resp.DatabaseID != c.databaseID {
 		conn.Close()
-		return fmt.Errorf("%w: server db=%s client db=%s", ErrDatabaseMismatch, resp.DatabaseID, c.databaseID)
+		return nil, fmt.Errorf("%w: server db=%s client db=%s", ErrDatabaseMismatch, resp.DatabaseID, c.databaseID)
 	}
 
 	// Clear the deadline so subsequent calls set their own.
 	if err := conn.SetDeadline(time.Time{}); err != nil {
 		conn.Close()
-		return fmt.Errorf("clear deadline: %w", err)
+		return nil, fmt.Errorf("clear deadline: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		conn.Close()
+		return nil, err
 	}
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		conn.Close()
+		return nil, ErrConnClosed
+	}
 	c.conn = conn
-	return nil
+	return conn, nil
 }
 
 // Probe attempts a full handshake on addr with a short timeout. It
 // returns nil if a matching server responds, or an error otherwise.
 // The connection is always closed after the probe.
 func Probe(addr, databaseID string) error {
-	conn, err := DialEndpoint(addr)
+	ctx, cancel := context.WithTimeout(context.Background(), handshakeProbeTimeout)
+	defer cancel()
+	conn, err := DialEndpointContext(ctx, addr)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
-	deadline := time.Now().Add(handshakeProbeTimeout)
+	deadline, _ := ctx.Deadline()
 	if deadlineErr := conn.SetDeadline(deadline); deadlineErr != nil {
 		return deadlineErr
 	}
@@ -163,8 +195,8 @@ func Probe(addr, databaseID string) error {
 }
 
 // Call sends a request and waits for a response. Only one call may be
-// in flight at a time. A failed call does not automatically reconnect
-// or retry; the caller may call Reconnect and retry explicitly.
+// in flight at a time. Read-only methods retry once on a broken connection;
+// mutations are never replayed because their outcome may be unknown.
 func (c *Client) Call(method string, params, result any) error {
 	return c.CallWithContext(context.Background(), method, params, result, defaultCallTimeout)
 }
@@ -177,39 +209,127 @@ func (c *Client) CallWithTimeout(method string, params, result any, timeout time
 // CallWithContext is like CallWithTimeout and also interrupts network I/O when
 // ctx is cancelled. A cancelled mutation is never replayed automatically.
 func (c *Client) CallWithContext(ctx context.Context, method string, params, result any, timeout time.Duration) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	// Include queueing, reconnecting, and any retry in one total budget.
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if err := c.acquire(ctx); err != nil {
+		return err
+	}
+	defer c.release()
 
-	if c.closed {
+	for attempt := 0; ; attempt++ {
+		err := c.call(ctx, method, params, result)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		// Socket deadlines can fire just before the context's timer callback.
+		// Keep timeout errors stable even in that scheduling window.
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+				return context.DeadlineExceeded
+			}
+		}
+		if err == nil || attempt != 0 || !readOnlyMethod(method) || !IsRetryable(err) {
+			return err
+		}
+	}
+}
+
+func readOnlyMethod(method string) bool {
+	switch method {
+	case "GetFeed", "GetAllFeeds", "GetArticle", "GetArticlesWithCursor", "FeedStats":
+		return true
+	default:
+		return false
+	}
+}
+
+// acquire serializes requests without making cancellation or Close wait for
+// another operation's network I/O. Lazy initialization also supports test pipes.
+func (c *Client) acquire(ctx context.Context) error {
+	c.mu.Lock()
+	if c.gate == nil {
+		c.gate = make(chan struct{}, 1)
+		c.done = make(chan struct{})
+	}
+	gate, done, closed := c.gate, c.done, c.closed
+	c.mu.Unlock()
+	if closed {
+		return ErrConnClosed
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-done:
+		return ErrConnClosed
+	case gate <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			c.release()
+			return err
+		}
+		return nil
+	}
+}
+
+func (c *Client) release() { <-c.gate }
+
+func (c *Client) discard(conn net.Conn) {
+	c.mu.Lock()
+	if c.conn == conn {
+		c.conn = nil
+	}
+	c.mu.Unlock()
+	_ = conn.Close()
+}
+
+// closeOnCancel joins a running cancellation callback before a connection can
+// be reused, so late cancellation cannot interfere with the next request.
+func closeOnCancel(ctx context.Context, conn net.Conn) func() {
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		_ = conn.Close()
+		close(done)
+	})
+	return func() {
+		if !stop() {
+			<-done
+		}
+	}
+}
+
+func (c *Client) call(ctx context.Context, method string, params, result any) error {
+	c.mu.Lock()
+	conn, closed := c.conn, c.closed
+	c.mu.Unlock()
+	if closed {
 		return ErrConnClosed
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-
-	// A call made after a previous connection failure establishes a fresh
-	// connection, but never replays the failed call that lost the connection.
-	if c.conn == nil {
-		if err := c.connect(); err != nil {
+	if conn == nil {
+		var err error
+		conn, err = c.connect(ctx)
+		if err != nil {
 			return fmt.Errorf("reconnect: %w", err)
 		}
 	}
 
-	deadline := time.Now().Add(timeout)
-	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
-		deadline = ctxDeadline
-	}
-	if deadlineErr := c.conn.SetDeadline(deadline); deadlineErr != nil {
-		return fmt.Errorf("set deadline: %w", deadlineErr)
-	}
-	conn := c.conn
-	stopCancel := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Now()) })
+	healthy := false
+	stopCancel := closeOnCancel(ctx, conn)
 	defer func() {
 		stopCancel()
-		if c.conn != nil {
-			_ = c.conn.SetDeadline(time.Time{})
+		if !healthy || ctx.Err() != nil {
+			c.discard(conn)
+		} else {
+			_ = conn.SetDeadline(time.Time{})
 		}
 	}()
+	deadline, _ := ctx.Deadline()
+	if err := conn.SetDeadline(deadline); err != nil {
+		return fmt.Errorf("set deadline: %w", err)
+	}
 
 	id := atomic.AddUint64(&c.reqID, 1)
 
@@ -220,45 +340,30 @@ func (c *Client) CallWithContext(ctx context.Context, method string, params, res
 		Params:  params,
 	}
 
-	if err := WriteFrame(c.conn, req); err != nil {
-		// Connection is likely broken; mark it unusable.
-		c.conn.Close()
-		c.conn = nil
+	if err := WriteFrame(conn, req); err != nil {
 		return fmt.Errorf("write request: %w", err)
 	}
 
-	body, err := ReadFrame(c.conn)
+	body, err := ReadFrame(conn)
 	if err != nil {
-		c.conn.Close()
-		c.conn = nil
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
-		}
 		return fmt.Errorf("read response: %w", err)
 	}
 
 	var resp Response
 	if err := json.Unmarshal(body, &resp); err != nil {
-		c.conn.Close()
-		c.conn = nil
 		return fmt.Errorf("unmarshal response: %w", err)
 	}
 
 	if resp.Version != ProtocolVersion {
-		c.conn.Close()
-		c.conn = nil
 		return fmt.Errorf("%w: response version %d", ErrProtocol, resp.Version)
 	}
 	if resp.ID != id {
-		c.conn.Close()
-		c.conn = nil
 		return fmt.Errorf("%w: response ID mismatch: expected %d got %d", ErrProtocol, id, resp.ID)
 	}
 	if resp.Error != nil && len(resp.Result) != 0 && !bytes.Equal(resp.Result, []byte("null")) {
-		c.conn.Close()
-		c.conn = nil
 		return fmt.Errorf("%w: response contains both result and error", ErrProtocol)
 	}
+	healthy = true
 	if resp.Error != nil {
 		return resp.Error
 	}
@@ -274,19 +379,20 @@ func (c *Client) CallWithContext(ctx context.Context, method string, params, res
 // Reconnect closes the current connection (if any) and reconnects with a
 // fresh handshake. Use after a connection-level error.
 func (c *Client) Reconnect() error {
+	ctx, cancel := context.WithTimeout(context.Background(), handshakeTimeout)
+	defer cancel()
+	if err := c.acquire(ctx); err != nil {
+		return err
+	}
+	defer c.release()
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.closed {
-		return ErrConnClosed
+	conn := c.conn
+	c.mu.Unlock()
+	if conn != nil {
+		c.discard(conn)
 	}
-
-	if c.conn != nil {
-		c.conn.Close()
-		c.conn = nil
-	}
-
-	return c.connect()
+	_, err := c.connect(ctx)
+	return err
 }
 
 // Close closes the client and its underlying connection.
@@ -294,7 +400,16 @@ func (c *Client) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.closed {
+		return nil
+	}
 	c.closed = true
+	if c.connecting != nil {
+		c.connecting()
+	}
+	if c.done != nil {
+		close(c.done)
+	}
 	if c.conn != nil {
 		err := c.conn.Close()
 		c.conn = nil

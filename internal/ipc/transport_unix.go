@@ -3,6 +3,7 @@
 package ipc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -26,7 +27,14 @@ func transportRunDir() string {
 // DialEndpoint connects to the Unix-domain IPC endpoint. Callers apply
 // handshake and operation deadlines to the returned connection.
 func DialEndpoint(addr string) (net.Conn, error) {
-	conn, err := net.Dial("unix", addr)
+	ctx, cancel := context.WithTimeout(context.Background(), handshakeTimeout)
+	defer cancel()
+	return DialEndpointContext(ctx, addr)
+}
+
+// DialEndpointContext connects within the caller's time budget.
+func DialEndpointContext(ctx context.Context, addr string) (net.Conn, error) {
+	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial unix %s: %w", addr, err)
 	}

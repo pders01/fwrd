@@ -3,6 +3,7 @@
 package ipc
 
 import (
+	"context"
 	"fmt"
 	"net"
 
@@ -18,8 +19,14 @@ func transportRunDir() string { return "" }
 
 // DialEndpoint connects to the named pipe at addr.
 func DialEndpoint(addr string) (net.Conn, error) {
-	timeout := handshakeTimeout
-	conn, err := winio.DialPipe(addr, &timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), handshakeTimeout)
+	defer cancel()
+	return DialEndpointContext(ctx, addr)
+}
+
+// DialEndpointContext connects within the caller's time budget.
+func DialEndpointContext(ctx context.Context, addr string) (net.Conn, error) {
+	conn, err := winio.DialPipeContext(ctx, addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial pipe %s: %w", addr, err)
 	}
