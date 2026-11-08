@@ -131,6 +131,17 @@ func (e *ErrorBody) Unwrap() error {
 
 // --- framing ---
 
+// frameWriteError records confirmed progress only for writer errors with valid
+// byte counts. Only a direct *frameWriteError with written == 0 establishes
+// that no frame bytes were sent.
+type frameWriteError struct {
+	written int
+	err     error
+}
+
+func (e *frameWriteError) Error() string { return fmt.Sprintf("write frame: %v", e.err) }
+func (e *frameWriteError) Unwrap() error { return e.err }
+
 // WriteFrame marshals msg as JSON, prepends a 4-byte big-endian length,
 // and writes the complete frame to w. Frames longer than MaxFrameSize
 // are rejected before writing.
@@ -146,13 +157,23 @@ func WriteFrame(w io.Writer, msg any) error {
 	var header [4]byte
 	binary.BigEndian.PutUint32(header[:], uint32(len(data)))
 	// Do not allocate a second full-sized copy just to prepend the header.
+	written := 0
 	for _, part := range [][]byte{header[:], data} {
 		for len(part) > 0 {
 			n, writeErr := w.Write(part)
-			if writeErr != nil {
-				return fmt.Errorf("write frame: %w", writeErr)
+			if n < 0 || n > len(part) {
+				// Invalid counts cannot establish how many bytes were sent.
+				cause := error(io.ErrShortWrite)
+				if writeErr != nil {
+					cause = errors.Join(cause, writeErr)
+				}
+				return fmt.Errorf("write frame: %w", cause)
 			}
-			if n <= 0 || n > len(part) {
+			written += n
+			if writeErr != nil {
+				return &frameWriteError{written: written, err: writeErr}
+			}
+			if n == 0 {
 				return fmt.Errorf("write frame: %w", io.ErrShortWrite)
 			}
 			part = part[n:]

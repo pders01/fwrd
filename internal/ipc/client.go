@@ -195,8 +195,9 @@ func Probe(addr, databaseID string) error {
 }
 
 // Call sends a request and waits for a response. Only one call may be
-// in flight at a time. Read-only methods retry once on a broken connection;
-// mutations are never replayed because their outcome may be unknown.
+// in flight at a time. Read-only methods retry once on a broken connection.
+// A mutation can reconnect once only if its request write accepted zero bytes;
+// potentially delivered mutations are never replayed.
 func (c *Client) Call(method string, params, result any) error {
 	return c.CallWithContext(context.Background(), method, params, result, defaultCallTimeout)
 }
@@ -218,7 +219,7 @@ func (c *Client) CallWithContext(ctx context.Context, method string, params, res
 	defer c.release()
 
 	for attempt := 0; ; attempt++ {
-		err := c.call(ctx, method, params, result)
+		requestNotSent, err := c.call(ctx, method, params, result)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
@@ -230,7 +231,8 @@ func (c *Client) CallWithContext(ctx context.Context, method string, params, res
 				return context.DeadlineExceeded
 			}
 		}
-		if err == nil || attempt != 0 || !readOnlyMethod(method) || !IsRetryable(err) {
+		mayRetry := readOnlyMethod(method) || requestNotSent
+		if err == nil || attempt != 0 || !mayRetry || !IsRetryable(err) {
 			return err
 		}
 	}
@@ -298,21 +300,24 @@ func closeOnCancel(ctx context.Context, conn net.Conn) func() {
 	}
 }
 
-func (c *Client) call(ctx context.Context, method string, params, result any) error {
+// call's first result permits recovery only for an actual request transport
+// write that accepted zero cumulative frame bytes. Handshake, serialization,
+// deadline, response, and invalid-writer failures never grant this permission.
+func (c *Client) call(ctx context.Context, method string, params, result any) (bool, error) {
 	c.mu.Lock()
 	conn, closed := c.conn, c.closed
 	c.mu.Unlock()
 	if closed {
-		return ErrConnClosed
+		return false, ErrConnClosed
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return false, err
 	}
 	if conn == nil {
 		var err error
 		conn, err = c.connect(ctx)
 		if err != nil {
-			return fmt.Errorf("reconnect: %w", err)
+			return false, fmt.Errorf("reconnect: %w", err)
 		}
 	}
 
@@ -328,7 +333,7 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	}()
 	deadline, _ := ctx.Deadline()
 	if err := conn.SetDeadline(deadline); err != nil {
-		return fmt.Errorf("set deadline: %w", err)
+		return false, fmt.Errorf("set deadline: %w", err)
 	}
 
 	id := atomic.AddUint64(&c.reqID, 1)
@@ -342,39 +347,42 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	}
 
 	if err := WriteFrame(conn, req); err != nil {
-		return fmt.Errorf("write request: %w", err)
+		// Assert the direct type: a marshal error can wrap arbitrary errors
+		// but is not evidence of an actual zero-byte socket write.
+		writeErr, ok := err.(*frameWriteError)
+		return ok && writeErr.written == 0, fmt.Errorf("write request: %w", err)
 	}
 
 	body, err := ReadFrame(conn)
 	if err != nil {
-		return fmt.Errorf("read response: %w", err)
+		return false, fmt.Errorf("read response: %w", err)
 	}
 
 	var resp Response
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return fmt.Errorf("unmarshal response: %w", err)
+		return false, fmt.Errorf("unmarshal response: %w", err)
 	}
 
 	if resp.Version != ProtocolVersion {
-		return fmt.Errorf("%w: response version %d", ErrProtocol, resp.Version)
+		return false, fmt.Errorf("%w: response version %d", ErrProtocol, resp.Version)
 	}
 	if resp.ID != id {
-		return fmt.Errorf("%w: response ID mismatch: expected %d got %d", ErrProtocol, id, resp.ID)
+		return false, fmt.Errorf("%w: response ID mismatch: expected %d got %d", ErrProtocol, id, resp.ID)
 	}
 	if resp.Error != nil && len(resp.Result) != 0 && !bytes.Equal(resp.Result, []byte("null")) {
-		return fmt.Errorf("%w: response contains both result and error", ErrProtocol)
+		return false, fmt.Errorf("%w: response contains both result and error", ErrProtocol)
 	}
 	healthy = true
 	if resp.Error != nil {
-		return resp.Error
+		return false, resp.Error
 	}
 
 	if result != nil && len(resp.Result) != 0 {
 		if err := json.Unmarshal(resp.Result, result); err != nil {
-			return fmt.Errorf("unmarshal result: %w", err)
+			return false, fmt.Errorf("unmarshal result: %w", err)
 		}
 	}
-	return nil
+	return false, nil
 }
 
 // Reconnect closes the current connection (if any) and reconnects with a
