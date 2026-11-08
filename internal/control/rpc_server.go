@@ -439,7 +439,7 @@ func (s *RPCServer) dispatch(ctx context.Context, conn net.Conn, req *ipc.Reques
 		}
 		s.writeResult(conn, req.ID, nil)
 
-	case "CommitFeed":
+	case "CommitFeed", "CommitFeedCounted":
 		var p struct {
 			Feed       *storage.Feed      `json:"feed"`
 			Articles   []*storage.Article `json:"articles"`
@@ -457,12 +457,42 @@ func (s *RPCServer) dispatch(ctx context.Context, conn net.Conn, req *ipc.Reques
 			s.writeError(conn, req.ID, ipc.CodeInvalidArg, err.Error())
 			return
 		}
+		if req.Method == "CommitFeedCounted" {
+			result, err := s.coordinator.CommitFeedCounted(ctx, p.Feed, p.Articles, p.CreateOnly)
+			if err != nil {
+				s.writeError(conn, req.ID, errorCode(err), err.Error())
+				return
+			}
+			s.writeResult(conn, req.ID, result)
+			return
+		}
 		saved, err := s.coordinator.CommitFeed(ctx, p.Feed, p.Articles, p.CreateOnly)
 		if err != nil {
 			s.writeError(conn, req.ID, errorCode(err), err.Error())
 			return
 		}
 		s.writeResult(conn, req.ID, saved)
+
+	case "SetFeedError":
+		var p struct {
+			ID      string    `json:"id"`
+			Message string    `json:"message"`
+			At      time.Time `json:"at"`
+		}
+		if err := s.decodeParams(req, &p); err != nil {
+			s.writeError(conn, req.ID, ipc.CodeInvalidArg, err.Error())
+			return
+		}
+		if err := requireValue("id", p.ID); err != nil {
+			s.writeError(conn, req.ID, ipc.CodeInvalidArg, err.Error())
+			return
+		}
+		value, err := s.coordinator.SetFeedError(ctx, p.ID, p.Message, p.At)
+		if err != nil {
+			s.writeError(conn, req.ID, errorCode(err), err.Error())
+			return
+		}
+		s.writeResult(conn, req.ID, value)
 
 	case "SetFeedDesk", "RenameFeed":
 		var p struct {

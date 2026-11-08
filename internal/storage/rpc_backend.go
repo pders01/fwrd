@@ -3,6 +3,7 @@ package storage
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/pders01/fwrd/internal/ipc"
 )
@@ -44,6 +45,22 @@ func (r *rpcBackend) CommitFeed(feed *Feed, articles []*Article, createOnly bool
 	var saved []*Article
 	err := r.call("CommitFeed", map[string]any{"feed": feed, "articles": articles, "create_only": createOnly}, &saved)
 	return saved, err
+}
+
+func (r *rpcBackend) CommitFeedCounted(feed *Feed, articles []*Article, createOnly bool) (FeedCommitResult, error) {
+	var result FeedCommitResult
+	if err := r.call("CommitFeedCounted", map[string]any{"feed": feed, "articles": articles, "create_only": createOnly}, &result); err != nil {
+		return FeedCommitResult{}, err
+	}
+	return result, nil
+}
+
+func (r *rpcBackend) SetFeedError(id, message string, at time.Time) (*Feed, error) {
+	var feed Feed
+	if err := r.call("SetFeedError", map[string]any{"id": id, "message": message, "at": at}, &feed); err != nil {
+		return nil, err
+	}
+	return &feed, nil
 }
 
 func (r *rpcBackend) SetFeedDesk(id, deskID string) (*Feed, error) {

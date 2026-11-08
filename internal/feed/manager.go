@@ -301,34 +301,32 @@ func (m *Manager) RefreshFeedContext(ctx context.Context, feedID string) error {
 	return err
 }
 
-// refreshFeedByID does the work of RefreshFeed and returns the feed +
-// freshly-saved articles so RefreshAllFeeds can dispatch listener
+// refreshFeedByIDContext returns the feed, merged articles and atomic insertion
+// count so RefreshAllFeeds can summarize writes and dispatch listener
 // notifications from a single goroutine. When notify is true,
 // notifyDataUpdated runs inline; the multi-feed path passes false and
 // notifies later from the result-collection loop.
-func (m *Manager) refreshFeedByIDContext(ctx context.Context, feedID string, notify bool) (*storage.Feed, []*storage.Article, error) {
+func (m *Manager) refreshFeedByIDContext(ctx context.Context, feedID string, notify bool) (*storage.Feed, storage.FeedCommitResult, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err
+		return nil, storage.FeedCommitResult{}, err
 	}
 	feed, err := m.store.GetFeed(feedID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("getting feed: %w", err)
+		return nil, storage.FeedCommitResult{}, fmt.Errorf("getting feed: %w", err)
 	}
+	previous := *feed
 
 	if time.Since(feed.LastFetched) < m.config.Feed.RefreshInterval {
-		return feed, nil, nil
+		return feed, storage.FeedCommitResult{}, nil
 	}
 
 	resp, updated, err := m.fetcher.FetchContext(ctx, feed)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return feed, nil, ctxErr
+			return feed, storage.FeedCommitResult{}, ctxErr
 		}
-		// Persist the failure so /feeds can surface a stale/error badge.
-		// Best-effort: a save error here is subordinate to the fetch error.
-		recordFeedError(feed, err)
-		_, _ = m.store.CommitFeed(feed, nil, false)
-		return feed, nil, fmt.Errorf("fetching feed: %w", err)
+		m.recordFeedError(feed, err)
+		return feed, storage.FeedCommitResult{}, fmt.Errorf("fetching feed: %w", err)
 	}
 
 	if !updated || resp == nil {
@@ -336,20 +334,21 @@ func (m *Manager) refreshFeedByIDContext(ctx context.Context, feedID string, not
 		feed.LastFetched = time.Now()
 		clearFeedError(feed)
 		if _, saveErr := m.store.CommitFeed(feed, nil, false); saveErr != nil {
-			return feed, nil, fmt.Errorf("saving feed metadata: %w", saveErr)
+			*feed = previous
+			m.recordFeedError(feed, saveErr)
+			return feed, storage.FeedCommitResult{}, fmt.Errorf("saving feed metadata: %w", saveErr)
 		}
-		return feed, nil, nil
+		return feed, storage.FeedCommitResult{}, nil
 	}
 	defer resp.Body.Close()
 
 	parsed, err := m.parser.ParseFeed(io.LimitReader(contextReader{ctx: ctx, reader: resp.Body}, maxFeedBodySize), feedID)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return feed, nil, ctxErr
+			return feed, storage.FeedCommitResult{}, ctxErr
 		}
-		recordFeedError(feed, err)
-		_, _ = m.store.CommitFeed(feed, nil, false)
-		return feed, nil, fmt.Errorf("parsing feed: %w", err)
+		m.recordFeedError(feed, err)
+		return feed, storage.FeedCommitResult{}, fmt.Errorf("parsing feed: %w", err)
 	}
 	articles := parsed.Articles
 	applyParsedIdentity(feed, parsed)
@@ -358,26 +357,30 @@ func (m *Manager) refreshFeedByIDContext(ctx context.Context, feedID string, not
 	feed.UpdatedAt = time.Now()
 	clearFeedError(feed)
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return feed, nil, ctxErr
+		return feed, storage.FeedCommitResult{}, ctxErr
 	}
 
 	// Validators, fetch timestamps, content and current reader state commit
 	// together. A rejected article must not make subsequent fetches return 304
 	// for content that was never persisted.
 	applyOnboardingState(feed, articles)
-	articles, err = m.store.CommitFeed(feed, articles, false)
+	result, err := m.store.CommitFeedCounted(feed, articles, false)
 	if err != nil {
-		return feed, nil, fmt.Errorf("saving refreshed feed: %w", err)
+		// Never persist tentative identity, validators or fetch timestamps when
+		// the article transaction failed. Health alone updates current metadata.
+		*feed = previous
+		m.recordFeedError(feed, err)
+		return feed, storage.FeedCommitResult{}, fmt.Errorf("saving refreshed feed: %w", err)
 	}
 	feed, err = m.store.GetFeed(feed.ID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read committed refreshed feed: %w", err)
+		return nil, storage.FeedCommitResult{}, fmt.Errorf("read committed refreshed feed: %w", err)
 	}
 
 	if notify {
-		m.notifyDataUpdated(feed, articles)
+		m.notifyDataUpdated(feed, result.Articles)
 	}
-	return feed, articles, nil
+	return feed, result, nil
 }
 
 // applyOnboardingState marks pre-subscription history read for feeds created
@@ -421,9 +424,9 @@ func (m *Manager) RefreshAllFeedsContext(ctx context.Context) (RefreshSummary, e
 	}
 
 	type result struct {
-		feed     *storage.Feed
-		articles []*storage.Article
-		err      error
+		feed   *storage.Feed
+		commit storage.FeedCommitResult
+		err    error
 	}
 
 	maxConcurrent := m.config.Feed.MaxConcurrentRefreshes
@@ -447,12 +450,12 @@ func (m *Manager) RefreshAllFeedsContext(ctx context.Context) (RefreshSummary, e
 					if !ok {
 						return
 					}
-					feed, articles, refreshErr := m.refreshFeedByIDContext(ctx, f.ID, false)
+					feed, commit, refreshErr := m.refreshFeedByIDContext(ctx, f.ID, false)
 					if refreshErr != nil {
 						// Use the original subscription: refresh can return a nil feed.
 						refreshErr = fmt.Errorf("%s: %w", refreshFeedIdentity(f), refreshErr)
 					}
-					resultChan <- result{feed: feed, articles: articles, err: refreshErr}
+					resultChan <- result{feed: feed, commit: commit, err: refreshErr}
 				}
 			}
 		}()
@@ -478,13 +481,13 @@ feedLoop:
 			summary.Errors = append(summary.Errors, r.err)
 			continue
 		}
-		if r.articles == nil {
+		if r.commit.Articles == nil {
 			// Refresh skipped (rate-limited or 304) — no listener event.
 			continue
 		}
 		summary.UpdatedFeeds++
-		summary.AddedArticles += len(r.articles)
-		m.notifyDataUpdated(r.feed, r.articles)
+		summary.AddedArticles += r.commit.AddedArticles
+		m.notifyDataUpdated(r.feed, r.commit.Articles)
 	}
 
 	return summary, errors.Join(append(summary.Errors, ctx.Err())...)
@@ -529,11 +532,14 @@ func (r contextReader) Read(p []byte) (int, error) {
 	return r.reader.Read(p)
 }
 
-// recordFeedError stamps a failed refresh onto the feed. LastFetched is left
-// untouched so it keeps pointing at the last *successful* fetch.
-func recordFeedError(feed *storage.Feed, err error) {
-	feed.LastError = err.Error()
-	feed.LastErrorAt = time.Now()
+// recordFeedError updates only health on previously committed metadata. A
+// recording failure (e.g. an unwritable database) never hides the original error.
+// No listener event is emitted for failed refreshes.
+func (m *Manager) recordFeedError(feed *storage.Feed, err error) {
+	feed.LastError, feed.LastErrorAt = err.Error(), time.Now()
+	if committed, saveErr := m.store.SetFeedError(feed.ID, feed.LastError, feed.LastErrorAt); saveErr == nil {
+		*feed = *committed
+	}
 }
 
 // clearFeedError wipes any prior failure after a successful refresh.

@@ -113,10 +113,15 @@ func (b *boltBackend) SaveFeed(feed *Feed) error {
 }
 
 func (b *boltBackend) CommitFeed(feed *Feed, articles []*Article, createOnly bool) ([]*Article, error) {
+	result, err := b.CommitFeedCounted(feed, articles, createOnly)
+	return result.Articles, err
+}
+
+func (b *boltBackend) CommitFeedCounted(feed *Feed, articles []*Article, createOnly bool) (FeedCommitResult, error) {
 	if feed == nil {
-		return nil, fmt.Errorf("feed must not be nil")
+		return FeedCommitResult{}, fmt.Errorf("feed must not be nil")
 	}
-	var saved []*Article
+	var result FeedCommitResult
 	err := b.db.Update(func(tx *bolt.Tx) error {
 		committed := *feed
 		fb := tx.Bucket(feedsBucket)
@@ -151,13 +156,13 @@ func (b *boltBackend) CommitFeed(feed *Feed, articles []*Article, createOnly boo
 		if putErr := fb.Put([]byte(feed.ID), data); putErr != nil {
 			return putErr
 		}
-		saved, err = saveArticlesTx(tx, articles, true)
+		result, err = saveArticlesTx(tx, articles, true)
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return FeedCommitResult{}, err
 	}
-	return saved, nil
+	return result, nil
 }
 
 func (b *boltBackend) mutateFeed(id string, mutate func(*Feed)) (*Feed, error) {
@@ -182,6 +187,10 @@ func (b *boltBackend) mutateFeed(id string, mutate func(*Feed)) (*Feed, error) {
 		return nil, err
 	}
 	return &feed, nil
+}
+
+func (b *boltBackend) SetFeedError(id, message string, at time.Time) (*Feed, error) {
+	return b.mutateFeed(id, func(f *Feed) { f.LastError, f.LastErrorAt = message, at })
 }
 
 func (b *boltBackend) SetFeedDesk(id, deskID string) (*Feed, error) {
@@ -276,20 +285,20 @@ func (b *boltBackend) MergeArticles(articles []*Article) ([]*Article, error) {
 }
 
 func (b *boltBackend) saveArticles(articles []*Article, preserveState bool) ([]*Article, error) {
-	var saved []*Article
+	var result FeedCommitResult
 	err := b.db.Update(func(tx *bolt.Tx) error {
 		var err error
-		saved, err = saveArticlesTx(tx, articles, preserveState)
+		result, err = saveArticlesTx(tx, articles, preserveState)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	return saved, nil
+	return result.Articles, nil
 }
 
-func saveArticlesTx(tx *bolt.Tx, articles []*Article, preserveState bool) ([]*Article, error) {
-	saved := make([]*Article, 0, len(articles))
+func saveArticlesTx(tx *bolt.Tx, articles []*Article, preserveState bool) (FeedCommitResult, error) {
+	result := FeedCommitResult{Articles: make([]*Article, 0, len(articles))}
 	err := func() error {
 		ab := tx.Bucket(articlesBucket)
 		idxRoot := tx.Bucket(articlesByFeedBucket)
@@ -351,14 +360,19 @@ func saveArticlesTx(tx *bolt.Tx, articles []*Article, preserveState bool) ([]*Ar
 					return err
 				}
 			}
-			saved = append(saved, &article)
+			result.Articles = append(result.Articles, &article)
+			// Reads see earlier writes in this transaction, so repeated incoming
+			// IDs count only once without any preflight or database-wide scan.
+			if !hadPrev {
+				result.AddedArticles++
+			}
 		}
 		return nil
 	}()
 	if err != nil {
-		return nil, err
+		return FeedCommitResult{}, err
 	}
-	return saved, nil
+	return result, nil
 }
 
 func (b *boltBackend) GetArticle(id string) (*Article, error) {

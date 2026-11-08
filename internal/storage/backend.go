@@ -1,6 +1,9 @@
 package storage
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 // ErrDatabaseLocked is returned when bbolt cannot acquire the file lock
 // within the configured timeout — almost always because another fwrd
@@ -22,12 +25,22 @@ var ErrResultTooLarge = errors.New("article page exceeds byte budget")
 // deletes it on Close.
 const MemoryPath = ":memory:"
 
+// FeedCommitResult includes every merged record for listener/index updates and
+// the number of unique article IDs inserted by the same transaction. On failure
+// the result is zero, even if some writes were attempted before rollback.
+type FeedCommitResult struct {
+	Articles      []*Article `json:"articles"`
+	AddedArticles int        `json:"added_articles"`
+}
+
 // storeBackend abstracts the underlying data-access mechanism.
 // Implementations include the local bbolt store (boltBackend) and
 // the IPC-backed client (rpcBackend).
 type storeBackend interface {
 	SaveFeed(feed *Feed) error
 	CommitFeed(feed *Feed, articles []*Article, createOnly bool) ([]*Article, error)
+	CommitFeedCounted(feed *Feed, articles []*Article, createOnly bool) (FeedCommitResult, error)
+	SetFeedError(id, message string, at time.Time) (*Feed, error)
 	SetFeedDesk(id, deskID string) (*Feed, error)
 	RenameFeed(id, title string) (*Feed, error)
 	GetFeed(id string) (*Feed, error)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/storage"
@@ -182,6 +183,38 @@ func (c *MutationCoordinator) CommitFeed(ctx context.Context, value *storage.Fee
 		return nil, errors.New("primitive CommitFeed is unavailable")
 	}
 	return ops.CommitFeed(value, articles, createOnly)
+}
+
+// CommitFeedCounted requires explicit backend support; no racy count fallback.
+func (c *MutationCoordinator) CommitFeedCounted(ctx context.Context, value *storage.Feed, articles []*storage.Article, createOnly bool) (storage.FeedCommitResult, error) {
+	_, done, err := c.operationContext(ctx)
+	if err != nil {
+		return storage.FeedCommitResult{}, err
+	}
+	defer done()
+	ops, ok := c.ops.(interface {
+		CommitFeedCounted(*storage.Feed, []*storage.Article, bool) (storage.FeedCommitResult, error)
+	})
+	if !ok {
+		return storage.FeedCommitResult{}, errors.New("primitive CommitFeedCounted is unavailable")
+	}
+	return ops.CommitFeedCounted(value, articles, createOnly)
+}
+
+// SetFeedError serializes a health-only mutation without listener notification.
+func (c *MutationCoordinator) SetFeedError(ctx context.Context, id, message string, at time.Time) (*storage.Feed, error) {
+	_, done, err := c.operationContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	ops, ok := c.ops.(interface {
+		SetFeedError(string, string, time.Time) (*storage.Feed, error)
+	})
+	if !ok {
+		return nil, errors.New("primitive SetFeedError is unavailable")
+	}
+	return ops.SetFeedError(id, message, at)
 }
 
 // SetFeedDesk changes only the desk and notifies search under the mutation lock.

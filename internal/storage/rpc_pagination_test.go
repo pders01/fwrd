@@ -38,7 +38,7 @@ func paginationPeer(t *testing.T, respond func(net.Conn, *ipc.Request) error) *r
 		}
 		for {
 			body, readErr := ipc.ReadFrame(conn)
-			if errors.Is(readErr, ipc.ErrConnClosed) {
+			if errors.Is(readErr, ipc.ErrConnClosed) || errors.Is(readErr, net.ErrClosed) {
 				done <- nil
 				return
 			}

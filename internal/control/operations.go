@@ -5,6 +5,7 @@ package control
 
 import (
 	"context"
+	"time"
 
 	"github.com/pders01/fwrd/internal/feed"
 	"github.com/pders01/fwrd/internal/storage"
@@ -108,6 +109,25 @@ func (l *LocalOps) CommitFeed(value *storage.Feed, articles []*storage.Article, 
 	}
 	l.Manager.NotifyDataUpdated(committed, saved)
 	return saved, nil
+}
+
+// CommitFeedCounted publishes all merged records, not just new insertions.
+func (l *LocalOps) CommitFeedCounted(value *storage.Feed, articles []*storage.Article, createOnly bool) (storage.FeedCommitResult, error) {
+	result, err := l.Store.CommitFeedCounted(value, articles, createOnly)
+	if err != nil {
+		return storage.FeedCommitResult{}, err
+	}
+	committed, err := l.Store.GetFeed(value.ID)
+	if err != nil {
+		return storage.FeedCommitResult{}, err
+	}
+	l.Manager.NotifyDataUpdated(committed, result.Articles)
+	return result, nil
+}
+
+// SetFeedError records health without publishing a failed refresh to listeners.
+func (l *LocalOps) SetFeedError(id, message string, at time.Time) (*storage.Feed, error) {
+	return l.Store.SetFeedError(id, message, at)
 }
 
 // SetFeedDesk atomically changes a feed's desk and updates search.

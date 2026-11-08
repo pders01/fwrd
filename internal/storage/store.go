@@ -86,6 +86,28 @@ func (s *Store) CommitFeed(feed *Feed, articles []*Article, createOnly bool) ([]
 	return saved, err
 }
 
+// CommitFeedCounted is CommitFeed with an atomic unique-insertion count.
+// Backends must support counted commits explicitly; remote failures (including
+// an older server's unknown-method error) never fall back to guessed counts.
+func (s *Store) CommitFeedCounted(feed *Feed, articles []*Article, createOnly bool) (FeedCommitResult, error) {
+	result, err := s.backend.CommitFeedCounted(feed, articles, createOnly)
+	if err != nil {
+		return FeedCommitResult{}, err
+	}
+	s.writeGen.Add(1)
+	return result, nil
+}
+
+// SetFeedError atomically updates only health on the currently committed feed.
+// Validators, timestamps, user metadata and articles are left untouched.
+func (s *Store) SetFeedError(id, message string, at time.Time) (*Feed, error) {
+	feed, err := s.backend.SetFeedError(id, message, at)
+	if err == nil {
+		s.writeGen.Add(1)
+	}
+	return feed, err
+}
+
 // SetFeedDesk changes only the desk of an existing feed.
 func (s *Store) SetFeedDesk(id, deskID string) (*Feed, error) {
 	feed, err := s.backend.SetFeedDesk(id, deskID)

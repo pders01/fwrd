@@ -58,18 +58,35 @@ func TestFailedSubscriptionDoesNotCommitValidators(t *testing.T) {
 
 func TestFailedRefreshKeepsPreviouslyCommittedValidatorsAndArticles(t *testing.T) {
 	manager, store := persistenceManager(t)
+	listener := &committedFeedListener{}
+	manager.RegisterDataListener(listener)
 	var broken atomic.Bool
+	var articleID, feedID string
 	var badRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		guid, etag := "stable", `"saved"`
 		if broken.Load() {
-			badRequests.Add(1)
+			if badRequests.Add(1) == 1 {
+				// Edit after the manager loaded its snapshot, before commit fails.
+				if _, err := store.RenameFeed(feedID, "Concurrent title"); err != nil {
+					t.Error(err)
+				}
+				if _, err := store.SetFeedDesk(feedID, "concurrent-desk"); err != nil {
+					t.Error(err)
+				}
+				if err := store.MarkArticleRead(articleID, false); err != nil {
+					t.Error(err)
+				}
+			}
 			if r.Header.Get("If-None-Match") != `"saved"` {
 				t.Errorf("refresh used uncommitted validator: %q", r.Header.Get("If-None-Match"))
 			}
 			guid, etag = strings.Repeat("g", 40*1024), `"not-saved"`
 		}
 		w.Header().Set("ETag", etag)
+		if broken.Load() {
+			w.Header().Set("Last-Modified", "Wed, 21 Oct 2015 07:28:00 GMT")
+		}
 		if r.Header.Get("If-None-Match") == etag {
 			w.WriteHeader(http.StatusNotModified)
 			return
@@ -85,7 +102,8 @@ func TestFailedRefreshKeepsPreviouslyCommittedValidatorsAndArticles(t *testing.T
 	if err != nil || len(articles) != 1 {
 		t.Fatalf("saved articles = %#v, %v", articles, err)
 	}
-	if markErr := store.MarkArticleStarred(articles[0].ID, true); markErr != nil {
+	articleID, feedID = articles[0].ID, value.ID
+	if markErr := store.MarkArticleStarred(articleID, true); markErr != nil {
 		t.Fatal(markErr)
 	}
 	before, err := store.GetFeed(value.ID)
@@ -94,26 +112,61 @@ func TestFailedRefreshKeepsPreviouslyCommittedValidatorsAndArticles(t *testing.T
 	}
 	broken.Store(true)
 	for range 2 {
-		if refreshErr := manager.RefreshFeed(value.ID); refreshErr == nil {
-			t.Fatal("invalid refreshed article unexpectedly committed")
+		refreshErr := manager.RefreshFeed(value.ID)
+		if refreshErr == nil || !strings.Contains(refreshErr.Error(), "saving refreshed feed:") {
+			t.Fatalf("invalid refreshed article error = %v", refreshErr)
 		}
 		got, getErr := store.GetFeed(value.ID)
-		if getErr != nil || got.ETag != before.ETag || !got.LastFetched.Equal(before.LastFetched) {
+		if getErr != nil || got.ETag != before.ETag || got.LastModified != before.LastModified || !got.LastFetched.Equal(before.LastFetched) || !got.UpdatedAt.Equal(before.UpdatedAt) {
 			t.Fatalf("failed refresh advanced metadata: %#v, %v", got, getErr)
+		}
+		if got.LastError == "" || !strings.Contains(refreshErr.Error(), got.LastError) || got.LastErrorAt.IsZero() {
+			t.Fatalf("failed commit not recorded: %#v, original %v", got, refreshErr)
+		}
+		if got.Title != "Concurrent title" || got.DeskID != "concurrent-desk" {
+			t.Fatalf("health write lost concurrent user edits: %#v", got)
+		}
+		if listener.calls != 1 {
+			t.Fatalf("failed refresh notified listener: %d calls", listener.calls)
 		}
 	}
 	if badRequests.Load() != 2 {
 		t.Fatal("failed refresh was not retried")
 	}
 	got, err := store.GetArticle(articles[0].ID)
-	if err != nil || !got.Starred {
+	if err != nil || !got.Starred || got.Read {
 		t.Fatal("failed refresh changed saved article")
+	}
+	broken.Store(false)
+	if refreshErr := manager.RefreshFeed(value.ID); refreshErr != nil {
+		t.Fatalf("304 recovery: %v", refreshErr)
+	}
+	healthy, err := store.GetFeed(value.ID)
+	if err != nil || healthy.LastError != "" || !healthy.LastErrorAt.IsZero() || !healthy.LastFetched.After(before.LastFetched) || listener.calls != 1 {
+		t.Fatalf("304 did not clear health without notification: %+v, %v", healthy, err)
+	}
+	broken.Store(true)
+	if refreshErr := manager.RefreshFeed(value.ID); refreshErr == nil {
+		t.Fatal("second failed transaction unexpectedly succeeded")
+	}
+	broken.Store(false)
+	manager.SetForceRefresh(true)
+	if refreshErr := manager.RefreshFeed(value.ID); refreshErr != nil {
+		t.Fatalf("200 recovery: %v", refreshErr)
+	}
+	healthy, err = store.GetFeed(value.ID)
+	if err != nil || healthy.LastError != "" || !healthy.LastErrorAt.IsZero() || listener.calls != 2 {
+		t.Fatalf("200 did not clear health and notify: %+v, %v", healthy, err)
 	}
 }
 
-type committedFeedListener struct{ last *storage.Feed }
+type committedFeedListener struct {
+	last  *storage.Feed
+	calls int
+}
 
 func (l *committedFeedListener) OnDataUpdated(value *storage.Feed, _ []*storage.Article) {
+	l.calls++
 	if value != nil {
 		snapshot := *value
 		l.last = &snapshot
