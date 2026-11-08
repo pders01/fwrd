@@ -23,7 +23,7 @@ These changes are not a claim of formal verification or complete sandbox isolati
 
 | Finding | Implementation / regression coverage |
 | --- | --- |
-| Metadata committed before articles | CommitFeed transaction includes validators/timestamps and merged articles; failed creation/refresh rollback tests |
+| Metadata committed before articles | CommitFeed transaction includes validators/timestamps and merged articles; failed creation/refresh rollback tests; failed commits record health without publishing tentative metadata |
 | Duplicate subscriptions and unstable IDs | Atomic create-only commits, idempotent duplicate detection and deterministic GUID-less IDs; persistence and parser identity tests |
 | Stale full-record desk/title writes | Atomic SetFeedDesk/RenameFeed operations, persistent title override, committed-record notifications; storage contracts and desk regression tests |
 | Article feed reassignment corrupts indexes | Reassignment rejected transactionally through both backends; storage contract tests |
@@ -34,8 +34,12 @@ These changes are not a claim of formal verification or complete sandbox isolati
 | Unbounded IPC resources and unsafe socket removal | Connection/frame/dispatch budgets, response-write deadlines and positive stale-socket evidence; frame-budget/socket/RPC tests |
 | Concurrent renderer and index batches | Exclusive renderer access, full batch-scope ownership and coordinated local operations; TUI/search concurrency tests |
 | Partial/stale search and reader results | Authoritative search hydration, input snapshots and generation/target checks on completions/errors; search/TUI tests |
+| Refresh metadata and overlay recovery | Reconcile completed mutations independently of status generations; replace invalidated initial reads; owned error recovery and reader/media/search lifecycle tests |
+| Inflated new-article counts | Count new IDs inside the article commit transaction while retaining all merged records for index listeners; local and RPC count tests |
 | Worker mutations and rapid read/star toggles | Per-field sequenced write intents; model updates only on Update; overlapping-intent tests |
 | Index/theme/worker leaks | Cancellation-aware theme reader, worker drain and owned-index close; shutdown/index-reuse tests |
+| Lost explicit service TLS choice and stale Linux activation | Preserve explicit TLS overrides; enable and restart installed units; service argument/activation tests |
+| HTTPS proxy form failures | Explicit validated public origin with preserved Host; no implicit forwarded-header trust; proxy and CSRF tests |
 | Runtime TLS expiry | Handshake-time renewal; valid-certificate fallback on transient errors, no expired fallback; clock-controlled TLS tests |
 | Config/index/service path hazards | Database-relative default indexes, file-relative config paths, private config replacement, non-overwriting generation, absolute service paths and systemd quoting; config/service tests |
 | Incomplete quality gates | CLI tests included, macOS/Linux full tests, Windows native package tests, pinned lint and vulnerability scan; build targets compile the command package |

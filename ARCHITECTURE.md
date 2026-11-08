@@ -88,6 +88,8 @@ Implements the sophisticated terminal user interface:
 styling. `service` installs per-user systemd units or launchd agents, resolves
 paths before installation, and quotes systemd arguments. Service installation
 is loopback-only with mDNS off unless explicitly configured otherwise.
+Explicit TLS flags survive installation; Linux activation enables and restarts
+units so replacement arguments apply to an already-running service.
 
 ### internal/plugins
 Defines the `Plugin` interface, `FeedInfo` result type, and a thread-safe
@@ -146,6 +148,9 @@ it. It reaches near-parity with the other front-ends:
 - **CSRF defense**: a same-origin guard rejects non-GET requests whose
   `Origin`/`Referer` scheme and authority don't match the request origin.
   It protects state-changing forms alongside optional HTTP Basic Auth.
+  An optional, validated `[web] external_origin` configures the expected public
+  origin for an HTTP upstream behind a TLS-terminating reverse proxy; the proxy
+  must preserve Host. Forwarded headers never establish this trust implicitly.
   Caller-supplied redirect targets are constrained to local paths
 - **Render**: `html/template` with `//go:embed`-ed templates and CSS. Article
   HTML is run through the same `bluemonday.UGCPolicy` sanitizer the TUI uses

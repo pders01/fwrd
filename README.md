@@ -250,8 +250,24 @@ Two ways to protect it:
   encrypted. Behind a plain-HTTP reverse proxy, terminate TLS there.
 
 - **Reverse proxy.** Front fwrd with nginx/Caddy/Traefik handling TLS and
-  authentication, and keep fwrd bound to `127.0.0.1`. This is the
-  recommended setup for anything beyond a trusted LAN.
+  authentication, and keep fwrd bound to `127.0.0.1`. For an HTTP upstream,
+  explicitly configure the browser-visible origin and disable fwrd's own TLS:
+
+  ```toml
+  [web]
+  external_origin = "https://reader.example.org"
+
+  [web.tls]
+  enabled = false
+  ```
+
+  The proxy must preserve the original `Host` header, including any non-default
+  port (for nginx, `proxy_set_header Host $http_host;`). Match `external_origin`
+  to the public scheme, ASCII/punycode host, and port only—no path,
+  credentials, query, or fragment. Keep authentication enabled in fwrd or enforce it at the proxy.
+  Forwarded headers are **not** automatically trusted; setting
+  `X-Forwarded-Proto` alone does not bypass origin checks. Without this explicit
+  setting, browser mutations must match fwrd's native HTTP/HTTPS origin.
 
 #### Configuration and outbound requests
 
@@ -401,6 +417,12 @@ On Linux, systemd retries within the unit's five-starts-per-minute limit and
 then enters `failed` (`systemctl --user status fwrd`). On macOS, the launchd
 agent uses `KeepAlive=true` and continues relaunching; errors appear in
 `~/.fwrd/serve.err.log` (see [Viewing logs](#viewing-logs)).
+
+Re-running `service install` updates and restarts the service, including an
+already-running Linux unit, so changed arguments actually take effect. This can
+briefly interrupt connected readers. Explicit `--tls=true` and `--tls=false`
+choices are preserved in the installed invocation; when omitted, the service
+honors `[web.tls] enabled` in its configuration.
 
 #### Serving on port 80 (`fwrd net`)
 
@@ -641,10 +663,13 @@ An HTTP `504` means a gateway on the feed request path returned a timeout;
 this is different from a broken local IPC connection. Increasing fwrd's HTTP
 timeout does not fix a gateway's own timeout.
 
-Bulk refresh keeps successful updates even when other feeds fail. Local and
-server-connected TUIs show completed-work and failure counts, then reload feed
-metadata so the affected feeds have error badges. Aggregate error details include a
-stable feed identifier and safe host label, not the feed URL's credentials or
+Bulk refresh keeps successful updates even when other feeds fail. Article
+addition counts include only newly inserted IDs, not existing articles updated
+by an HTTP 200 response. Failed article commits leave prior articles, validators,
+and successful-fetch timestamps intact, while recording refresh-error health
+when storage remains writable. Local and server-connected TUIs show
+completed-work and failure counts, then reload feed metadata so the affected
+feeds have error badges. Aggregate error details include a stable feed identifier and safe host label, not the feed URL's credentials or
 query string. The CLI prints its summary before returning a failing exit status
 for per-feed failures. Retry affected feeds later; fwrd does not automatically
 retry these HTTP errors or delete previously stored articles.
