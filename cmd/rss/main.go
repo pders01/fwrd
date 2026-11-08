@@ -1518,13 +1518,7 @@ func refreshFeeds(cmd *cobra.Command, _ []string) {
 
 		fmt.Println("Refreshing all feeds...")
 		summary, err := sess.Feeds.RefreshAllFeeds(commandContext(cmd), forceRefresh)
-		if err != nil {
-			return fmt.Errorf("failed to refresh feeds: %w", err)
-		}
-
-		fmt.Printf("Refreshed %d feed(s), added %d article(s).\n",
-			summary.UpdatedFeeds, summary.AddedArticles)
-		return nil
+		return writeRefreshSummary(cmd.OutOrStdout(), summary, err)
 	}); err != nil {
 		exitWithError(err)
 	}
