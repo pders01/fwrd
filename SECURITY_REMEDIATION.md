@@ -29,6 +29,7 @@ These changes are not a claim of formal verification or complete sandbox isolati
 | Article feed reassignment corrupts indexes | Reassignment rejected transactionally through both backends; storage contract tests |
 | Pre-epoch/undated ordering and expensive feed pagination | Full-range ordered keys, per-feed indexes and transactional rebuild; date/migration/page-decoding tests |
 | Oversized IPC pages | Byte-budgeted server reads and adaptive client page reduction; bounded-page and RPC pagination tests |
+| Stale IPC connection fails the first mutation | One bounded reconnect after an actual retryable zero-byte request write; cumulative header/body progress, partial/full-write errors and lost-response no-replay tests |
 | Cancelled IPC work executes later | Request deadlines and disconnect cancellation reach queued/running work; cancellation/deadline/pipelining tests |
 | Unbounded IPC resources and unsafe socket removal | Connection/frame/dispatch budgets, response-write deadlines and positive stale-socket evidence; frame-budget/socket/RPC tests |
 | Concurrent renderer and index batches | Exclusive renderer access, full batch-scope ownership and coordinated local operations; TUI/search concurrency tests |

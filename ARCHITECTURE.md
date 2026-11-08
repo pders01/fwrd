@@ -25,7 +25,7 @@ Uses Viper for unified configuration management with support for config override
 process. `MutationCoordinator` serializes feed lifecycle operations and their
 search notifications. The framed JSON protocol uses Unix sockets or Windows
 named pipes, with database identity checks, cancellation, resource budgets,
-and read-only transport retries.
+and bounded transport recovery.
 
 ### internal/feed
 Handles RSS/Atom/JSON feed fetching and parsing:
@@ -162,8 +162,11 @@ it. It reaches near-parity with the other front-ends:
   frame reads are bounded. Calls include queueing/reconnection in their timeout,
   propagate request deadlines/disconnect cancellation to queued and running
   server operations, and retry read-only methods at most once after a
-  transport failure. Mutations are never automatically replayed because a lost
-  response does not establish whether they committed
+  transport failure. Mutations can recover once only when an actual retryable
+  request-write failure accepted zero cumulative header/body bytes. Any positive
+  write progress, failed handshake, invalid writer count, or response failure
+  cannot authorize mutation recovery; a lost response may hide a committed
+  operation. Reconnection uses the original call's remaining deadline
 - **TUI pagination**: Results and failures carry feed/request identities so stale
   responses cannot replace another feed's list. Failed pages retain their cursor
   and loaded items for a subsequent user-triggered retry. Search and reader

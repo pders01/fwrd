@@ -214,8 +214,11 @@ its feed plugins or search-index updates. A second `serve` for the same database
 is still rejected because BoltDB and Bleve each require a single owner.
 Storage reads use a separate connection from long-running feed operations, so
 refreshes do not block browsing. Idle connections stay open; read-only requests
-can reconnect and retry once after a dropped connection. Mutations are never
-replayed automatically, since a lost response can hide a committed operation.
+can reconnect and retry once after a dropped connection. A mutation can also
+reconnect once after a retryable write failure if **zero request bytes** were
+accepted by the socket. Header and body bytes both count: partial writes and
+lost responses never trigger mutation replay, since the outcome may be unknown.
+The retry stays within the original call deadline.
 
 #### Exposing the web view
 
@@ -631,6 +634,20 @@ can supply one through `http.get` headers.
 - There is **no per-host rate limiter or automatic Retry-After backoff**. A
   helper parses numeric Retry-After values, but fetching does not schedule
   retries from that result. HTTP 429/503 responses are reported as errors.
+
+### Refresh failures
+
+An HTTP `504` means a gateway on the feed request path returned a timeout;
+this is different from a broken local IPC connection. Increasing fwrd's HTTP
+timeout does not fix a gateway's own timeout.
+
+Bulk refresh keeps successful updates even when other feeds fail. Local and
+server-connected TUIs show completed-work and failure counts, then reload feed
+metadata so the affected feeds have error badges. Aggregate error details include a
+stable feed identifier and safe host label, not the feed URL's credentials or
+query string. The CLI prints its summary before returning a failing exit status
+for per-feed failures. Retry affected feeds later; fwrd does not automatically
+retry these HTTP errors or delete previously stored articles.
 
 ## Testing
 
