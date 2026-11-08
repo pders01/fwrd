@@ -448,6 +448,10 @@ func (m *Manager) RefreshAllFeedsContext(ctx context.Context) (RefreshSummary, e
 						return
 					}
 					feed, articles, refreshErr := m.refreshFeedByIDContext(ctx, f.ID, false)
+					if refreshErr != nil {
+						// Use the original subscription: refresh can return a nil feed.
+						refreshErr = fmt.Errorf("%s: %w", refreshFeedIdentity(f), refreshErr)
+					}
 					resultChan <- result{feed: feed, articles: articles, err: refreshErr}
 				}
 			}
@@ -484,6 +488,33 @@ feedLoop:
 	}
 
 	return summary, errors.Join(append(summary.Errors, ctx.Err())...)
+}
+
+// refreshFeedIdentity is a bounded, terminal-safe label, not a display title.
+// Keep the prefix of generated IDs so it can be matched to the stored ID;
+// fingerprint arbitrary IDs rather than trusting their contents. For legacy
+// missing IDs, fingerprint the URL without ever displaying its sensitive parts.
+func refreshFeedIdentity(feed *storage.Feed) string {
+	id := feed.ID
+	if strings.TrimSpace(id) == "" {
+		id = generateFeedID(feed.URL)
+	}
+	if len(id) != 64 || strings.IndexFunc(id, func(r rune) bool {
+		return (r < 'a' || r > 'f') && (r < '0' || r > '9')
+	}) != -1 {
+		id = generateFeedID(id)
+	}
+	fingerprint := id[:16]
+	host := "unknown-host"
+	if parsed, err := neturl.Parse(feed.URL); err == nil {
+		candidate := strings.ToLower(parsed.Hostname())
+		if candidate != "" && len(candidate) <= 253 && strings.IndexFunc(candidate, func(r rune) bool {
+			return (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '.' && r != '-' && r != ':'
+		}) == -1 {
+			host = candidate
+		}
+	}
+	return fmt.Sprintf("feed %s (%s)", fingerprint, host)
 }
 
 type contextReader struct {

@@ -1,6 +1,10 @@
 package feed
 
-import "github.com/pders01/fwrd/internal/storage"
+import (
+	"errors"
+
+	"github.com/pders01/fwrd/internal/storage"
+)
 
 // DataListener receives notifications after Manager persists feed data.
 // Implementations must not block — notification is synchronous from the
@@ -31,4 +35,36 @@ type RefreshSummary struct {
 	UpdatedFeeds  int
 	AddedArticles int
 	Errors        []error
+}
+
+// OnlyFeedErrors reports whether every cause of err is represented in Errors.
+// Callers must also check their operation context: a feed's HTTP timeout can
+// share a cancellation sentinel with a top-level canceled refresh. Error text
+// alone cannot distinguish unrelated failures with identical messages.
+func (s RefreshSummary) OnlyFeedErrors(err error) bool {
+	if err == nil {
+		return false
+	}
+	for _, feedErr := range s.Errors {
+		if errors.Is(feedErr, err) {
+			return true
+		}
+	}
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		causes := wrapped.Unwrap()
+		if len(causes) == 0 {
+			return false
+		}
+		for _, cause := range causes {
+			if !s.OnlyFeedErrors(cause) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		return s.OnlyFeedErrors(wrapped.Unwrap())
+	default:
+		return false
+	}
 }
