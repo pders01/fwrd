@@ -39,6 +39,10 @@ type Config struct {
 }
 
 type WebConfig struct {
+	// ExternalOrigin explicitly trusts this public HTTP(S) origin when a reverse
+	// proxy terminates TLS. Empty uses the native request transport. The proxy
+	// must preserve Host; Forwarded/X-Forwarded-* never establish trust.
+	ExternalOrigin string `mapstructure:"external_origin"`
 	// Font selects the reading font for the web view. Accepts a preset
 	// that maps to the OS's own system font stack — "serif" (default,
 	// e.g. New York / Georgia), "sans", or "mono" — or any raw CSS
@@ -381,6 +385,11 @@ func Load(configPath string) (*Config, error) {
 	}
 	if config.Database.SearchIndex == "" && config.Database.Path != ":memory:" {
 		config.Database.SearchIndex = DerivedIndexPath(config.Database.Path)
+	}
+	var originErr error
+	config.Web.ExternalOrigin, originErr = NormalizeWebExternalOrigin(config.Web.ExternalOrigin)
+	if originErr != nil {
+		return nil, originErr
 	}
 	if (config.Web.Auth.Username == "") != (config.Web.Auth.Password == "") {
 		return nil, fmt.Errorf("web.auth requires both a non-empty username and password")

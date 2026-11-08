@@ -101,6 +101,10 @@ back = "esc"  # compatibility setting; Escape handling is built in
 [web]
 # Non-loopback serving without credentials is denied unless explicitly opted in.
 allow_unauthenticated = false
+# Only for an explicitly configured reverse proxy. Preserve the public Host
+# header (including port); keep fwrd on loopback, and set [web.tls] enabled=false
+# for an HTTP upstream behind the TLS-terminating proxy.
+# external_origin = "https://reader.example.org"
 # Reading font for the web view (fwrd serve). Uses the OS system font
 # library — nothing is bundled or fetched. Presets:
 #   "serif" (default) — system serif, e.g. New York / Georgia

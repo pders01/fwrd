@@ -21,6 +21,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/pders01/fwrd/internal/audit"
 	"github.com/pders01/fwrd/internal/config"
@@ -44,15 +45,16 @@ const ShutdownGrace = shutdownGrace
 // the caller doesn't already own: the store, manager, and searcher are
 // passed in and closed by the caller, mirroring how runTUI manages them.
 type Server struct {
-	store       *storage.Store
-	manager     *feed.Manager
-	coordinator *control.MutationCoordinator
-	searcher    search.Searcher
-	cfg         *config.Config
-	tmpl        *templates
-	readingFont string // resolved CSS font-family for reading text
-	authUser    string // HTTP Basic Auth username; empty disables auth
-	authPass    string // HTTP Basic Auth password
+	store          *storage.Store
+	manager        *feed.Manager
+	coordinator    *control.MutationCoordinator
+	searcher       search.Searcher
+	cfg            *config.Config
+	tmpl           *templates
+	readingFont    string // resolved CSS font-family for reading text
+	authUser       string // HTTP Basic Auth username; empty disables auth
+	authPass       string // HTTP Basic Auth password
+	externalOrigin string // validated public origin; empty uses native transport
 
 	// tlsConfig, when non-nil, makes Serve front the listener with a
 	// single-port TLS mux and Handler redirect cleartext requests to https.
@@ -94,21 +96,27 @@ func NewServer(store *storage.Store, manager *feed.Manager, searcher search.Sear
 	}
 	font := ""
 	authUser, authPass := "", ""
+	externalOrigin := ""
 	if cfg != nil {
 		font = cfg.Web.Font
 		authUser = cfg.Web.Auth.Username
 		authPass = cfg.Web.Auth.Password
+		externalOrigin, err = config.NormalizeWebExternalOrigin(cfg.Web.ExternalOrigin)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &Server{
-		store:       store,
-		manager:     manager,
-		coordinator: coord,
-		searcher:    searcher,
-		cfg:         cfg,
-		tmpl:        tmpl,
-		readingFont: resolveFont(font),
-		authUser:    authUser,
-		authPass:    authPass,
+		store:          store,
+		manager:        manager,
+		coordinator:    coord,
+		searcher:       searcher,
+		cfg:            cfg,
+		tmpl:           tmpl,
+		readingFont:    resolveFont(font),
+		authUser:       authUser,
+		authPass:       authPass,
+		externalOrigin: externalOrigin,
 	}, nil
 }
 
@@ -282,7 +290,8 @@ func (s *Server) basicAuth(next http.Handler) http.Handler {
 }
 
 // sameOriginGuard rejects state-changing requests whose Origin/Referer origin
-// does not match the request scheme and authority. GET/HEAD are read-only and pass through.
+// does not match the native request origin or explicitly configured public
+// origin (which also requires a preserved Host). GET/HEAD pass through.
 // This blocks cross-site form POSTs (CSRF) against the local server.
 func (s *Server) sameOriginGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -290,7 +299,7 @@ func (s *Server) sameOriginGuard(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if !sameOrigin(r) {
+		if !sameOriginFor(r, s.externalOrigin) {
 			http.Error(w, "cross-origin request rejected", http.StatusForbidden)
 			return
 		}
@@ -302,41 +311,52 @@ func (s *Server) sameOriginGuard(next http.Handler) http.Handler {
 // Referer) matches the scheme and authority it was sent to. A request with neither
 // header is treated as same-origin: curl and other non-browser clients
 // omit them, and they cannot be the vehicle for a browser-driven CSRF.
-func sameOrigin(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		origin = r.Header.Get("Referer")
-	}
-	if origin == "" {
-		return true
-	}
-	u, err := url.Parse(origin)
-	if err != nil {
-		return false
-	}
+func sameOrigin(r *http.Request) bool { return sameOriginFor(r, "") }
+
+func sameOriginFor(r *http.Request, externalOrigin string) bool {
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
 	}
-	target, err := url.Parse(scheme + "://" + r.Host)
-	if err != nil || u.User != nil || target.User != nil || u.Opaque != "" || u.Hostname() == "" {
+	if externalOrigin != "" {
+		// This is a fixed trust decision from configuration, not a scheme or
+		// authority inferred from client-controlled proxy headers.
+		scheme = strings.SplitN(externalOrigin, ":", 2)[0]
+	}
+	target, err := config.NormalizeWebExternalOrigin(scheme + "://" + r.Host)
+	if strings.ContainsAny(r.Host, "/?#") {
 		return false
 	}
-	// Browsers canonicalize host casing and omit default ports. Proxy headers
-	// are deliberately not trusted to determine the request's scheme.
-	return strings.EqualFold(u.Scheme, scheme) &&
-		strings.EqualFold(u.Hostname(), target.Hostname()) &&
-		originPort(u) == originPort(target)
-}
-
-func originPort(u *url.URL) string {
-	if p := u.Port(); p != "" {
-		return p
+	if externalOrigin != "" && (err != nil || target != externalOrigin) {
+		return false
 	}
-	if strings.EqualFold(u.Scheme, "https") {
-		return "443"
+	origins := r.Header.Values("Origin")
+	referer := false
+	if len(origins) == 0 {
+		origins = r.Header.Values("Referer")
+		referer = true
 	}
-	return "80"
+	if len(origins) == 0 {
+		return true // non-browser clients still need no CSRF header
+	}
+	if err != nil || len(origins) != 1 || origins[0] == "" {
+		return false
+	}
+	origin := origins[0]
+	if referer {
+		// Referer may include a page path/query; Origin may not. Validate the
+		// entire URL before reducing it to an origin. Origin always wins.
+		if strings.ContainsFunc(origin, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }) {
+			return false
+		}
+		u, parseErr := url.Parse(origin)
+		if parseErr != nil || u.User != nil || u.Opaque != "" || u.Host == "" {
+			return false
+		}
+		origin = u.Scheme + "://" + u.Host
+	}
+	canonical, err := config.NormalizeWebExternalOrigin(origin)
+	return err == nil && canonical != "" && canonical == target
 }
 
 // Listen binds addr and returns the listener, surfacing a bind failure (e.g.
