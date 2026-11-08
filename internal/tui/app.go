@@ -43,6 +43,10 @@ type App struct {
 	manager          *feed.Manager // local sessions only; remote work goes through feedOps
 	feedOps          control.FeedOperations
 	forceRefresh     bool
+	refreshSeq       uint64 // identifies the latest bulk refresh, including failures
+	refreshErr       error  // latest refresh-owned error, not unrelated UI failures
+	feedsSeq         uint64 // identifies the latest feed-metadata read
+	feedsErr         error  // latest metadata-read error
 	launcher         *media.Launcher
 	searchEngine     search.Searcher
 	searchEngineType string // "bleve" or "basic" - for UI display
@@ -540,6 +544,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.keyHandler.HandleKey(msg)
 
 	case feedsLoadedMsg:
+		if msg.seq != a.feedsSeq {
+			return a, nil
+		}
+		if a.feedsErr != nil && errors.Is(a.err, a.feedsErr) {
+			a.err = nil
+		}
+		a.feedsErr = nil
 		a.feeds = msg.feeds
 		items := make([]list.Item, len(msg.feeds))
 		for i, f := range msg.feeds {
@@ -651,9 +662,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case refreshDoneMsg:
-		// Show a concise summary in the status bar
-		a.setStatus(MsgRefreshSummary(msg.updatedFeeds, msg.addedArticles, msg.errors, msg.docCount), 0)
-		a.stopSpinner()
+		if msg.seq != a.refreshSeq {
+			return a, nil
+		}
+		if a.refreshErr != nil && errors.Is(a.err, a.refreshErr) {
+			a.err = nil
+		}
+		a.refreshErr = nil
+		kind := StatusSuccess
+		if msg.errors > 0 {
+			kind = StatusWarn
+			if msg.updatedFeeds == 0 {
+				kind = StatusError
+			}
+		}
+		a.setStatusWithKind(MsgRefreshSummary(msg.updatedFeeds, msg.addedArticles, msg.errors, msg.docCount), kind, 0)
+		if a.spinnerLabel == MsgRefreshing {
+			a.stopSpinner()
+		}
+		// Refresh persists both successful metadata and failed-feed badges.
+		// Reload only feeds; leave navigation and article selection alone.
+		cmds = append(cmds, a.loadFeeds())
 
 	case searchResultsMsg:
 		if msg.seq != a.searchSeq || (msg.articleID != "" && (a.currentArticle == nil || a.currentArticle.ID != msg.articleID)) {
@@ -700,6 +729,26 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case errorMsg:
+		if msg.refreshSeq != 0 {
+			if msg.refreshSeq != a.refreshSeq {
+				return a, nil
+			}
+			a.err = msg.err
+			a.refreshErr = msg.err
+			a.setStatusWithKind(msg.err.Error(), StatusError, 0)
+			if a.spinnerLabel == MsgRefreshing {
+				a.stopSpinner()
+			}
+			break
+		}
+		if msg.feedsSeq != 0 {
+			if msg.feedsSeq != a.feedsSeq {
+				return a, nil
+			}
+			a.err, a.feedsErr = msg.err, msg.err
+			// A metadata-read failure does not own the reader's spinner.
+			break
+		}
 		a.err = msg.err
 		// Clear loading flag if we were loading an article
 		if a.loadingArticle {
@@ -1189,6 +1238,7 @@ func (i mediaItem) FilterValue() string {
 
 type feedsLoadedMsg struct {
 	feeds []*storage.Feed
+	seq   uint64
 }
 
 type articlesLoadedMsg struct {
@@ -1238,7 +1288,9 @@ type feedAddedMsg struct {
 }
 
 type errorMsg struct {
-	err error
+	err        error
+	refreshSeq uint64 // nonzero only for bulk-refresh failures
+	feedsSeq   uint64 // nonzero only for feed-metadata read failures
 }
 
 type feedDeletedMsg struct {
@@ -1258,6 +1310,7 @@ type feedRenamedMsg struct {
 
 // refreshDoneMsg summarizes a refresh operation outcome
 type refreshDoneMsg struct {
+	seq           uint64
 	updatedFeeds  int
 	addedArticles int
 	errors        int

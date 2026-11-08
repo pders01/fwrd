@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,13 +15,14 @@ import (
 )
 
 func (a *App) loadFeeds() tea.Cmd {
-	store := a.store
+	a.feedsSeq++
+	seq, store := a.feedsSeq, a.store
 	return a.worker(func() tea.Msg {
 		feeds, err := store.GetAllFeeds()
 		if err != nil {
-			return errorMsg{err: err}
+			return errorMsg{err: err, feedsSeq: seq}
 		}
-		return feedsLoadedMsg{feeds: feeds}
+		return feedsLoadedMsg{feeds: feeds, seq: seq}
 	})
 }
 
@@ -244,14 +246,24 @@ func (a *App) renameFeed(newTitle string) tea.Cmd {
 }
 
 func (a *App) refreshFeeds() tea.Cmd {
+	a.refreshSeq++
+	// Older metadata reads must not overwrite this refresh's eventual state
+	// or surface stale errors while its replacement read is still pending.
+	a.feedsSeq++
+	seq := a.refreshSeq
 	ops, engine, force, ctx := a.feedOps, a.searchEngine, a.forceRefresh, a.commandContext()
 	return a.worker(func() tea.Msg {
 		if ops == nil {
-			return errorMsg{err: fmt.Errorf("feed operations are unavailable")}
+			return errorMsg{err: fmt.Errorf("feed operations are unavailable"), refreshSeq: seq}
 		}
 		summary, err := ops.RefreshAllFeeds(ctx, force)
-		if err != nil && len(summary.Errors) == 0 {
-			return errorMsg{err: wrapErr("refresh feeds", err)}
+		// A feed's own timeout is a partial result, not cancellation of the
+		// session. Check the actual command context, not errors.Is(err, ...).
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return errorMsg{err: wrapErr("refresh feeds", errors.Join(err, ctxErr)), refreshSeq: seq}
+		}
+		if err != nil && !summary.OnlyFeedErrors(err) {
+			return errorMsg{err: wrapErr("refresh feeds", err), refreshSeq: seq}
 		}
 
 		docCount := -1
@@ -262,6 +274,7 @@ func (a *App) refreshFeeds() tea.Cmd {
 		}
 
 		return refreshDoneMsg{
+			seq:           seq,
 			updatedFeeds:  summary.UpdatedFeeds,
 			addedArticles: summary.AddedArticles,
 			errors:        len(summary.Errors),
