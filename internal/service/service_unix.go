@@ -25,9 +25,12 @@ func serveArgs(o *Options) []string {
 			args = append(args, "--mdns-iface", o.MDNSIface)
 		}
 	}
-	// HTTPS is the serve default, so only the disabled case needs a flag.
+	// An unspecified HTTPS default leaves config in control. Explicit enables
+	// must override config; disabled TLS always retains its historical flag.
 	if !o.TLS {
 		args = append(args, "--tls=false")
+	} else if o.TLSExplicit {
+		args = append(args, "--tls=true")
 	}
 	if o.TLSMode != "" {
 		args = append(args, "--tls-mode", o.TLSMode)

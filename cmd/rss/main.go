@@ -781,7 +781,7 @@ func runServe(cmd *cobra.Command, _ []string) {
 	}
 }
 
-func runServiceInstall(_ *cobra.Command, _ []string) {
+func runServiceInstall(cmd *cobra.Command, _ []string) {
 	cfg, err := loadConfig()
 	if err != nil {
 		logger.Fatal("load service configuration", "err", err)
@@ -803,21 +803,7 @@ func runServiceInstall(_ *cobra.Command, _ []string) {
 	if resolved, rerr := filepath.EvalSymlinks(bin); rerr == nil && !isVersionedPkgPath(resolved) {
 		bin = resolved
 	}
-	path, err := service.Install(&service.Options{
-		BinPath:              bin,
-		Addr:                 svcAddr,
-		MDNS:                 svcMDNS,
-		MDNSName:             svcMDNSName,
-		MDNSIPs:              svcMDNSIPs,
-		MDNSIface:            svcMDNSIface,
-		TLS:                  svcTLS,
-		TLSMode:              svcTLSMode,
-		TLSCert:              svcTLSCert,
-		TLSKey:               svcTLSKey,
-		Config:               cfg.SourcePath,
-		DB:                   dbPath,
-		AllowUnauthenticated: svcAllowUnauthenticated,
-	})
+	path, err := service.Install(serviceInstallOptions(cmd, cfg, bin, dbPath))
 	if err != nil {
 		// A non-empty path means the file was written but activation failed —
 		// surface the path so the user can enable it by hand.
@@ -830,7 +816,7 @@ func runServiceInstall(_ *cobra.Command, _ []string) {
 	logger.Info("service installed and started", "path", path)
 	if svcMDNS {
 		scheme := "https"
-		if !svcTLS {
+		if !resolveTLSOption(cmd, cfg, svcTLS) {
 			scheme = "http"
 		}
 		if _, port, perr := net.SplitHostPort(svcAddr); perr == nil {
@@ -1083,13 +1069,7 @@ func startMDNS(addr, scheme string) *mdns.Advertiser {
 // explicitly set; otherwise [web.tls].enabled is honoured; otherwise TLS is on
 // (HTTPS-by-default).
 func resolveTLSEnabled(cmd *cobra.Command, cfg *config.Config) bool {
-	if cmd != nil && cmd.Flags().Changed("tls") {
-		return serveTLS
-	}
-	if cfg != nil && cfg.Web.TLS.Enabled != nil {
-		return *cfg.Web.TLS.Enabled
-	}
-	return true
+	return resolveTLSOption(cmd, cfg, serveTLS)
 }
 
 // tlsHosts assembles the SAN list the generated certificate must cover: the

@@ -44,10 +44,10 @@ func unitPath() (string, error) {
 	return filepath.Join(dir, "systemd", "user", unitName), nil
 }
 
-// Install writes the systemd user unit, reloads the user daemon, and enables
-// + starts the service. It returns the unit path. systemctl failures after
-// the file is written are returned with the path so the caller can surface a
-// manual-enable hint.
+// Install writes the systemd user unit, reloads the user daemon, enables the
+// service, and restarts it to apply changed arguments. It returns the unit path.
+// systemctl failures after the file is written are returned with the path so
+// the caller can surface a manual-enable hint.
 func Install(o *Options) (string, error) {
 	prepared, prepErr := prepareOptions(o)
 	if prepErr != nil {
@@ -69,15 +69,25 @@ func Install(o *Options) (string, error) {
 		return "", fmt.Errorf("writing unit: %w", err)
 	}
 	if _, err := exec.LookPath("systemctl"); err != nil {
-		return path, fmt.Errorf("systemctl not found; enable manually: systemctl --user enable --now %s", unitName)
+		return path, fmt.Errorf("systemctl not found; enable manually: systemctl --user daemon-reload && systemctl --user enable %s && systemctl --user restart %s", unitName, unitName)
 	}
-	if err := run("systemctl", "--user", "daemon-reload"); err != nil {
-		return path, err
+	return path, activateSystemdUserService(run)
+}
+
+// activateSystemdUserService restarts even an already-active unit so reinstall
+// applies new arguments. Restart also starts an inactive unit. Inject the runner
+// per call so sequencing can be tested without globals or host service actions.
+func activateSystemdUserService(runner func(string, ...string) error) error {
+	for _, args := range [][]string{
+		{"--user", "daemon-reload"},
+		{"--user", "enable", unitName},
+		{"--user", "restart", unitName},
+	} {
+		if err := runner("systemctl", args...); err != nil {
+			return err
+		}
 	}
-	if err := run("systemctl", "--user", "enable", "--now", unitName); err != nil {
-		return path, err
-	}
-	return path, nil
+	return nil
 }
 
 // Uninstall stops and disables the service, then removes the unit file.

@@ -7,6 +7,45 @@ import (
 	"testing"
 )
 
+// The service forwards config paths, not their contents. Omission of a TLS
+// argument is what lets serve honor either configured default.
+func tlsArgumentTestCases() []struct {
+	name     string
+	options  Options
+	argument string
+} {
+	return []struct {
+		name     string
+		options  Options
+		argument string
+	}{
+		{"explicit_enable_overrides_disabled_config", Options{TLS: true, TLSExplicit: true, Config: "/tmp/tls-disabled.toml"}, "--tls=true"},
+		{"explicit_disable_overrides_enabled_config", Options{TLS: false, TLSExplicit: true, Config: "/tmp/tls-enabled.toml"}, "--tls=false"},
+		{"implicit_disable_retains_flag", Options{TLS: false, Config: "/tmp/tls-enabled.toml"}, "--tls=false"},
+		{"default_preserves_disabled_config", Options{TLS: true, Config: "/tmp/tls-disabled.toml"}, ""},
+		{"default_preserves_enabled_config", Options{TLS: true, Config: "/tmp/tls-enabled.toml"}, ""},
+		{"default_without_config", Options{TLS: true}, ""},
+	}
+}
+
+func TestServeArgsTLSOverrides(t *testing.T) {
+	for _, tt := range tlsArgumentTestCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.options.Addr = "127.0.0.1:8080"
+			want := []string{"serve", "--addr", tt.options.Addr}
+			if tt.options.Config != "" {
+				want = append(want, "--config", tt.options.Config)
+			}
+			if tt.argument != "" {
+				want = append(want, tt.argument)
+			}
+			if got := serveArgs(&tt.options); !slices.Equal(got, want) {
+				t.Fatalf("serveArgs = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestServeArgs(t *testing.T) {
 	got := serveArgs(&Options{
 		Addr:     "0.0.0.0:8080",

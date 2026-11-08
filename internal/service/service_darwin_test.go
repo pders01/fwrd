@@ -122,6 +122,35 @@ func TestReloadLaunchAgentRejectsNonTransientBootstrapError(t *testing.T) {
 	}
 }
 
+func TestPlistContentTLSOverrides(t *testing.T) {
+	for _, tt := range tlsArgumentTestCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.options.BinPath = "/usr/local/bin/fwrd"
+			tt.options.Addr = "127.0.0.1:8080"
+			got, err := plistContent(&tt.options, "/tmp/fwrd-logs")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var plist struct {
+				Args []string `xml:"dict>array>string"`
+			}
+			if err := xml.Unmarshal(got, &plist); err != nil {
+				t.Fatal(err)
+			}
+			want := []string{tt.options.BinPath, "serve", "--addr", tt.options.Addr}
+			if tt.options.Config != "" {
+				want = append(want, "--config", tt.options.Config)
+			}
+			if tt.argument != "" {
+				want = append(want, tt.argument)
+			}
+			if !slices.Equal(plist.Args, want) {
+				t.Fatalf("ProgramArguments = %q, want %q", plist.Args, want)
+			}
+		})
+	}
+}
+
 func TestPlistContent_WellFormedAndComplete(t *testing.T) {
 	// A path with an XML metacharacter must not break the document.
 	got, err := plistContent(&Options{

@@ -20,6 +20,7 @@ type Options struct {
 	MDNSIPs              []string // optional --mdns-ip values (alias IPs from `fwrd net up`)
 	MDNSIface            string   // optional --mdns-iface restriction
 	TLS                  bool     // serve over HTTPS; emits --tls=false when disabled
+	TLSExplicit          bool     // emit --tls=true when explicitly enabled, overriding config
 	TLSMode              string   // optional --tls-mode (self-signed|local-ca|file)
 	TLSCert              string   // optional --tls-cert path (bring-your-own)
 	TLSKey               string   // optional --tls-key path (bring-your-own)
