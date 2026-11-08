@@ -69,11 +69,11 @@ func (r *remoteOps) RefreshAllFeeds(ctx context.Context, force bool) (feed.Refre
 	waves := (len(feeds)+workers-1)/workers + 1
 	timeout := boundedOperationTimeout(time.Duration(waves)*r.feedTimeout + operationSlack)
 
-	var summary feed.RefreshSummary
-	if err := r.client.CallWithContext(ctx, "RefreshAllFeeds", map[string]bool{"force": force}, &summary, timeout); err != nil {
-		return summary, fmt.Errorf("RefreshAllFeeds: %w", err)
+	var wire refreshSummaryWire
+	if err := r.client.CallWithContext(ctx, "RefreshAllFeeds", map[string]bool{"force": force}, &wire, timeout); err != nil {
+		return feed.RefreshSummary{}, fmt.Errorf("RefreshAllFeeds: %w", err)
 	}
-	return summary, nil
+	return wire.decode()
 }
 
 func (r *remoteOps) DeleteFeed(ctx context.Context, id string) error {

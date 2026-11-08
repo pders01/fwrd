@@ -634,11 +634,22 @@ func (s *RPCServer) dispatch(ctx context.Context, conn net.Conn, req *ipc.Reques
 			return
 		}
 		summary, err := s.coordinator.RefreshAllFeeds(ctx, p.Force)
-		if err != nil {
+		// A per-feed timeout can wrap context.DeadlineExceeded without the
+		// request itself expiring. Only the request context decides whether
+		// cancellation takes precedence over a completed partial result.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			s.writeError(conn, req.ID, errorCode(ctxErr), ctxErr.Error())
+			return
+		}
+		// Only errors represented by the summary can travel as a result.
+		// Keep an unrelated top-level failure even if some feeds completed.
+		if err != nil && !summary.OnlyFeedErrors(err) {
 			s.writeError(conn, req.ID, errorCode(err), err.Error())
 			return
 		}
-		s.writeResult(conn, req.ID, summary)
+		// Completed per-feed failures belong in the result, not the RPC
+		// error envelope, which cannot carry a result at the same time.
+		s.writeResult(conn, req.ID, encodeRefreshSummary(summary))
 
 	case "ImportFeeds":
 		var p struct{ URLs []string }
