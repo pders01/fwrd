@@ -201,7 +201,8 @@ func TestRefreshResultsTopLevelAndSessionFailures(t *testing.T) {
 			if tc.err != nil {
 				require.ErrorIs(t, msg.err, tc.err, "context cancellation must not drop the operation error")
 			}
-			app.Update(msg)
+			_, reload := app.Update(msg)
+			app.Update(refreshMetadataMessage(t, reload))
 			require.ErrorIs(t, app.err, tc.want)
 			require.False(t, app.spinnerActive)
 			require.Equal(t, StatusError, app.statusKind)
@@ -209,7 +210,7 @@ func TestRefreshResultsTopLevelAndSessionFailures(t *testing.T) {
 	}
 }
 
-func TestRefreshResultsRejectStaleCompletionsAndFailures(t *testing.T) {
+func TestRefreshResultsReconcileStaleCompletionsWithoutPresentingThem(t *testing.T) {
 	app := commandTestApp(t)
 	app.feedOps = &refreshResultOps{refresh: func(context.Context, bool) (feed.RefreshSummary, error) {
 		return feed.RefreshSummary{UpdatedFeeds: 1}, nil
@@ -218,11 +219,13 @@ func TestRefreshResultsRejectStaleCompletionsAndFailures(t *testing.T) {
 	newer := app.refreshFeeds()()
 	app.startSpinner(MsgRefreshing)
 	_, cmd := app.Update(old)
-	require.Nil(t, cmd)
+	app.Update(refreshMetadataMessage(t, cmd))
 	require.True(t, app.spinnerActive)
+	require.Empty(t, app.statusText)
 	_, cmd = app.Update(errorMsg{err: errors.New("late RPC failure"), refreshSeq: old.(refreshDoneMsg).seq})
-	require.Nil(t, cmd)
+	app.Update(refreshMetadataMessage(t, cmd))
 	require.True(t, app.spinnerActive)
+	require.Empty(t, app.statusText)
 	require.NoError(t, app.err)
 	_, cmd = app.Update(newer)
 	app.Update(refreshMetadataMessage(t, cmd))

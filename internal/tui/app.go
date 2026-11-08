@@ -47,6 +47,9 @@ type App struct {
 	refreshErr       error  // latest refresh-owned error, not unrelated UI failures
 	feedsSeq         uint64 // identifies the latest feed-metadata read
 	feedsErr         error  // latest metadata-read error
+	addErr           error
+	renameErr        error
+	deleteErr        error
 	launcher         *media.Launcher
 	searchEngine     search.Searcher
 	searchEngineType string // "bleve" or "basic" - for UI display
@@ -100,6 +103,11 @@ type App struct {
 	articlesLoadingMore bool
 	articlesSeq         uint64 // identifies the latest list request, including failures
 	articlesErr         error  // cleared on recovery without hiding unrelated errors
+
+	searchContexts       []searchNavigation // suspended navigation, never App/worker state
+	searchReturnContext  View               // previousView before the search overlay was opened
+	mediaPreviousView    View               // media must not overwrite the search return target
+	readerInitialPending bool               // initial top reset survives a suspended reader render
 
 	// Theme change plumbing. themeEvents is signaled (without payload)
 	// whenever an external source — SIGUSR1 or the macOS plist watcher —
@@ -551,12 +559,33 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.err = nil
 		}
 		a.feedsErr = nil
+		selectedID := ""
+		if selected, ok := a.feedList.SelectedItem().(feedItem); ok {
+			selectedID = selected.feed.ID
+		}
 		a.feeds = msg.feeds
 		items := make([]list.Item, len(msg.feeds))
 		for i, f := range msg.feeds {
 			items[i] = feedItem{feed: f}
 		}
 		a.feedList.SetItems(items)
+		deleteTargetExists := false
+		for i, f := range msg.feeds {
+			if f.ID == selectedID {
+				a.feedList.Select(i)
+			}
+			if a.feedToDelete != nil && f.ID == a.feedToDelete.ID {
+				deleteTargetExists = true
+			}
+		}
+		// An uncertain delete may have committed. Only an authoritative
+		// successful read can retire its now-invalid confirmation.
+		if a.feedToDelete != nil && !deleteTargetExists {
+			a.feedToDelete = nil
+			if a.view == ViewDeleteConfirm {
+				a.view = ViewFeeds
+			}
+		}
 
 	case articlesLoadedMsg:
 		if a.currentFeed == nil || msg.feedID != a.currentFeed.ID || msg.seq != a.articlesSeq {
@@ -599,14 +628,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.applyArticleIntent(msg.articleID, msg.seq, msg.starred, msg.err, true)
 
 	case articleRenderedMsg:
-		if msg.seq != a.renderSeq || a.currentArticle == nil || msg.articleID != a.currentArticle.ID || a.view != ViewReader {
+		if msg.seq != a.renderSeq || a.currentArticle == nil || msg.articleID != a.currentArticle.ID || !a.readerVisible() {
 			return a, nil
 		}
 		if msg.err != nil {
 			a.err = msg.err
 			a.renderErr = msg.err
-			a.loadingArticle = false
-			a.stopSpinner()
+			a.readerInitialPending = false
+			a.releaseReaderLoading()
 			return a, nil
 		}
 		if a.renderErr != nil && errors.Is(a.err, a.renderErr) {
@@ -619,7 +648,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// top; on a re-render we preserve the scroll offset so the user
 		// is not snapped back to the start of the article they were
 		// reading.
-		isInitialLoad := a.loadingArticle
+		isInitialLoad := a.loadingArticle || a.readerInitialPending
 		yOffset := a.viewport.YOffset
 		a.viewport.SetContent(msg.content)
 		if isInitialLoad {
@@ -627,43 +656,55 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			a.viewport.SetYOffset(yOffset)
 		}
-		a.loadingArticle = false
-		a.stopSpinner()
+		a.readerInitialPending = false
+		a.releaseReaderLoading()
 
 	case feedAddedMsg:
-		if msg.err != nil {
-			a.err = msg.err
-		} else {
+		a.addErr = a.setOperationError(a.addErr, msg.err)
+		if msg.err == nil {
 			a.view = ViewFeeds
 			a.setStatusWithKind(MsgAddedFeed(msg.title, msg.added), StatusSuccess, 0)
 			cmd := a.loadFeeds()
 			return a, cmd
 		}
+		if !msg.notAttempted {
+			cmd := a.reconcileFeeds()
+			return a, cmd
+		}
 	case feedRenamedMsg:
-		if msg.err != nil {
-			a.err = msg.err
-		} else {
+		a.renameErr = a.setOperationError(a.renameErr, msg.err)
+		if msg.err == nil {
 			a.view = ViewFeeds
 			a.feedToRename = nil
 			a.setStatusWithKind(MsgFeedRenamed, StatusSuccess, 0)
 			cmd := a.loadFeeds()
 			return a, cmd
 		}
+		if !msg.notAttempted {
+			cmd := a.reconcileFeeds()
+			return a, cmd
+		}
 
 	case feedDeletedMsg:
-		if msg.err != nil {
-			a.err = msg.err
-		} else {
+		a.deleteErr = a.setOperationError(a.deleteErr, msg.err)
+		if msg.err == nil {
 			a.view = ViewFeeds
 			a.setStatusWithKind(MsgFeedDeleted, StatusSuccess, 0)
 			a.feedToDelete = nil
 			cmd := a.loadFeeds()
 			return a, cmd
 		}
+		if !msg.notAttempted {
+			cmd := a.reconcileFeeds()
+			return a, cmd
+		}
 
 	case refreshDoneMsg:
+		// Request generations order presentation, not coordinator execution.
+		// Even a stale completion may be the last persisted mutation.
 		if msg.seq != a.refreshSeq {
-			return a, nil
+			cmd := a.loadFeeds()
+			return a, cmd
 		}
 		if a.refreshErr != nil && errors.Is(a.err, a.refreshErr) {
 			a.err = nil
@@ -685,7 +726,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, a.loadFeeds())
 
 	case searchResultsMsg:
-		if msg.seq != a.searchSeq || (msg.articleID != "" && (a.currentArticle == nil || a.currentArticle.ID != msg.articleID)) {
+		if msg.seq != a.searchSeq || (msg.articleID != "" && (a.contextualSearchTarget() == nil || a.contextualSearchTarget().ID != msg.articleID)) {
 			return a, nil
 		}
 		if a.view == ViewSearch {
@@ -720,7 +761,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			q := strings.TrimSpace(a.pendingSearchQuery)
 			if len(q) > 1 {
 				// Use context-aware search if we came from reader view
-				if a.previousView == ViewReader && a.currentArticle != nil {
+				if a.searchContextArticle() != nil {
 					cmds = append(cmds, a.performSearchWithContext(q, "article"))
 				} else {
 					cmds = append(cmds, a.performSearch(q))
@@ -730,8 +771,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errorMsg:
 		if msg.refreshSeq != 0 {
+			// A failed RPC can still have committed changes. Reconcile even
+			// for stale failures, without replaying the mutation or its status.
+			cmds = append(cmds, a.loadFeeds())
 			if msg.refreshSeq != a.refreshSeq {
-				return a, nil
+				return a, tea.Batch(cmds...)
 			}
 			a.err = msg.err
 			a.refreshErr = msg.err
@@ -745,7 +789,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.feedsSeq != a.feedsSeq {
 				return a, nil
 			}
-			a.err, a.feedsErr = msg.err, msg.err
+			if !msg.preserveError || a.err == nil || (a.feedsErr != nil && errors.Is(a.err, a.feedsErr)) {
+				a.err = msg.err
+			}
+			a.feedsErr = msg.err
 			// A metadata-read failure does not own the reader's spinner.
 			break
 		}
@@ -763,7 +810,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// watcher command — it's a long-lived subscription.
 		if a.applyResolvedStyle() {
 			a.setStatusWithKind(MsgThemeApplied(a.themePref, a.glamourStyle), StatusInfo, 2*time.Second)
-			if a.view == ViewReader && a.currentArticle != nil {
+			if a.readerVisible() && a.currentArticle != nil {
 				cmds = append(cmds, a.renderArticle(a.currentArticle))
 			}
 		}
@@ -912,8 +959,8 @@ func (a *App) View() string {
 	case ViewSearch:
 		// Build header + subtitle with engine/context
 		subtitle := "global"
-		if a.previousView == ViewReader && a.currentArticle != nil {
-			subtitle = "in article: " + a.currentArticle.Title
+		if article := a.searchContextArticle(); article != nil {
+			subtitle = "in article: " + article.Title
 		}
 		if _, ok := a.searchEngine.(search.DebugStatser); ok {
 			subtitle += " • full-text"
@@ -1282,19 +1329,22 @@ type articleRenderedMsg struct {
 }
 
 type feedAddedMsg struct {
-	err   error
-	added int
-	title string
+	err          error
+	added        int
+	title        string
+	notAttempted bool // local validation/unavailable operations cannot have committed
 }
 
 type errorMsg struct {
-	err        error
-	refreshSeq uint64 // nonzero only for bulk-refresh failures
-	feedsSeq   uint64 // nonzero only for feed-metadata read failures
+	err           error
+	refreshSeq    uint64 // nonzero only for bulk-refresh failures
+	feedsSeq      uint64 // nonzero only for feed-metadata read failures
+	preserveError bool   // a failed mutation's reconciliation must not displace errors
 }
 
 type feedDeletedMsg struct {
-	err error
+	err          error
+	notAttempted bool
 }
 
 type searchResultsMsg struct {
@@ -1305,7 +1355,8 @@ type searchResultsMsg struct {
 }
 
 type feedRenamedMsg struct {
-	err error
+	err          error
+	notAttempted bool
 }
 
 // refreshDoneMsg summarizes a refresh operation outcome

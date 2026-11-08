@@ -109,7 +109,7 @@ func (kh *KeyHandler) handleTextInputEnter() (tea.Model, tea.Cmd) {
 		if input != "" {
 			normalizedURL, err := kh.urlValidator.ValidateAndNormalize(input)
 			if err != nil {
-				return kh.app, func() tea.Msg { return errorMsg{err: err} }
+				return kh.app, func() tea.Msg { return feedAddedMsg{err: err, notAttempted: true} }
 			}
 			kh.app.setStatus(MsgAddingFeed, 0)
 			return kh.app, kh.app.addFeed(normalizedURL)
@@ -119,7 +119,7 @@ func (kh *KeyHandler) handleTextInputEnter() (tea.Model, tea.Cmd) {
 	case ViewRenameFeed:
 		input := strings.TrimSpace(kh.app.textInput.Value())
 		if input == "" {
-			return kh.app, nil
+			return kh.app, func() tea.Msg { return feedRenamedMsg{err: fmt.Errorf("title cannot be empty"), notAttempted: true} }
 		}
 		kh.app.setStatus(MsgRenaming, 0)
 		return kh.app, kh.app.renameFeed(input)
@@ -425,6 +425,7 @@ func (kh *KeyHandler) handleDeleteConfirmKeys(key string) (tea.Model, tea.Cmd, b
 
 // selectSearchResult handles selection of search results
 func (kh *KeyHandler) selectSearchResult(result searchResultItem) (tea.Model, tea.Cmd) {
+	kh.app.saveSearchResults()
 	kh.app.searchSeq++ // any pending search belongs to the view being left
 	if result.isArticle {
 		// Validate article data
@@ -435,6 +436,7 @@ func (kh *KeyHandler) selectSearchResult(result searchResultItem) (tea.Model, te
 		kh.app.currentFeed = result.feed
 		kh.app.cameFromSearch = true
 		kh.app.loadingArticle = true // Set loading flag
+		kh.app.readerInitialPending = false
 		kh.app.view = ViewReader
 		// Mark article as read when opened
 		markReadCmd := kh.app.markArticleRead(result.article)
@@ -448,12 +450,8 @@ func (kh *KeyHandler) selectSearchResult(result searchResultItem) (tea.Model, te
 	}
 	kh.app.currentFeed = result.feed
 	kh.app.cameFromSearch = false
-	// Mark the article list as having been opened from a search result
-	// so navigateBack returns the user to their search hits instead of
-	// the feed list. Also clear previousView so a later in-articles
-	// Ctrl+S does not pick up a stale ViewReader context.
+	// Keep the suspended search origin intact, even for feed hits.
 	kh.app.articlesOrigin = ViewSearch
-	kh.app.previousView = ViewArticles
 	kh.app.view = ViewArticles
 	return kh.app, kh.app.loadArticles(result.feed.ID)
 }
@@ -468,18 +466,10 @@ func (kh *KeyHandler) navigateBack() (tea.Model, tea.Cmd) {
 		return kh.app, nil
 
 	case ViewSearch:
-		kh.app.searchSeq++
-		kh.app.view = kh.app.previousView
-		kh.app.searchInput.Reset()
-		kh.app.searchResults = []searchResultItem{}
-		kh.app.searchList.SetItems([]list.Item{})
-		if kh.app.view == ViewReader && kh.app.currentArticle != nil {
-			return kh.app, kh.app.renderArticle(kh.app.currentArticle)
-		}
-		return kh.app, nil
+		return kh.app, kh.app.leaveSearch()
 
 	case ViewMedia:
-		kh.app.view = kh.app.previousView
+		kh.app.view = kh.app.mediaPreviousView
 		kh.app.mediaURLs = []string{}
 		kh.app.mediaList.SetItems([]list.Item{})
 		return kh.app, nil
@@ -491,8 +481,7 @@ func (kh *KeyHandler) navigateBack() (tea.Model, tea.Cmd) {
 		kh.app.articleList.ResetFilter()
 		if kh.app.articlesOrigin == ViewSearch {
 			kh.app.articlesOrigin = ViewFeeds
-			kh.app.view = ViewSearch
-			kh.app.searchInput.Blur()
+			kh.app.returnToSearch()
 			return kh.app, nil
 		}
 		kh.app.view = ViewFeeds
@@ -502,13 +491,11 @@ func (kh *KeyHandler) navigateBack() (tea.Model, tea.Cmd) {
 		kh.app.renderSeq++
 		// Clear any in-flight loading state so a delayed articleRenderedMsg
 		// arriving after navigation doesn't leave the spinner running.
-		kh.app.loadingArticle = false
-		kh.app.stopSpinner()
+		kh.app.readerInitialPending = false
+		kh.app.releaseReaderLoading()
 		if kh.app.cameFromSearch {
-			kh.app.view = ViewSearch
 			kh.app.cameFromSearch = false
-			// Focus search results list, not input, for quick navigation
-			kh.app.searchInput.Blur()
+			kh.app.returnToSearch()
 			return kh.app, nil
 		}
 		kh.app.view = ViewArticles
@@ -521,10 +508,21 @@ func (kh *KeyHandler) navigateBack() (tea.Model, tea.Cmd) {
 
 // enterSearchMode transitions to search view
 func (kh *KeyHandler) enterSearchMode() (tea.Model, tea.Cmd) {
+	if kh.app.view == ViewSearch {
+		return kh.app, nil
+	}
 	kh.app.searchSeq++
 	kh.app.renderSeq++
+	if kh.app.readerVisible() {
+		// Keep the initial-load top reset, but release only reader-owned UI.
+		kh.app.readerInitialPending = kh.app.readerInitialPending || kh.app.loadingArticle
+		kh.app.releaseReaderLoading()
+	}
+	kh.app.suspendSearchNavigation()
+	kh.app.searchReturnContext = kh.app.previousView
 	kh.app.previousView = kh.app.view
 	kh.app.view = ViewSearch
+	kh.app.pendingSearchQuery = ""
 	kh.app.searchInput.Reset()
 	kh.app.searchInput.Focus()
 	kh.app.searchResults = []searchResultItem{}
@@ -598,7 +596,7 @@ func (kh *KeyHandler) openMediaList() (tea.Model, tea.Cmd) {
 
 	kh.app.mediaList.SetItems(items)
 	kh.app.mediaURLs = mediaURLs
-	kh.app.previousView = kh.app.view
+	kh.app.mediaPreviousView = kh.app.view
 	kh.app.view = ViewMedia
 
 	// Set title with article name

@@ -15,12 +15,22 @@ import (
 )
 
 func (a *App) loadFeeds() tea.Cmd {
+	return a.loadFeedMetadata(false)
+}
+
+// Reconciliation must not replace the mutation error (or a newer unrelated
+// error) even if the authoritative metadata read itself fails.
+func (a *App) reconcileFeeds() tea.Cmd {
+	return a.loadFeedMetadata(true)
+}
+
+func (a *App) loadFeedMetadata(preserveError bool) tea.Cmd {
 	a.feedsSeq++
 	seq, store := a.feedsSeq, a.store
 	return a.worker(func() tea.Msg {
 		feeds, err := store.GetAllFeeds()
 		if err != nil {
-			return errorMsg{err: err, feedsSeq: seq}
+			return errorMsg{err: err, feedsSeq: seq, preserveError: preserveError}
 		}
 		return feedsLoadedMsg{feeds: feeds, seq: seq}
 	})
@@ -126,6 +136,9 @@ func (a *App) renderArticle(article *storage.Article) tea.Cmd {
 	// App fields concurrently with Update — capturing r and rerr by
 	// value avoids a race against tea.WindowSizeMsg handling.
 	r, rerr := a.getRenderer()
+	if a.loadingArticle {
+		a.readerInitialPending = true
+	}
 	a.renderSeq++
 	seq := a.renderSeq
 	article = snapshotArticle(article)
@@ -195,7 +208,7 @@ func (a *App) addFeed(url string) tea.Cmd {
 	}
 	return a.worker(func() tea.Msg {
 		if ops == nil {
-			return feedAddedMsg{err: fmt.Errorf("feed operations are unavailable")}
+			return feedAddedMsg{err: fmt.Errorf("feed operations are unavailable"), notAttempted: true}
 		}
 		newFeed, err := ops.AddFeed(ctx, url)
 		if err != nil {
@@ -218,10 +231,10 @@ func (a *App) renameFeed(newTitle string) tea.Cmd {
 	newTitle = strings.TrimSpace(newTitle)
 	return a.worker(func() tea.Msg {
 		if id == "" {
-			return feedRenamedMsg{err: fmt.Errorf("no feed selected for rename")}
+			return feedRenamedMsg{err: fmt.Errorf("no feed selected for rename"), notAttempted: true}
 		}
 		if newTitle == "" {
-			return feedRenamedMsg{err: fmt.Errorf("title cannot be empty")}
+			return feedRenamedMsg{err: fmt.Errorf("title cannot be empty"), notAttempted: true}
 		}
 		// Local construction uses the coordinator so rename + notification
 		// cannot interleave with a refresh batch. Remote stores route this
@@ -299,7 +312,7 @@ func (a *App) deleteFeed(feedID string) tea.Cmd {
 	ops, ctx := a.feedOps, a.commandContext()
 	return a.worker(func() tea.Msg {
 		if ops == nil {
-			return feedDeletedMsg{err: fmt.Errorf("feed operations are unavailable")}
+			return feedDeletedMsg{err: fmt.Errorf("feed operations are unavailable"), notAttempted: true}
 		}
 		if err := ops.DeleteFeed(ctx, feedID); err != nil {
 			return feedDeletedMsg{err: wrapErr("delete feed", err)}
@@ -318,7 +331,7 @@ func (a *App) performSearchWithContext(query, searchContext string) tea.Cmd {
 	var article *storage.Article
 	id := ""
 	if searchContext == "article" {
-		article = snapshotArticle(a.currentArticle)
+		article = snapshotArticle(a.contextualSearchTarget())
 		if article != nil {
 			id = article.ID
 		}

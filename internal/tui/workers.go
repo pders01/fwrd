@@ -135,7 +135,19 @@ func (a *App) applyArticleIntent(id string, seq uint64, state bool, err error, s
 	for _, result := range a.searchResults {
 		apply(result.article)
 	}
-	for _, model := range []*list.Model{&a.articleList, &a.searchList} {
+	models := []*list.Model{&a.articleList, &a.searchList}
+	for i := range a.searchContexts {
+		s := &a.searchContexts[i]
+		apply(s.origin.article)
+		for _, article := range s.origin.articles {
+			apply(article)
+		}
+		for _, result := range s.results {
+			apply(result.article)
+		}
+		models = append(models, &s.origin.articleList, &s.list)
+	}
+	for _, model := range models {
 		for _, item := range model.Items() {
 			switch item := item.(type) {
 			case articleItem:

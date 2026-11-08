@@ -135,7 +135,7 @@ func TestViewStateTransitions(t *testing.T) {
 			msg:          tea.KeyMsg{Type: tea.KeyEsc},
 			expectedView: ViewArticles,
 			setupFunc: func(a *App) {
-				a.previousView = ViewArticles
+				a.mediaPreviousView = ViewArticles
 			},
 		},
 		{
