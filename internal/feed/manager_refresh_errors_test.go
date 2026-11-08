@@ -45,7 +45,9 @@ func TestRefreshAllFeedsErrorAttribution(t *testing.T) {
 	manager.RegisterDataListener(listener)
 	manager.RegisterBatchScope(listener)
 
-	previousFetch := time.Now().Add(-time.Hour).Truncate(time.Second)
+	// Exercise JSON's UTC-location normalization regardless of the host timezone.
+	previousFetch := time.Now().In(time.FixedZone("refresh-test", 0)).
+		Add(-time.Hour).Truncate(time.Second)
 	healthy := &storage.Feed{
 		ID: "healthy", URL: server.URL + "/healthy", LastFetched: previousFetch,
 		LastError: "old failure", LastErrorAt: previousFetch,
@@ -94,7 +96,8 @@ func TestRefreshAllFeedsErrorAttribution(t *testing.T) {
 		require.NoError(t, getErr)
 		assert.Equal(t, "HTTP error: 504", persisted.LastError, "persistence must remain unwrapped")
 		assert.False(t, persisted.LastErrorAt.IsZero())
-		assert.Equal(t, previousFetch, persisted.LastFetched)
+		assert.WithinDuration(t, previousFetch, persisted.LastFetched, 0,
+			"failed refresh must preserve the last successful fetch instant")
 		assert.Contains(t, label, "127.0.0.1")
 	}
 	for _, secret := range []string{
